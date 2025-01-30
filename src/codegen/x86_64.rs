@@ -6,6 +6,6 @@ impl X86_64Codegen {
     }
 
     pub fn generate(&self) {
-        println!("Generating x86_64 code");
+        println!("Generating x86_64 code...");
     }
 }
