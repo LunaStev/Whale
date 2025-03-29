@@ -1,4 +1,7 @@
-pub struct X86_64Codegen;
+use crate::wir::{instruction::Instruction, WIRModule};
+
+pub fn generate(module: &WIRModule) -> String {
+    let mut asm = String::new();
 
 impl X86_64Codegen {
     pub fn new() -> Self {
