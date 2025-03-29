@@ -30,3 +30,16 @@ pub fn generate(module: &WIRModule) -> String {
 
     asm
 }
+
+fn generate_print(format: &str, _args: &Vec<crate::wir::value::Value>) -> String {
+    let mut code = String::new();
+
+    // Simply insert a string literal into the .data section and output it as syscall
+    code.push_str("  mov rax, 1\n");              // syscall: write
+    code.push_str("  mov rdi, 1\n");              // fd: stdout
+    code.push_str("  mov rsi, msg\n");            // msg address
+    code.push_str("  mov rdx, msg_len\n");        // msg length
+    code.push_str("  syscall\n\n");
+
+    code
+}
