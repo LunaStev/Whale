@@ -22,4 +22,11 @@ pub fn generate(module: &WIRModule) -> String {
             }
         }
     }
+
+    // Ending the program
+    asm.push_str("  mov rax, 60\n");      // syscall: exit
+    asm.push_str("  xor rdi, rdi\n");     // status 0
+    asm.push_str("  syscall\n");
+
+    asm
 }
