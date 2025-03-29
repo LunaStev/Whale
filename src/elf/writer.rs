@@ -17,7 +17,13 @@ pub fn write_elf(asm: &str, output_name: &str) {
         panic!("nasm failed");
     }
 
-    pub fn write(&self) {
-        println!("Writing ELF file...");
+    // Step 3: Create ELF executable (ld)
+    let ld_status = Command::new("ld")
+        .args(["-o", output_name, "temp.o"])
+        .status()
+        .expect("Failed to run ld");
+
+    if !ld_status.success() {
+        panic!("ld failed");
     }
 }
