@@ -7,9 +7,14 @@ pub fn write_elf(asm: &str, output_name: &str) {
     let mut asm_file = File::create("temp.asm").expect("Failed to create temp.asm");
     asm_file.write_all(asm.as_bytes()).expect("Failed to write asm");
 
-impl ELFWriter {
-    pub fn new() -> Self {
-        ELFWriter {}
+    // Step 2: Create .o file (nasm)
+    let nasm_status = Command::new("nasm")
+        .args(["-felf64", "temp.asm", "-o", "temp.o"])
+        .status()
+        .expect("Failed to run nasm");
+
+    if !nasm_status.success() {
+        panic!("nasm failed");
     }
 
     pub fn write(&self) {
