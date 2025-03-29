@@ -26,4 +26,6 @@ pub fn write_elf(asm: &str, output_name: &str) {
     if !ld_status.success() {
         panic!("ld failed");
     }
+
+    println!("✅ ELF binary generated: {}", output_name);
 }
