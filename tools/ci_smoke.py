@@ -92,6 +92,24 @@ def smoke(binary, socket, artifacts, emulator=None, sysroot=None):
                     raise AssertionError("incorrect machine code")
             if outputs[0].read_bytes() != outputs[1].read_bytes():
                 raise AssertionError("object output differs across fresh processes")
+            multi_section = root / "symbols and relocations.asm"
+            multi_section.write_text(
+                "section .text\nextern external\nglobal entry\nentry:\ncall external\nret\n"
+                "section .data\nglobal pointers\npointers:\ndd entry\ndd external + 4\n",
+                encoding="utf-8",
+            )
+            reference = None
+            for attempt in range(3):
+                output = root / f"relocations-{attempt}.o"
+                invoke(["asm", "--amd64", multi_section, "-o", output])
+                data = output.read_bytes()
+                text_section(data)
+                for section in (b".data\0", b".rela.text\0", b".rela.data\0"):
+                    if section not in data:
+                        raise AssertionError(f"missing expected section {section!r}")
+                if reference is not None and reference != data:
+                    raise AssertionError("multi-section object differs across fresh processes")
+                reference = data
             bad_asm = root / "invalid input.asm"
             bad_asm.write_text("mov rax, [rbx\n", encoding="utf-8")
             rejected(["asm", "--amd64", bad_asm], root / "rejected.o", b"closing ']'")
@@ -116,6 +134,29 @@ def smoke(binary, socket, artifacts, emulator=None, sysroot=None):
                 invoke(["ir", "lower", socket_input, "-o", output])
                 if output.read_bytes() != first:
                     raise AssertionError("file and stdout IR differ")
+                multi_program = json.loads(json.dumps(program))
+                multi_program["globals"] = [
+                    {"name": "constant", "ty": {"Int": {"bits": 32, "signed": True}},
+                     "init": {"Lit": {"Int": {"bits": 32, "signed": True, "value": 7}}}},
+                    {"name": "alias", "ty": {"Int": {"bits": 32, "signed": True}},
+                     "init": {"Var": "constant"}},
+                ]
+                multi_program["functions"].append({
+                    "name": "from_global", "parameters": [],
+                    "return_type": {"Int": {"bits": 32, "signed": True}},
+                    "body": [{"Return": {"Var": "alias"}}],
+                })
+                multi_json = root / "multiple functions.json"
+                multi_json.write_text(json.dumps(multi_program), encoding="utf-8")
+                reference = None
+                for _ in range(3):
+                    data = invoke(["ir", "lower", multi_json]).stdout
+                    for name in (b"answer", b"from_global", b"constant", b"alias"):
+                        if name not in data:
+                            raise AssertionError(f"missing IR declaration {name!r}")
+                    if reference is not None and reference != data:
+                        raise AssertionError("multi-function IR differs across fresh processes")
+                    reference = data
                 bad_json = root / "malformed.json"
                 bad_json.write_text("{", encoding="utf-8")
                 rejected(["ir", "lower", bad_json], root / "rejected.wir", b"Failed to parse socket JSON")

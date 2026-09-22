@@ -32,6 +32,10 @@ socket JSON lowering to stdout and a file, rejected input without output
 creation/overwrite, and the feature-disabled CLI diagnostic. It uses no external
 assembler, linker, or object-inspection tool. QEMU is used only to execute the
 RISC-V host binary. This is a built-binary check, not release-archive validation.
+Reproducibility inputs include multiple sections, symbol declarations and
+relocations, plus multiple IR functions and dependent global constants. Their
+complete bytes/text must match across three fresh processes with identical
+options; no timestamps, paths, or other metadata are excluded from comparison.
 
 Coverage currently has no minimum percentage gate. The report includes workspace
 source files with no coverage; missing tests (including in the linker) remain
