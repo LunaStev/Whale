@@ -1,0 +1,56 @@
+name: Coverage
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whale-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  workspace:
+    name: Workspace coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Install pinned coverage tool
+        run: python tools/ci.py run --name install-coverage -- cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Run workspace tests with instrumentation
+        run: python tools/ci.py run --name coverage -- cargo llvm-cov --workspace --all-features --locked --no-report
+      - name: Export workspace LCOV
+        run: python tools/ci.py run --name coverage-lcov -- cargo llvm-cov report --workspace --lcov --output-path .ci-artifacts/coverage.lcov
+      - name: Render HTML without rerunning tests
+        run: python tools/ci.py run --name coverage-html -- cargo llvm-cov report --workspace --html --output-dir .ci-artifacts/coverage
+      - name: Record per-file coverage summary
+        run: python tools/ci.py run --name coverage-summary -- cargo llvm-cov report --workspace
+      - name: Summarize coverage for every workspace crate
+        run: python tools/ci.py run --name coverage-crates -- python tools/ci_coverage.py .ci-artifacts/coverage.lcov
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workspace-coverage
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

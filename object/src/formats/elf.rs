@@ -78,7 +78,7 @@ struct Elf64Shdr {
 }
 
 impl Elf64Shdr {
-    fn to_bytes(&self) -> [u8; 64] {
+    fn to_bytes(self) -> [u8; 64] {
         let mut out = [0u8; 64];
         out[0..4].copy_from_slice(&self.name.to_le_bytes());
         out[4..8].copy_from_slice(&self.type_.to_le_bytes());
@@ -106,7 +106,7 @@ struct Elf64Sym {
 }
 
 impl Elf64Sym {
-    fn to_bytes(&self) -> [u8; 24] {
+    fn to_bytes(self) -> [u8; 24] {
         let mut out = [0u8; 24];
         out[0..4].copy_from_slice(&self.name.to_le_bytes());
         out[4] = self.info;
@@ -127,7 +127,7 @@ struct Elf64Rela {
 }
 
 impl Elf64Rela {
-    fn to_bytes(&self) -> [u8; 24] {
+    fn to_bytes(self) -> [u8; 24] {
         let mut out = [0u8; 24];
         out[0..8].copy_from_slice(&self.offset.to_le_bytes());
         out[8..16].copy_from_slice(&self.info.to_le_bytes());
@@ -208,7 +208,10 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         if end > section.data.len() {
             return Err(format!(
                 "relocation range {}..{} exceeds section {:?} size {}",
-                reloc.offset, end, section.name, section.data.len()
+                reloc.offset,
+                end,
+                section.name,
+                section.data.len()
             ));
         }
     }
@@ -509,12 +512,12 @@ fn visibility_to_stv(vis: SymbolVisibility) -> u8 {
 
 fn reloc_type(kind: RelocKind) -> u32 {
     match kind {
-        RelocKind::Absolute64 => 1, // R_X86_64_64
+        RelocKind::Absolute64 => 1,  // R_X86_64_64
         RelocKind::Absolute32 => 10, // R_X86_64_32
-        RelocKind::Relative32 => 2, // R_X86_64_PC32
-        RelocKind::Relative8 => 15, // R_X86_64_PC8
-        RelocKind::GOTPCREL => 9,   // R_X86_64_GOTPCREL
-        RelocKind::PLT32 => 4,      // R_X86_64_PLT32
+        RelocKind::Relative32 => 2,  // R_X86_64_PC32
+        RelocKind::Relative8 => 15,  // R_X86_64_PC8
+        RelocKind::GOTPCREL => 9,    // R_X86_64_GOTPCREL
+        RelocKind::PLT32 => 4,       // R_X86_64_PLT32
     }
 }
 
@@ -686,7 +689,9 @@ mod tests {
         let contains_nul_terminated = |bytes: &[u8], name: &str| {
             let mut pattern = name.as_bytes().to_vec();
             pattern.push(0);
-            bytes.windows(pattern.len()).any(|w| w == pattern.as_slice())
+            bytes
+                .windows(pattern.len())
+                .any(|w| w == pattern.as_slice())
         };
 
         assert!(contains_nul_terminated(&elf_bytes, ".текст_café_日本語"));

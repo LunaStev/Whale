@@ -1,7 +1,7 @@
-use std::{env, fs, process};
+use std::{fs, process};
 
 use ir::lower_ast::{frontend, lower_o0};
-use ir::{DataLayout, printer, verifier};
+use ir::{printer, verifier, DataLayout};
 
 pub fn run(args: Vec<String>) {
     if args.is_empty() {
@@ -19,7 +19,10 @@ pub fn run(args: Vec<String>) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--help" => { print_help(); return; }
+            "--help" => {
+                print_help();
+                return;
+            }
 
             "lower" => {
                 sub = Some("lower".to_string());

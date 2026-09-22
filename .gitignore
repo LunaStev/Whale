@@ -3,3 +3,6 @@ target/
 **/*.bin
 .DS_Store
 *.swp
+
+.ci-artifacts/
+__pycache__/

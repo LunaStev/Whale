@@ -138,7 +138,10 @@ pub(crate) fn map_cmp(op: frontend::CmpOpRef, ty: &Type) -> Result<CmpOp, LowerE
             });
         }
 
-        let signed = matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128);
+        let signed = matches!(
+            ty,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+        );
 
         return Ok(match (op, signed) {
             (frontend::CmpOpRef::Eq, _) => CmpOp::Eq,

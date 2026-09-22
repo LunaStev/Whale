@@ -6,6 +6,8 @@ use crate::error::AsmError;
 use crate::isa::amd64::encoding::{encode_address, DispKind, EncodedAddress, ModRM, REX};
 use crate::isa::amd64::tables::*;
 
+type LabelLocations = HashMap<String, (usize, usize)>;
+
 pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
     const MAX_RELAX_ITERATIONS: usize = 8;
 
@@ -29,7 +31,7 @@ pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
 fn encode_once(
     ast: &AST,
     jump_hint_locs: Option<&HashMap<String, (usize, usize)>>,
-) -> Result<(AssemblerOutput, HashMap<String, (usize, usize)>), AsmError> {
+) -> Result<(AssemblerOutput, LabelLocations), AsmError> {
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
 
@@ -85,7 +87,9 @@ fn encode_once(
             }
             ASTNode::Const { name, expr } => {
                 let resolved_name = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if defined_labels.contains(&resolved_name) || extern_symbols.contains(&resolved_name) {
+                if defined_labels.contains(&resolved_name)
+                    || extern_symbols.contains(&resolved_name)
+                {
                     return Err(AsmError::SymbolError(format!(
                         "Constant '{}' conflicts with an existing symbol",
                         resolved_name
@@ -201,7 +205,10 @@ enum EvaluatedExpr {
     Symbol { name: String, addend: i64 },
 }
 
-fn resolve_symbol_name(raw: &str, current_nonlocal_label: &Option<String>) -> Result<String, AsmError> {
+fn resolve_symbol_name(
+    raw: &str,
+    current_nonlocal_label: &Option<String>,
+) -> Result<String, AsmError> {
     if raw.starts_with('.') {
         if let Some(base) = current_nonlocal_label {
             return Ok(format!("{}{}", base, raw));
@@ -214,7 +221,10 @@ fn resolve_symbol_name(raw: &str, current_nonlocal_label: &Option<String>) -> Re
     Ok(raw.to_string())
 }
 
-fn resolve_expr_symbols(expr: &ExprValue, current_nonlocal_label: &Option<String>) -> Result<ExprValue, AsmError> {
+fn resolve_expr_symbols(
+    expr: &ExprValue,
+    current_nonlocal_label: &Option<String>,
+) -> Result<ExprValue, AsmError> {
     match expr {
         ExprValue::Number(n) => Ok(ExprValue::Number(*n)),
         ExprValue::Symbol { name, addend } => Ok(ExprValue::Symbol {
@@ -317,11 +327,12 @@ fn resolve_directive_symbols(
     let mut out_values = Vec::with_capacity(dir.values.len());
     for v in &dir.values {
         match v {
-            DirectiveValue::StringLiteral(s) => out_values.push(DirectiveValue::StringLiteral(s.clone())),
-            DirectiveValue::Expr(expr) => out_values.push(DirectiveValue::Expr(resolve_expr_symbols(
-                expr,
-                current_nonlocal_label,
-            )?)),
+            DirectiveValue::StringLiteral(s) => {
+                out_values.push(DirectiveValue::StringLiteral(s.clone()))
+            }
+            DirectiveValue::Expr(expr) => out_values.push(DirectiveValue::Expr(
+                resolve_expr_symbols(expr, current_nonlocal_label)?,
+            )),
         }
     }
     Ok(Directive {
@@ -410,7 +421,12 @@ fn emit_addr_tail(bytes: &mut Vec<u8>, addr: &EncodedAddress) {
     emit_disp(bytes, addr.disp.clone());
 }
 
-fn emit_reg_reg(bytes: &mut Vec<u8>, opcode: u8, dst: &RegInfo, src: &RegInfo) -> Result<(), AsmError> {
+fn emit_reg_reg(
+    bytes: &mut Vec<u8>,
+    opcode: u8,
+    dst: &RegInfo,
+    src: &RegInfo,
+) -> Result<(), AsmError> {
     emit_operand_size_prefix(bytes, dst.width);
     emit_rex(
         bytes,
@@ -524,12 +540,9 @@ fn encode_instruction(
     label_locs: &HashMap<String, (usize, usize)>,
 ) -> Result<(), AsmError> {
     match ins.mnemonic.as_str() {
-        "ret" | "nop" | "syscall" | "int3" if !ins.operands.is_empty() => {
-            Err(AsmError::EncodeError(format!(
-                "{} expects 0 operands",
-                ins.mnemonic
-            )))
-        }
+        "ret" | "nop" | "syscall" | "int3" if !ins.operands.is_empty() => Err(
+            AsmError::EncodeError(format!("{} expects 0 operands", ins.mnemonic)),
+        ),
         "mov" => encode_mov(ins, bytes, relocs),
         "add" => encode_binop(ins, 0x00, 0x01, 0x02, 0x03, 0, bytes, relocs),
         "sub" => encode_binop(ins, 0x28, 0x29, 0x2A, 0x2B, 5, bytes, relocs),
@@ -585,7 +598,14 @@ fn encode_instruction(
             current_offset,
             label_locs,
         ),
-        "loop" => encode_loop(ins, bytes, relocs, current_section, current_offset, label_locs),
+        "loop" => encode_loop(
+            ins,
+            bytes,
+            relocs,
+            current_section,
+            current_offset,
+            label_locs,
+        ),
         "ret" => {
             bytes.push(0xC3);
             Ok(())
@@ -631,7 +651,8 @@ fn encode_mov(
 
     match (dst, src) {
         (Operand::Register(dst_name), Operand::Immediate(imm)) => {
-            let reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             match reg.width {
                 8 => {
                     if !(-128..=255).contains(imm) {
@@ -669,7 +690,8 @@ fn encode_mov(
         }
         (Operand::Register(dst_name), _) if symbol_operand(src).is_some() => {
             let (label, addend) = symbol_operand(src).unwrap();
-            let reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             match reg.width {
                 64 => {
                     emit_rex(bytes, reg.width, false, false, reg.code >= 8, false)?;
@@ -702,8 +724,10 @@ fn encode_mov(
             Ok(())
         }
         (Operand::Register(dst_name), Operand::Register(src_name)) => {
-            let dst_reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
-            let src_reg = lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
+            let dst_reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
+            let src_reg =
+                lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
             if dst_reg.width != src_reg.width {
                 return Err(AsmError::EncodeError("Register width mismatch".into()));
             }
@@ -711,12 +735,14 @@ fn encode_mov(
             emit_reg_reg(bytes, opcode, &dst_reg, &src_reg)
         }
         (Operand::Register(dst_name), Operand::Memory(mem)) => {
-            let reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 { 0x8A } else { 0x8B };
             emit_reg_mem(bytes, relocs, opcode, &reg, mem)
         }
         (Operand::Memory(mem), Operand::Register(src_name)) => {
-            let reg = lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 { 0x88 } else { 0x89 };
             emit_mem_reg(bytes, relocs, opcode, mem, &reg)
         }
@@ -724,6 +750,8 @@ fn encode_mov(
     }
 }
 
+// The five opcode fields describe the existing instruction table explicitly.
+#[allow(clippy::too_many_arguments)]
 fn encode_binop(
     ins: &Instruction,
     opcode_rm_r_8: u8,
@@ -745,8 +773,10 @@ fn encode_binop(
 
     match (dst, src) {
         (Operand::Register(dst_name), Operand::Register(src_name)) => {
-            let dst_reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
-            let src_reg = lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
+            let dst_reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
+            let src_reg =
+                lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
             if dst_reg.width != src_reg.width {
                 return Err(AsmError::EncodeError("Register width mismatch".into()));
             }
@@ -758,7 +788,8 @@ fn encode_binop(
             emit_reg_reg(bytes, opcode, &dst_reg, &src_reg)
         }
         (Operand::Register(dst_name), Operand::Immediate(imm)) => {
-            let dst_reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
+            let dst_reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
             emit_operand_size_prefix(bytes, dst_reg.width);
             emit_rex(
                 bytes,
@@ -813,14 +844,15 @@ fn encode_binop(
             }
             Ok(())
         }
-        (Operand::Register(_), _) if symbol_operand(src).is_some() => Err(AsmError::EncodeError(
-            format!(
+        (Operand::Register(_), _) if symbol_operand(src).is_some() => {
+            Err(AsmError::EncodeError(format!(
                 "{} with symbolic immediate is not supported; use equ or mov reg, symbol",
                 ins.mnemonic
-            ),
-        )),
+            )))
+        }
         (Operand::Register(dst_name), Operand::Memory(mem)) => {
-            let reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 {
                 opcode_r_rm_8
             } else {
@@ -829,7 +861,8 @@ fn encode_binop(
             emit_reg_mem(bytes, relocs, opcode, &reg, mem)
         }
         (Operand::Memory(mem), Operand::Register(src_name)) => {
-            let reg = lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
+            let reg =
+                lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 {
                 opcode_rm_r_8
             } else {
@@ -860,7 +893,8 @@ fn encode_imul(
             "imul form supported: imul reg, reg/mem".into(),
         ));
     };
-    let dst_reg = lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
+    let dst_reg =
+        lookup_reg(dst_name).ok_or(AsmError::EncodeError("Invalid dst register".into()))?;
 
     if dst_reg.width == 8 {
         return Err(AsmError::EncodeError(
@@ -870,7 +904,8 @@ fn encode_imul(
 
     match src {
         Operand::Register(src_name) => {
-            let src_reg = lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
+            let src_reg =
+                lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid src register".into()))?;
             if src_reg.width != dst_reg.width {
                 return Err(AsmError::EncodeError("Register width mismatch".into()));
             }
@@ -931,7 +966,11 @@ fn encode_imul(
     }
 }
 
-fn encode_push_pop(ins: &Instruction, base_opcode: u8, bytes: &mut Vec<u8>) -> Result<(), AsmError> {
+fn encode_push_pop(
+    ins: &Instruction,
+    base_opcode: u8,
+    bytes: &mut Vec<u8>,
+) -> Result<(), AsmError> {
     if ins.operands.len() != 1 {
         return Err(AsmError::EncodeError(format!(
             "{} expects 1 operand",
@@ -1058,10 +1097,14 @@ fn encode_loop(
         return Err(AsmError::EncodeError("loop expects 1 operand".into()));
     }
     let Some((label, addend)) = symbol_operand(&ins.operands[0]) else {
-        return Err(AsmError::EncodeError("loop only supports labels for now".into()));
+        return Err(AsmError::EncodeError(
+            "loop only supports labels for now".into(),
+        ));
     };
     if addend != 0 {
-        return Err(AsmError::EncodeError("loop does not support label addends".into()));
+        return Err(AsmError::EncodeError(
+            "loop does not support label addends".into(),
+        ));
     }
 
     bytes.push(0xE2);
@@ -1090,10 +1133,7 @@ fn encode_loop(
     Ok(())
 }
 
-fn eval_directive_expr(
-    expr: &ExprValue,
-    consts: &HashMap<String, i64>,
-) -> EvaluatedExpr {
+fn eval_directive_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> EvaluatedExpr {
     eval_expr(expr, consts)
 }
 
@@ -1131,33 +1171,31 @@ fn encode_data_expr(
             }
             Ok(())
         }
-        EvaluatedExpr::Symbol { name, addend } => {
-            match width {
-                4 => {
-                    relocs.push(Relocation {
-                        offset: bytes.len(),
-                        symbol: name,
-                        kind: RelocKind::Absolute32,
-                        addend,
-                    });
-                    bytes.extend_from_slice(&0u32.to_le_bytes());
-                    Ok(())
-                }
-                8 => {
-                    relocs.push(Relocation {
-                        offset: bytes.len(),
-                        symbol: name,
-                        kind: RelocKind::Absolute64,
-                        addend,
-                    });
-                    bytes.extend_from_slice(&0u64.to_le_bytes());
-                    Ok(())
-                }
-                _ => Err(AsmError::EncodeError(
-                    "Only dd/dq support symbolic expressions".into(),
-                )),
+        EvaluatedExpr::Symbol { name, addend } => match width {
+            4 => {
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: name,
+                    kind: RelocKind::Absolute32,
+                    addend,
+                });
+                bytes.extend_from_slice(&0u32.to_le_bytes());
+                Ok(())
             }
-        }
+            8 => {
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: name,
+                    kind: RelocKind::Absolute64,
+                    addend,
+                });
+                bytes.extend_from_slice(&0u64.to_le_bytes());
+                Ok(())
+            }
+            _ => Err(AsmError::EncodeError(
+                "Only dd/dq support symbolic expressions".into(),
+            )),
+        },
     }
 }
 
@@ -1168,7 +1206,9 @@ fn reserve_bytes(
     consts: &HashMap<String, i64>,
 ) -> Result<(), AsmError> {
     if values.len() != 1 {
-        return Err(AsmError::EncodeError("res* expects exactly one count operand".into()));
+        return Err(AsmError::EncodeError(
+            "res* expects exactly one count operand".into(),
+        ));
     }
 
     let count = match &values[0] {
@@ -1182,12 +1222,16 @@ fn reserve_bytes(
             }
         },
         DirectiveValue::StringLiteral(_) => {
-            return Err(AsmError::EncodeError("res* count must be numeric expression".into()))
+            return Err(AsmError::EncodeError(
+                "res* count must be numeric expression".into(),
+            ))
         }
     };
 
     if count < 0 {
-        return Err(AsmError::EncodeError("res* count must be non-negative".into()));
+        return Err(AsmError::EncodeError(
+            "res* count must be non-negative".into(),
+        ));
     }
     let count = count as usize;
     let extra = count
@@ -1223,7 +1267,9 @@ fn encode_directive(
         "dw" => {
             for v in &dir.values {
                 let DirectiveValue::Expr(expr) = v else {
-                    return Err(AsmError::EncodeError("dw only supports numeric expressions".into()));
+                    return Err(AsmError::EncodeError(
+                        "dw only supports numeric expressions".into(),
+                    ));
                 };
                 let eval = eval_directive_expr(expr, consts);
                 encode_data_expr(eval, 2, bytes, relocs)?;
@@ -1233,7 +1279,9 @@ fn encode_directive(
         "dd" => {
             for v in &dir.values {
                 let DirectiveValue::Expr(expr) = v else {
-                    return Err(AsmError::EncodeError("dd only supports numeric expressions".into()));
+                    return Err(AsmError::EncodeError(
+                        "dd only supports numeric expressions".into(),
+                    ));
                 };
                 let eval = eval_directive_expr(expr, consts);
                 encode_data_expr(eval, 4, bytes, relocs)?;
@@ -1243,7 +1291,9 @@ fn encode_directive(
         "dq" => {
             for v in &dir.values {
                 let DirectiveValue::Expr(expr) = v else {
-                    return Err(AsmError::EncodeError("dq only supports numeric expressions".into()));
+                    return Err(AsmError::EncodeError(
+                        "dq only supports numeric expressions".into(),
+                    ));
                 };
                 let eval = eval_directive_expr(expr, consts);
                 encode_data_expr(eval, 8, bytes, relocs)?;

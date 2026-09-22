@@ -1,12 +1,12 @@
-use crate::traits::ISA;
+use crate::assembler::AssemblerOutput;
 use crate::ast::AST;
 use crate::error::AsmError;
-use crate::assembler::{AssemblerOutput};
+use crate::traits::ISA;
 
 pub mod encoder;
+pub mod encoding;
 pub mod parser;
 pub mod tables;
-pub mod encoding;
 
 pub struct AMD64;
 

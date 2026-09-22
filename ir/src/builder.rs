@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{BasicBlock, BinOp, BlockId, Callee, CheckedOp, CmpOp, ConstValue, DataLayout, Function, Global, ICmpPred, Instruction, Module, Param, Terminator, Type, ValueId};
+use crate::{
+    BasicBlock, BinOp, BlockId, Callee, CheckedOp, CmpOp, ConstValue, DataLayout, Function, Global,
+    ICmpPred, Instruction, Module, Param, Terminator, Type, ValueId,
+};
 
 pub struct ModuleBuilder {
     module: Module,
@@ -15,7 +18,9 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn undef(&mut self, ty: Type) -> ValueId {
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut().instructions.push(Instruction::Undef { dst, ty });
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::Undef { dst, ty });
         dst
     }
 

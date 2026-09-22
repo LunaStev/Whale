@@ -2,23 +2,181 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [master]
   pull_request:
-    branches: [ "master" ]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whale-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
+  native:
+    name: Native ${{ matrix.platform }} / ${{ matrix.features }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, all]
+        platform: [linux-x64, linux-arm64, windows-x64, windows-arm64, macos-arm64, macos-intel]
+        include:
+          - platform: linux-x64
+            os: ubuntu-24.04
+            host: x86_64-unknown-linux-gnu
+            binary: target/debug/whale
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            host: aarch64-unknown-linux-gnu
+            binary: target/debug/whale
+          - platform: windows-x64
+            os: windows-2025
+            host: x86_64-pc-windows-msvc
+            binary: target/debug/whale.exe
+          - platform: windows-arm64
+            os: windows-11-arm
+            host: aarch64-pc-windows-msvc
+            binary: target/debug/whale.exe
+          - platform: macos-arm64
+            os: macos-15
+            host: aarch64-apple-darwin
+            binary: target/debug/whale
+          - platform: macos-intel
+            os: macos-15-intel
+            host: x86_64-apple-darwin
+            binary: target/debug/whale
+    env:
+      RUSTUP_TOOLCHAIN: stable-${{ matrix.host }}
+      FEATURE_FLAGS: ${{ matrix.features == 'all' && '--all-features' || '' }}
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --workspace --locked --verbose
-    - name: Run workspace tests with default features
-      run: cargo test --workspace --locked --verbose
-    - name: Run workspace tests with all features
-      run: cargo test --workspace --all-features --locked --verbose
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Install native Rust toolchain
+        run: rustup toolchain install stable-${{ matrix.host }} --profile minimal
+      - name: Verify native compiler identity
+        run: python tools/ci.py run --name host -- python tools/ci.py host --expected ${{ matrix.host }}
+      - name: Build all workspace crates
+        run: python tools/ci.py run --name build -- cargo build --workspace --locked ${{ env.FEATURE_FLAGS }}
+      - name: Test workspace including doctests
+        run: python tools/ci.py run --name test -- cargo test --workspace --locked ${{ env.FEATURE_FLAGS }}
+      - name: Test CI command failure handling
+        run: python tools/ci.py run --name runner-tests -- python -m unittest discover -s tools -p test_*.py -v
+      - name: Run standalone CLI smoke with empty PATH
+        run: python tools/ci.py run --name smoke -- python tools/ci_smoke.py --binary ${{ matrix.binary }} --socket ${{ matrix.features == 'all' && 'enabled' || 'disabled' }}
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-${{ matrix.platform }}-${{ matrix.features }}
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  msrv:
+    name: Rust 1.86 / ${{ matrix.features }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        features: [default, all]
+    env:
+      RUSTUP_TOOLCHAIN: '1.86.0'
+      FEATURE_FLAGS: ${{ matrix.features == 'all' && '--all-features' || '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Install minimum supported Rust
+        run: rustup toolchain install 1.86.0 --profile minimal
+      - name: Record compiler version
+        run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Build all targets with the committed lockfile
+        run: python tools/ci.py run --name build -- cargo build --workspace --all-targets --locked ${{ env.FEATURE_FLAGS }}
+      - name: Test on the minimum supported compiler
+        run: python tools/ci.py run --name test -- cargo test --workspace --locked ${{ env.FEATURE_FLAGS }}
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: msrv-${{ matrix.features }}
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  release-tests:
+    name: Optimized regression tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install stable --profile minimal
+      - run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Test optimized code
+        run: python tools/ci.py run --name release-tests -- cargo test --workspace --all-features --release --locked
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-tests
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  riscv:
+    name: RISC-V Linux host / QEMU smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Install cross compiler and emulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-riscv64-linux-gnu libc6-dev-riscv64-cross qemu-user
+      - name: Install Rust target
+        run: rustup toolchain install stable --profile minimal --target riscv64gc-unknown-linux-gnu
+      - run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Cross-build Whale and all workspace crates
+        run: python tools/ci.py run --name build -- cargo build --workspace --all-features --locked --target riscv64gc-unknown-linux-gnu
+      - name: Run the RISC-V host under QEMU
+        run: python tools/ci.py run --name smoke -- python tools/ci_smoke.py --binary target/riscv64gc-unknown-linux-gnu/debug/whale --socket enabled --emulator /usr/bin/qemu-riscv64 --sysroot /usr/riscv64-linux-gnu
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: riscv-smoke
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

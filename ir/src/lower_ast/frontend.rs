@@ -64,8 +64,15 @@ pub enum Stmt {
         value: Expr,
     },
     ExprStmt(Expr),
-    If { cond: Expr, then_body: Vec<Stmt>, else_body: Vec<Stmt> },
-    While { cond: Expr, body: Vec<Stmt> },
+    If {
+        cond: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
     Break,
     Continue,
 }
@@ -80,15 +87,22 @@ pub enum Expr {
         op: BinOpRef,
         right: Box<Expr>,
     },
-    Cmp { left: Box<Expr>, op: CmpOpRef, right: Box<Expr> },
+    Cmp {
+        left: Box<Expr>,
+        op: CmpOpRef,
+        right: Box<Expr>,
+    },
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, Copy)]
 pub enum CmpOpRef {
-    Eq, Ne,
-    Lt, Le,
-    Gt, Ge,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]

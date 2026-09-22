@@ -25,7 +25,12 @@ pub struct Token {
 }
 
 fn lexer_err<S: Into<String>>(msg: S, line: usize, column: usize) -> AsmError {
-    AsmError::LexerError(format!("{} at line {}, column {}", msg.into(), line, column))
+    AsmError::LexerError(format!(
+        "{} at line {}, column {}",
+        msg.into(),
+        line,
+        column
+    ))
 }
 
 pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
@@ -163,7 +168,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
 
                 let mut s = String::new();
                 let mut closed = false;
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     pos += 1;
                     if c == '"' {
                         column += 1;
@@ -179,7 +184,11 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                     s.push(c);
                 }
                 if !closed {
-                    return Err(lexer_err("Unterminated string literal", start_line, start_col));
+                    return Err(lexer_err(
+                        "Unterminated string literal",
+                        start_line,
+                        start_col,
+                    ));
                 }
 
                 tokens.push(Token {
@@ -246,7 +255,11 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                                 }
                             }
                             if n.is_empty() {
-                                return Err(lexer_err("Invalid binary number", start_line, start_col));
+                                return Err(lexer_err(
+                                    "Invalid binary number",
+                                    start_line,
+                                    start_col,
+                                ));
                             }
                             let parsed = i64::from_str_radix(&n, 2).map_err(|_| {
                                 lexer_err("Binary number out of range", start_line, start_col)
@@ -308,13 +321,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                 });
             }
 
-            _ => {
-                return Err(lexer_err(
-                    format!("Unexpected char '{}'", ch),
-                    line,
-                    column,
-                ))
-            }
+            _ => return Err(lexer_err(format!("Unexpected char '{}'", ch), line, column)),
         }
     }
 

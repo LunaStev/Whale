@@ -2,6 +2,7 @@
 name = "object"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 
 [dependencies]
 # Future dependencies like 'elf' crate if we don't want to build from scratch, 

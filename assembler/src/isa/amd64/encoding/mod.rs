@@ -1,9 +1,9 @@
-pub mod modrm;
-pub mod sib;
-pub mod rex;
 pub mod address;
+pub mod modrm;
+pub mod rex;
+pub mod sib;
 
-pub use modrm::*;
-pub use sib::*;
-pub use rex::*;
 pub use address::*;
+pub use modrm::*;
+pub use rex::*;
+pub use sib::*;

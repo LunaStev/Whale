@@ -8,7 +8,7 @@ impl Layout {
     pub fn compute(objects: &[object::ObjectFile], base_address: u64) -> Self {
         let mut section_offsets = vec![];
         let mut current_addr = base_address;
-        
+
         // Simple linear layout for now
         for obj in objects {
             let mut obj_offsets = vec![];

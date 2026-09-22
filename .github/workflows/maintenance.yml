@@ -1,0 +1,77 @@
+name: Maintenance
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whale-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  dependencies:
+    name: Dependency advisories and lockfile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install stable --profile minimal
+      - run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Install pinned advisory checker
+        run: python tools/ci.py run --name install-audit -- cargo install cargo-audit --version 0.22.2 --locked
+      - name: Check locked dependencies against RustSec
+        run: python tools/ci.py run --name audit -- cargo audit --file Cargo.lock
+      - name: Verify dependency resolution without lockfile changes
+        run: python tools/ci.py run --name lockfile -- cargo metadata --locked --format-version 1
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-audit
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+  beta:
+    name: Rust beta compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      RUSTUP_TOOLCHAIN: beta
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install beta --profile minimal
+      - run: python tools/ci.py run --name toolchain -- rustc -vV
+      - name: Build all workspace targets on beta
+        run: python tools/ci.py run --name build -- cargo build --workspace --all-targets --all-features --locked
+      - name: Run workspace tests on beta
+        run: python tools/ci.py run --name test -- cargo test --workspace --all-features --locked
+      - name: Retain command logs and reproduction evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: beta-tests
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

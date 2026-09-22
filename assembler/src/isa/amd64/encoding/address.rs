@@ -49,12 +49,16 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
     let base_code = mem
         .base
         .as_deref()
-        .map(|b| reg_code(b, mode).ok_or_else(|| AsmError::EncodeError("Invalid base register".into())))
+        .map(|b| {
+            reg_code(b, mode).ok_or_else(|| AsmError::EncodeError("Invalid base register".into()))
+        })
         .transpose()?;
     let index_code = mem
         .index
         .as_deref()
-        .map(|i| reg_code(i, mode).ok_or_else(|| AsmError::EncodeError("Invalid index register".into())))
+        .map(|i| {
+            reg_code(i, mode).ok_or_else(|| AsmError::EncodeError("Invalid index register".into()))
+        })
         .transpose()?;
 
     if base_code.is_none() && index_code.is_none() {
@@ -86,9 +90,12 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
         Some(DispKind::Disp32(disp32))
     };
 
-    let need_sib = index_code.is_some() || base_code.is_none() || base_code.map(|b| (b & 7) == 4).unwrap_or(false);
+    let need_sib = index_code.is_some()
+        || base_code.is_none()
+        || base_code.map(|b| (b & 7) == 4).unwrap_or(false);
 
-    let (mod_bits, final_disp, rm_bits, sib, rex_b, rex_x) = match (base_code, index_code, need_sib) {
+    let (mod_bits, final_disp, rm_bits, sib, rex_b, rex_x) = match (base_code, index_code, need_sib)
+    {
         (Some(base), idx, true) => {
             let base_low = base & 7;
             let mut mod_bits = 0;

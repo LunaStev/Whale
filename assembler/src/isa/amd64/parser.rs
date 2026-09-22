@@ -128,15 +128,17 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
 
     if let TokenKind::Identifier(name) = &tokens[*pos].kind {
         let reg = name.to_ascii_lowercase();
-        let next_is_expr_op =
-            *pos + 1 < tokens.len() && matches!(tokens[*pos + 1].kind, TokenKind::Plus | TokenKind::Minus);
+        let next_is_expr_op = *pos + 1 < tokens.len()
+            && matches!(tokens[*pos + 1].kind, TokenKind::Plus | TokenKind::Minus);
         if is_register(&reg) && !next_is_expr_op {
             *pos += 1;
             return Ok(Operand::Register(reg));
         }
     }
 
-    let expr = parse_expr(tokens, pos, |k| matches!(k, TokenKind::Comma | TokenKind::Newline))?;
+    let expr = parse_expr(tokens, pos, |k| {
+        matches!(k, TokenKind::Comma | TokenKind::Newline)
+    })?;
     match expr {
         ExprValue::Number(n) => Ok(Operand::Immediate(n)),
         ExprValue::Symbol { name, addend } => {
@@ -326,8 +328,9 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
                         *pos += 1;
                     }
                     _ => {
-                        let expr =
-                            parse_expr(tokens, pos, |k| matches!(k, TokenKind::Comma | TokenKind::Newline))?;
+                        let expr = parse_expr(tokens, pos, |k| {
+                            matches!(k, TokenKind::Comma | TokenKind::Newline)
+                        })?;
                         values.push(DirectiveValue::Expr(expr));
                     }
                 }
@@ -370,7 +373,11 @@ where
                 }
                 TokenKind::Identifier(s) => {
                     if sign < 0 {
-                        return Err(parser_err(tokens, *pos, "Unary '-' before symbol is not supported"));
+                        return Err(parser_err(
+                            tokens,
+                            *pos,
+                            "Unary '-' before symbol is not supported",
+                        ));
                     }
                     let term = ExprValue::Symbol {
                         name: s.clone(),
@@ -395,13 +402,23 @@ where
                     expect_term = true;
                     *pos += 1;
                 }
-                _ => return Err(parser_err(tokens, *pos, "Expected '+' or '-' in expression")),
+                _ => {
+                    return Err(parser_err(
+                        tokens,
+                        *pos,
+                        "Expected '+' or '-' in expression",
+                    ))
+                }
             }
         }
     }
 
     if expect_term && acc.is_some() {
-        return Err(parser_err(tokens, *pos, "Expression cannot end with operator"));
+        return Err(parser_err(
+            tokens,
+            *pos,
+            "Expression cannot end with operator",
+        ));
     }
 
     acc.ok_or_else(|| parser_err(tokens, *pos, "Expected expression"))
@@ -416,21 +433,19 @@ fn combine_expr(
     match (left, right) {
         (None, r) => Ok(r),
         (Some(ExprValue::Number(a)), ExprValue::Number(b)) => Ok(ExprValue::Number(a + b)),
-        (Some(ExprValue::Number(a)), ExprValue::Symbol { name, addend }) => {
-            Ok(ExprValue::Symbol {
-                name,
-                addend: addend + a,
-            })
-        }
-        (Some(ExprValue::Symbol { name, addend }), ExprValue::Number(b)) => {
-            Ok(ExprValue::Symbol {
-                name,
-                addend: addend + b,
-            })
-        }
-        (Some(ExprValue::Symbol { .. }), ExprValue::Symbol { .. }) => {
-            Err(parser_err(tokens, pos, "Expressions with multiple symbols are not supported"))
-        }
+        (Some(ExprValue::Number(a)), ExprValue::Symbol { name, addend }) => Ok(ExprValue::Symbol {
+            name,
+            addend: addend + a,
+        }),
+        (Some(ExprValue::Symbol { name, addend }), ExprValue::Number(b)) => Ok(ExprValue::Symbol {
+            name,
+            addend: addend + b,
+        }),
+        (Some(ExprValue::Symbol { .. }), ExprValue::Symbol { .. }) => Err(parser_err(
+            tokens,
+            pos,
+            "Expressions with multiple symbols are not supported",
+        )),
     }
 }
 
@@ -507,8 +522,7 @@ fn is_register(name: &str) -> bool {
 fn is_directive(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "db"
-            | "dw"
+        "db" | "dw"
             | "dd"
             | "dq"
             | "resb"
