@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a focused Whale toolchain, IR, object-format, CLI, or contributor-workflow improvement.
+title: "[Proposal]: "
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests for this proposal.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Area
+      options:
+        - Assembler and instruction encoding
+        - Object formats and relocations
+        - IR, verification, and lowering
+        - Linker
+        - CLI and diagnostics
+        - Host and target support
+        - Testing and CI
+        - Documentation and contributor workflow
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: Describe the concrete limitation and the workflow it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed behavior
+      description: Explain the intended syntax, public API, IR contract, CLI behavior, or object/target support. Include examples where useful.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and completion criteria
+      description: Identify the affected component, a bounded implementation scope, and observable checks that would demonstrate completion.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Alternatives and compatibility
+      description: Describe alternatives, feature gates, host versus code-generation targets, object/ABI changes, and any migration impact.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

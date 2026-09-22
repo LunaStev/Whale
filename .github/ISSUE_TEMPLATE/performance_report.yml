@@ -1,0 +1,58 @@
+name: Performance report
+description: Report a measured Whale processing-time, memory, output-size, or generated-code regression.
+title: "[Performance]: "
+body:
+  - type: input
+    id: revision
+    attributes:
+      label: Whale revision and build
+      description: Include the commit or release, Rust version, build profile, and enabled features for every compared build.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Host and hardware
+      description: Operating system, host architecture, CPU, memory, and whether execution is native or emulated.
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Command, output target, and format
+      description: Distinguish the host running Whale from its emitted architecture and object/IR format.
+      placeholder: "whale asm --amd64, AMD64 ELF .o"
+    validations:
+      required: true
+  - type: dropdown
+    id: metric
+    attributes:
+      label: Affected metric
+      options:
+        - Assembly or object-generation time
+        - IR lowering or verification time
+        - Peak memory usage
+        - Output object or IR size
+        - Generated-code runtime
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Workload and measurement method
+      description: Include a shareable minimal input, exact build/run commands, measurement tools, warmup policy, and repetition count. For generated-code runtime, also describe how the output was linked and executed.
+    validations:
+      required: true
+  - type: textarea
+    id: measurements
+    attributes:
+      label: Baseline and observed measurements
+      description: Provide comparable revisions and results with units, run counts, and variability. Label estimates separately from measured data.
+    validations:
+      required: true
+  - type: textarea
+    id: profiles
+    attributes:
+      label: Profiles and additional context
+      description: Attach profiles, traces, relevant output, or suspected code paths. Remove credentials and private data.

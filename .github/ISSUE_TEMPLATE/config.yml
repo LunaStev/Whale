@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributor guide and review workflow
+    url: https://github.com/wavefnd/Whale/blob/master/CONTRIBUTING.md
+    about: Find setup instructions, verification commands, sign-off requirements, and review contacts.
+  - name: Wave community
+    url: https://wave-lang.dev/community
+    about: Discuss general questions with the Wave and Whale community.

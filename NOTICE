@@ -1,0 +1,16 @@
+Whale Toolchain Project
+======================
+
+Whale is a modular low-level toolchain maintained by Wave Foundation.
+The project was initiated by LunaStev and is developed with its contributors.
+See COPYRIGHT and the repository history for attribution.
+
+Unless otherwise noted, Whale repository components are licensed under the
+Mozilla Public License v2.0 (MPL-2.0). See LICENSE for the license text.
+Retain any separate license and attribution notices accompanying third-party
+material. This notice does not replace those notices or relicense that material.
+
+Contributor-facing guidance is adapted from the Wave project, maintained by
+Wave Foundation, and tailored to Whale's crates, CLI, and verification workflow.
+The Code of Conduct retains its Contributor Covenant attribution.
+The repository's AI/ML usage notice and permission contact are in ai.txt.

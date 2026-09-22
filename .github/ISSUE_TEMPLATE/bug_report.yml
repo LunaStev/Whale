@@ -1,0 +1,88 @@
+name: Bug report
+description: Report a Whale assembler, IR, object-format, CLI, or tooling defect.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests for the same problem.
+          required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Whale revision and build
+      description: Include the commit from `git rev-parse HEAD` or release identifier, build profile, and feature flags.
+      placeholder: "commit ..., debug/release, default features or socket-cli"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Assembler and AMD64 encoding
+        - Object formats and ELF output
+        - IR and verification
+        - Socket AST lowering
+        - Linker groundwork
+        - CLI and diagnostics
+        - Tests and tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Host environment
+      description: Operating system, host architecture, and relevant Rust/Python or other tool versions.
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Output target or format
+      description: Distinguish the host running Whale from the architecture/format being emitted. Use not applicable for a docs-only report.
+      placeholder: "AMD64 ELF .o, socket JSON to .wir, or not applicable"
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence-kind
+    attributes:
+      label: Verification status
+      options:
+        - Reproduced with Whale
+        - Source-derived finding, not executed with Whale
+        - Independent model or tool experiment only
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal input and exact commands
+      description: Include assembly, Rust IR-builder code, or socket JSON as appropriate. For a source-derived finding, include a commit permalink and a minimal scenario to verify.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: State the expected bytes, IR, diagnostics, exit status, or output-file behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and evidence
+      description: Include stdout/stderr, exit status, and relevant output bytes or traces. Clearly label predicted behavior that has not been observed in Whale.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Related regressions, last known working commit, workarounds, or relevant files. Remove credentials and private data from attachments.

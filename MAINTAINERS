@@ -1,0 +1,57 @@
+# Whale maintainers
+# M: maintainer contact. F: repository-relative file, directory prefix, or glob.
+# Directory entries include their contents. This file documents review ownership;
+# it does not automatically request reviewers or grant repository permissions.
+# GitHub contact for the entries below: @LunaStev.
+
+[Assembler]
+M: luna@lunastev.org
+F: assembler/
+
+[Object Formats]
+M: luna@lunastev.org
+F: object/
+
+[Intermediate Representation and Socket Lowering]
+M: luna@lunastev.org
+F: ir/
+
+[Linker]
+M: luna@lunastev.org
+F: linker/
+
+[Whale CLI]
+M: luna@lunastev.org
+F: src/
+
+[Integration Tests and Development Tools]
+M: luna@lunastev.org
+F: tests/
+F: tools/
+
+[Documentation]
+M: luna@lunastev.org
+F: docs/
+F: README.md
+F: CONTRIBUTING.md
+
+[Community and Repository Policy]
+M: luna@lunastev.org
+F: CODE_OF_CONDUCT.md
+F: MAINTAINERS
+F: COPYRIGHT
+F: NOTICE
+F: LICENSE
+F: ai.txt
+
+[GitHub Templates and CI]
+M: luna@lunastev.org
+F: .github/
+
+[Workspace Metadata]
+M: luna@lunastev.org
+F: Cargo.toml
+F: Cargo.lock
+F: */Cargo.toml
+F: .gitattributes
+F: .gitignore
