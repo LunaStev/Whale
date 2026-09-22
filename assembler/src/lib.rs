@@ -184,4 +184,143 @@ far_target:
         assert_eq!(text.data[169], 0xFB);
         assert_eq!(text.data[170], 0xC3);
     }
+
+    fn eval_imm32(expr: &str) -> i32 {
+        let src = format!("section .text\nglobal _start\n_start:\n    mov eax, {expr}\n    ret\n");
+        let out = assemble(&src, &AMD64).expect("assemble should succeed");
+        let text = out
+            .sections
+            .iter()
+            .find(|s| s.name == ".text")
+            .expect("text section");
+        i32::from_le_bytes([text.data[1], text.data[2], text.data[3], text.data[4]])
+    }
+
+    #[test]
+    fn unary_plus_after_infix_minus_subtracts() {
+        assert_eq!(eval_imm32("10 - +2"), 8);
+    }
+
+    #[test]
+    fn unary_minus_after_infix_minus_adds() {
+        assert_eq!(eval_imm32("10 - -2"), 12);
+    }
+
+    #[test]
+    fn double_unary_minus_is_positive() {
+        assert_eq!(eval_imm32("--2"), 2);
+    }
+
+    #[test]
+    fn unary_minus_then_plus_is_negative() {
+        assert_eq!(eval_imm32("-+2"), -2);
+    }
+
+    #[test]
+    fn leading_unary_minus_negates() {
+        assert_eq!(eval_imm32("-3"), -3);
+    }
+
+    #[test]
+    fn unary_chain_following_infix_plus() {
+        assert_eq!(eval_imm32("10 + -+2"), 8);
+        assert_eq!(eval_imm32("10 + --2"), 12);
+        assert_eq!(eval_imm32("10 + -2"), 8);
+    }
+
+    #[test]
+    fn dd_unary_sign_composition_emits_expected_bytes() {
+        let src = r#"
+section .data
+dd 10 - +2
+dd 10 - -2
+dd 10 + -+2
+dd 10 + --2
+"#;
+        let out = assemble(src, &AMD64).expect("assemble should succeed");
+        let data = out
+            .sections
+            .iter()
+            .find(|s| s.name == ".data")
+            .expect("data section");
+        assert_eq!(
+            data.data,
+            vec![
+                0x08, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x0C, 0x00,
+                0x00, 0x00,
+            ]
+        );
+        assert!(
+            data.relocs.is_empty(),
+            "dd constants must not produce relocations"
+        );
+    }
+
+    #[test]
+    fn equ_unary_sign_composition() {
+        let src = r#"
+section .text
+global _start
+VAL_SUB_PLUS  equ 10 - +2
+VAL_SUB_MINUS equ 10 - -2
+VAL_ADD_CHAIN equ 10 + -+2
+_start:
+    mov eax, VAL_SUB_PLUS
+    mov ebx, VAL_SUB_MINUS
+    mov ecx, VAL_ADD_CHAIN
+    ret
+"#;
+        let out = assemble(src, &AMD64).expect("assemble should succeed");
+        let text = out
+            .sections
+            .iter()
+            .find(|s| s.name == ".text")
+            .expect("text section");
+        assert_eq!(
+            text.data,
+            vec![
+                0xB8, 0x08, 0x00, 0x00, 0x00, 0xBB, 0x0C, 0x00, 0x00, 0x00, 0xB9, 0x08, 0x00, 0x00,
+                0x00, 0xC3,
+            ]
+        );
+        assert!(
+            text.relocs.is_empty(),
+            "equ immediate must not create relocations"
+        );
+    }
+
+    #[test]
+    fn trailing_operator_and_missing_term_errors() {
+        let res1 = assemble("section .text\n_start:\n    mov eax, 10 +\n", &AMD64);
+        match res1 {
+            Err(e) => assert!(e
+                .to_string()
+                .contains("Expression cannot end with operator")),
+            Ok(_) => panic!("expected error on trailing '+'"),
+        }
+
+        let res2 = assemble("section .text\n_start:\n    mov eax, 10 -\n", &AMD64);
+        match res2 {
+            Err(e) => assert!(e
+                .to_string()
+                .contains("Expression cannot end with operator")),
+            Ok(_) => panic!("expected error on trailing '-'"),
+        }
+
+        let res3 = assemble("section .text\n_start:\n    mov eax, 10 - +\n", &AMD64);
+        match res3 {
+            Err(e) => assert!(e
+                .to_string()
+                .contains("Expression cannot end with operator")),
+            Ok(_) => panic!("expected error on trailing '- +'"),
+        }
+
+        let res4 = assemble("section .data\n    dd 10 +\n", &AMD64);
+        match res4 {
+            Err(e) => assert!(e
+                .to_string()
+                .contains("Expression cannot end with operator")),
+            Ok(_) => panic!("expected error on trailing '+' in data directive"),
+        }
+    }
 }
