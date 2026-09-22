@@ -1,0 +1,50 @@
+# Whale Toolchain maintainers
+#
+# Primary maintainer: LunaStev (@LunaStev)
+# M: maintainer email address.
+# F: repository-relative file or directory; directories include descendants.
+# Use these sections for review routing, not as a list of copyright owners.
+# For a change spanning components, contact the maintainer for each area.
+# Whale does not currently ship a get_maintainer.py helper.
+
+[Assembler]
+M: luna@lunastev.org
+F: assembler/
+
+[Object Model and ELF Serialization]
+M: luna@lunastev.org
+F: object/
+
+[Intermediate Representation]
+M: luna@lunastev.org
+F: ir/
+
+[Linker]
+M: luna@lunastev.org
+F: linker/
+
+[Whale CLI]
+M: luna@lunastev.org
+F: src/
+
+[Integration Tests and Development Tools]
+M: luna@lunastev.org
+F: tests/
+F: tools/
+F: Cargo.toml
+F: Cargo.lock
+
+[Documentation and Repository Policies]
+M: luna@lunastev.org
+F: docs/
+F: .github/
+F: README.md
+F: CONTRIBUTING.md
+F: CODE_OF_CONDUCT.md
+F: MAINTAINERS
+F: COPYRIGHT
+F: NOTICE
+F: LICENSE
+F: ai.txt
+F: .gitattributes
+F: .gitignore
