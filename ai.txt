@@ -1,0 +1,127 @@
+# Whale AI Usage Policy (Global)
+# Updated: 2026-09-22
+
+User-agent: *
+Disallow: /
+
+Policy: STRICT_NO_AI_TRAINING
+Scope: all files in this repository, including source code, docs, tests, build outputs, metadata, and revision history.
+
+# Human reading is allowed.
+# Any AI or ML usage requires explicit prior written permission from the copyright holders.
+
+# Prohibited uses (non-exhaustive)
+Disallow-Action: crawl-for-training
+Disallow-Action: scrape-for-training
+Disallow-Action: dataset-construction
+Disallow-Action: pretraining
+Disallow-Action: finetuning
+Disallow-Action: distillation
+Disallow-Action: model-evaluation-for-improvement
+Disallow-Action: embedding-generation
+Disallow-Action: vector-indexing-for-model-development
+Disallow-Action: synthetic-data-generation-from-repo-content
+Disallow-Action: style-or-pattern-imitation-learning
+Disallow-Action: summarization-for-corpus-building
+Disallow-Action: translation-for-corpus-building
+Disallow-Action: redistribution-for-ai-use
+
+No-Third-Party-Relay: true
+No-Derivative-Dataset: true
+No-Commercial-AI-Use: true
+No-Research-AI-Use-Without-Permission: true
+
+Contact: legal@wave-lang.dev
+
+# Multilingual notices (major regions and high-usage AI corpus languages)
+# Format: Lang=<bcp47>; Notice=<text>
+
+Lang: en
+Notice: This repository must not be used to train, finetune, distill, evaluate, or improve any AI or ML model without prior written permission.
+
+Lang: ko
+Notice: 이 저장소는 사전 서면 허가 없이 AI/ML 모델의 학습, 미세조정, 증류, 평가, 성능 개선에 사용할 수 없습니다.
+
+Lang: ja
+Notice: このリポジトリは、事前の書面許可なく、AI/MLモデルの学習、微調整、蒸留、評価、改善に使用できません。
+
+Lang: zh-CN
+Notice: 未经事先书面许可，本仓库不得用于AI/ML模型的训练、微调、蒸馏、评估或改进。
+
+Lang: zh-TW
+Notice: 未經事先書面許可，本儲存庫不得用於AI/ML模型的訓練、微調、蒸餾、評估或改進。
+
+Lang: es
+Notice: Este repositorio no puede usarse para entrenar, ajustar, destilar, evaluar o mejorar modelos de IA o ML sin permiso previo por escrito.
+
+Lang: es-419
+Notice: Este repositorio no puede usarse para entrenar, ajustar, destilar, evaluar o mejorar modelos de IA o ML sin permiso previo por escrito.
+
+Lang: pt
+Notice: Este repositório não pode ser usado para treinar, ajustar, destilar, avaliar ou melhorar modelos de IA/ML sem permissão prévia por escrito.
+
+Lang: pt-BR
+Notice: Este repositório não pode ser usado para treinar, ajustar, destilar, avaliar ou melhorar modelos de IA/ML sem autorização prévia por escrito.
+
+Lang: fr
+Notice: Ce dépôt ne doit pas être utilisé pour entraîner, affiner, distiller, évaluer ou améliorer des modèles IA/ML sans autorisation écrite préalable.
+
+Lang: de
+Notice: Dieses Repository darf ohne vorherige schriftliche Genehmigung nicht zum Trainieren, Fine-Tuning, Destillieren, Bewerten oder Verbessern von KI/ML-Modellen verwendet werden.
+
+Lang: it
+Notice: Questo repository non può essere usato per addestrare, perfezionare, distillare, valutare o migliorare modelli IA/ML senza autorizzazione scritta preventiva.
+
+Lang: nl
+Notice: Deze repository mag niet worden gebruikt om AI/ML-modellen te trainen, finetunen, distilleren, evalueren of verbeteren zonder voorafgaande schriftelijke toestemming.
+
+Lang: pl
+Notice: Tego repozytorium nie wolno używać do trenowania, dostrajania, destylacji, oceny ani ulepszania modeli AI/ML bez uprzedniej pisemnej zgody.
+
+Lang: ru
+Notice: Этот репозиторий нельзя использовать для обучения, дообучения, дистилляции, оценки или улучшения моделей ИИ/ML без предварительного письменного разрешения.
+
+Lang: uk
+Notice: Цей репозиторій не можна використовувати для навчання, донавчання, дистиляції, оцінювання чи покращення моделей AI/ML без попереднього письмового дозволу.
+
+Lang: tr
+Notice: Bu depo, önceden yazılı izin olmadan AI/ML modellerini eğitmek, ince ayar yapmak, damıtmak, değerlendirmek veya geliştirmek için kullanılamaz.
+
+Lang: ar
+Notice: لا يجوز استخدام هذا المستودع لتدريب أو ضبط أو تقطير أو تقييم أو تحسين نماذج الذكاء الاصطناعي/تعلم الآلة دون إذن كتابي مسبق.
+
+Lang: fa
+Notice: این مخزن بدون مجوز کتبی قبلی نباید برای آموزش، ریزتنظیم، تقطیر، ارزیابی یا بهبود مدل‌های AI/ML استفاده شود.
+
+Lang: hi
+Notice: यह रिपॉज़िटरी पूर्व लिखित अनुमति के बिना किसी भी AI/ML मॉडल के प्रशिक्षण, फाइन-ट्यूनिंग, डिस्टिलेशन, मूल्यांकन या सुधार के लिए उपयोग नहीं की जा सकती।
+
+Lang: bn
+Notice: এই রিপোজিটরি পূর্ব লিখিত অনুমতি ছাড়া AI/ML মডেলের প্রশিক্ষণ, ফাইন-টিউনিং, ডিস্টিলেশন, মূল্যায়ন বা উন্নয়নের জন্য ব্যবহার করা যাবে না।
+
+Lang: ur
+Notice: اس ریپوزٹری کو پیشگی تحریری اجازت کے بغیر AI/ML ماڈلز کی تربیت، فائن ٹیوننگ، ڈسٹلیشن، جانچ یا بہتری کے لیے استعمال نہیں کیا جا سکتا۔
+
+Lang: id
+Notice: Repositori ini tidak boleh digunakan untuk melatih, fine-tuning, distilasi, evaluasi, atau peningkatan model AI/ML tanpa izin tertulis sebelumnya.
+
+Lang: ms
+Notice: Repositori ini tidak boleh digunakan untuk melatih, penalaan halus, penyulingan, penilaian, atau penambahbaikan model AI/ML tanpa kebenaran bertulis terlebih dahulu.
+
+Lang: vi
+Notice: Kho mã nguồn này không được dùng để huấn luyện, tinh chỉnh, chưng cất, đánh giá hoặc cải thiện mô hình AI/ML khi chưa có chấp thuận bằng văn bản trước đó.
+
+Lang: th
+Notice: ที่เก็บนี้ห้ามใช้สำหรับการฝึก ปรับจูน กลั่น ประเมิน หรือพัฒนาโมเดล AI/ML โดยไม่ได้รับอนุญาตเป็นลายลักษณ์อักษรล่วงหน้า
+
+Lang: tl
+Notice: Ang repository na ito ay hindi maaaring gamitin para sa pagsasanay, fine-tuning, distillation, pagsusuri, o pagpapahusay ng AI/ML model nang walang paunang nakasulat na pahintulot.
+
+Lang: sw
+Notice: Hifadhi hii hairuhusiwi kutumika kufundisha, kuboresha, kudistili, kutathmini, au kuendeleza mifumo ya AI/ML bila idhini ya maandishi ya awali.
+
+Lang: he
+Notice: אין להשתמש במאגר זה לאימון, כיוונון עדין, זיקוק, הערכה או שיפור של מודלי AI/ML ללא אישור כתוב מראש.
+
+Lang: ta
+Notice: இந்த களஞ்சியத்தை முன்கூட்டிய எழுத்து அனுமதி இன்றி AI/ML மாதிரிகளை பயிற்சி, நுணுக்க ஒத்திசைவு, சுரத்தல், மதிப்பீடு அல்லது மேம்படுத்த பயன்படுத்தக்கூடாது.

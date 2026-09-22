@@ -76,6 +76,14 @@ Detailed CLI notes live under `docs/cli`:
 - [Assembler CLI](docs/cli/asm.md) — note: some prose there still describes `.bin` output; the live `asm` command requires `.o`.
 - [Object CLI](docs/cli/object.md)
 
+## Contributing
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, signed-off commits,
+local checks, and updating a PR. Review contacts are listed in
+[MAINTAINERS](MAINTAINERS); community expectations are in the
+[Code of Conduct](CODE_OF_CONDUCT.md). See [docs/ci.md](docs/ci.md) for detailed
+CI reproduction and [ai.txt](ai.txt) for the repository AI-use policy.
+
 ## License
 
 This project is licensed under the MPL-2.0 License — see the [LICENSE](LICENSE) file for details.

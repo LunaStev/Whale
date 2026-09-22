@@ -1,0 +1,16 @@
+Whale Toolchain
+===============
+
+Whale is a low-level toolchain maintained by the Wave Foundation, with
+assembler, object-file, linker, and intermediate-representation components.
+See README.md for their current implementation status.
+
+The repository is licensed under the Mozilla Public License Version 2.0
+(MPL-2.0), except where individual files state otherwise. See LICENSE.
+
+Preserve the copyright and attribution notices accompanying individual works.
+COPYRIGHT describes project authorship, and CODE_OF_CONDUCT.md retains the
+attribution for the community policy adapted from the Contributor Covenant.
+
+The repository AI-use policy and permission contact are recorded in ai.txt.
+This notice does not replace the applicable license texts.
