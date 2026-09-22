@@ -1,4 +1,4 @@
-use std::{env, fs, process};
+use std::{fs, process};
 
 use ir::lower_ast::{frontend, lower_o0};
 use ir::{printer, verifier, DataLayout};

@@ -78,7 +78,7 @@ struct Elf64Shdr {
 }
 
 impl Elf64Shdr {
-    fn to_bytes(&self) -> [u8; 64] {
+    fn to_bytes(self) -> [u8; 64] {
         let mut out = [0u8; 64];
         out[0..4].copy_from_slice(&self.name.to_le_bytes());
         out[4..8].copy_from_slice(&self.type_.to_le_bytes());
@@ -106,7 +106,7 @@ struct Elf64Sym {
 }
 
 impl Elf64Sym {
-    fn to_bytes(&self) -> [u8; 24] {
+    fn to_bytes(self) -> [u8; 24] {
         let mut out = [0u8; 24];
         out[0..4].copy_from_slice(&self.name.to_le_bytes());
         out[4] = self.info;
@@ -127,7 +127,7 @@ struct Elf64Rela {
 }
 
 impl Elf64Rela {
-    fn to_bytes(&self) -> [u8; 24] {
+    fn to_bytes(self) -> [u8; 24] {
         let mut out = [0u8; 24];
         out[0..8].copy_from_slice(&self.offset.to_le_bytes());
         out[8..16].copy_from_slice(&self.info.to_le_bytes());

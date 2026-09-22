@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn smoke_lower_socket_o0_while_break() {
         use crate::lower_ast::{frontend as s, lower_o0};
-        use crate::{DataLayout, Type};
+        use crate::DataLayout;
 
         let program = s::Program {
             globals: vec![],

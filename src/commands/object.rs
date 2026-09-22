@@ -18,7 +18,7 @@ pub fn run(args: Vec<String>) {
     let mut show_bytes = false;
     let mut dump_hex = false;
     let mut dump_bin = false;
-    let mut dump_json = false;
+    let mut _dump_json = false;
     let mut _no_color = false;
     let mut _no_warn_ext = false;
     let mut show_stats = false;
@@ -41,7 +41,7 @@ pub fn run(args: Vec<String>) {
             "--bytes" => show_bytes = true,
             "--dump-hex" => dump_hex = true,
             "--dump-bin" => dump_bin = true,
-            "--dump-json" => dump_json = true,
+            "--dump-json" => _dump_json = true,
             "--stats" => show_stats = true,
             "--trace" => trace_enable = true,
             s if input.is_none() && !s.starts_with('-') => input = Some(s.to_string()),

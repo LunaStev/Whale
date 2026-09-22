@@ -1,6 +1,7 @@
 use object::{ObjectFile, SymbolBinding};
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct SymbolTable {
     pub symbols: HashMap<String, ResolvedSymbol>,
 }

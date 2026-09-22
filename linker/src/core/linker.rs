@@ -1,5 +1,4 @@
 use object::ObjectFile;
-use std::collections::HashMap;
 
 pub struct Linker {
     objects: Vec<ObjectFile>,

@@ -6,6 +6,8 @@ use crate::error::AsmError;
 use crate::isa::amd64::encoding::{encode_address, DispKind, EncodedAddress, ModRM, REX};
 use crate::isa::amd64::tables::*;
 
+type LabelLocations = HashMap<String, (usize, usize)>;
+
 pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
     const MAX_RELAX_ITERATIONS: usize = 8;
 
@@ -29,7 +31,7 @@ pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
 fn encode_once(
     ast: &AST,
     jump_hint_locs: Option<&HashMap<String, (usize, usize)>>,
-) -> Result<(AssemblerOutput, HashMap<String, (usize, usize)>), AsmError> {
+) -> Result<(AssemblerOutput, LabelLocations), AsmError> {
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
 
@@ -748,6 +750,8 @@ fn encode_mov(
     }
 }
 
+// The five opcode fields describe the existing instruction table explicitly.
+#[allow(clippy::too_many_arguments)]
 fn encode_binop(
     ins: &Instruction,
     opcode_rm_r_8: u8,

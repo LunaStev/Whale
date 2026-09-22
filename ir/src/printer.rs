@@ -250,7 +250,7 @@ fn print_term(t: &Terminator) -> String {
             let mut s = format!("switch {ty} {value}, label {} [", default_bb.0);
             for (i, (c, bb)) in cases.iter().enumerate() {
                 if i != 0 {
-                    s.push_str(",");
+                    s.push(',');
                 }
                 s.push_str(&format!(" {}: {}", fmt_const(c), bb.0));
             }

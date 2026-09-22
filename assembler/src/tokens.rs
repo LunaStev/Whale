@@ -168,7 +168,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
 
                 let mut s = String::new();
                 let mut closed = false;
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     pos += 1;
                     if c == '"' {
                         column += 1;
