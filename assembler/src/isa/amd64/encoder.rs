@@ -524,6 +524,12 @@ fn encode_instruction(
     label_locs: &HashMap<String, (usize, usize)>,
 ) -> Result<(), AsmError> {
     match ins.mnemonic.as_str() {
+        "ret" | "nop" | "syscall" | "int3" if !ins.operands.is_empty() => {
+            Err(AsmError::EncodeError(format!(
+                "{} expects 0 operands",
+                ins.mnemonic
+            )))
+        }
         "mov" => encode_mov(ins, bytes, relocs),
         "add" => encode_binop(ins, 0x00, 0x01, 0x02, 0x03, 0, bytes, relocs),
         "sub" => encode_binop(ins, 0x28, 0x29, 0x2A, 0x2B, 5, bytes, relocs),

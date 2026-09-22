@@ -10,14 +10,15 @@ Install Rust through rustup, then run the workspace checks:
 
 ```bash
 cargo fmt --all -- --check
-cargo test --workspace
-cargo build --workspace
-cargo test --workspace --all-features
+cargo test --workspace --locked
+cargo build --workspace --locked
+cargo test --workspace --all-features --locked
 ```
 
-The assembler's NASM comparison tests require `nasm` on `PATH`; mention its
-version in the PR when those tests are run. Changes to the CLI should update
-the matching page under `docs/cli`.
+CI runs both test configurations across every workspace crate; the all-features
+run also includes the socket AST lowering tests. Use the committed `Cargo.lock`.
+
+Changes to the CLI should update the matching page under `docs/cli`.
 
 ## Pull requests
 

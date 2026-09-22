@@ -104,6 +104,7 @@ mod tests {
         use crate::lower_ast::{frontend as s, lower_o0};
 
         let program = s::Program {
+            globals: vec![],
             functions: vec![s::Function {
                 name: "add".into(),
                 parameters: vec![
@@ -155,6 +156,7 @@ mod tests {
         let i32s = s::TypeRef::Int { bits: 32, signed: true };
 
         let program = s::Program {
+            globals: vec![],
             functions: vec![s::Function {
                 name: "max".into(),
                 parameters: vec![
@@ -205,6 +207,7 @@ mod tests {
         };
 
         let program = s::Program {
+            globals: vec![],
             functions: vec![s::Function {
                 name: "sum_to_n".into(),
                 parameters: vec![s::Parameter {
@@ -263,6 +266,7 @@ mod tests {
         use crate::{DataLayout, Type};
 
         let program = s::Program {
+            globals: vec![],
             functions: vec![s::Function {
                 name: "main".into(),
                 parameters: vec![],

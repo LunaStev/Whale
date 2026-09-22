@@ -58,6 +58,21 @@ Although the output extension is not enforced, `.bin` is recommended because Wha
 
 ---
 
+## AMD64 Input Validation
+
+Memory operands must close with `]` and separate terms with `+` or `-`.
+For example, `[rbx + r12*4 - 8]` is accepted. The SIB index may be `r12`
+with scale 1, 2, 4, or 8; `rsp` cannot be an index. Subtracting a register
+or symbol, adjacent terms, and dangling or repeated operators are rejected.
+Base/index address displacements must fit a signed 32-bit integer.
+
+The implemented forms of `nop`, `ret`, `syscall`, and `int3` take no operands.
+Unexpected top-level tokens also cause an error instead of being skipped.
+Invalid assembly exits unsuccessfully with a diagnostic and does not create
+or overwrite the requested output file.
+
+---
+
 ## Developer Options (Debug Mode)
 
 These options are intended for Whale developers or internal debugging.

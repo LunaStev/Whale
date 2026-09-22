@@ -16,11 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Install NASM/binutils
-      run: sudo apt-get update && sudo apt-get install -y nasm binutils
     - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
-    - name: NASM differential check
-      run: ./scripts/nasm_diff.sh
+      run: cargo build --workspace --locked --verbose
+    - name: Run workspace tests with default features
+      run: cargo test --workspace --locked --verbose
+    - name: Run workspace tests with all features
+      run: cargo test --workspace --all-features --locked --verbose

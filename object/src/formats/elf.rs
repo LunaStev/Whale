@@ -154,6 +154,13 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
                 section.name
             ));
         }
+        // Zero means no alignment constraint and is serialized as one.
+        if section.align != 0 && !section.align.is_power_of_two() {
+            return Err(format!(
+                "section {:?} alignment {} must be zero or a power of two",
+                section.name, section.align
+            ));
+        }
     }
 
     for sym in &obj.symbols {
@@ -170,6 +177,38 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
             return Err(format!(
                 "relocation reference {:?} contains embedded NUL byte",
                 reloc.symbol
+            ));
+        }
+        let section = obj.sections.get(reloc.section_index).ok_or_else(|| {
+            format!(
+                "relocation for {:?} references invalid section {}",
+                reloc.symbol, reloc.section_index
+            )
+        })?;
+        if section.kind == SectionKind::Bss {
+            return Err(format!(
+                "relocations targeting BSS section {:?} are not supported",
+                section.name
+            ));
+        }
+        let width = match reloc.kind {
+            RelocKind::Absolute64 => 8,
+            RelocKind::Relative8 => 1,
+            RelocKind::Absolute32
+            | RelocKind::Relative32
+            | RelocKind::GOTPCREL
+            | RelocKind::PLT32 => 4,
+        };
+        let end = reloc.offset.checked_add(width).ok_or_else(|| {
+            format!(
+                "relocation range overflow in section {:?} at offset {}",
+                section.name, reloc.offset
+            )
+        })?;
+        if end > section.data.len() {
+            return Err(format!(
+                "relocation range {}..{} exceeds section {:?} size {}",
+                reloc.offset, end, section.name, section.data.len()
             ));
         }
     }
@@ -611,7 +650,7 @@ mod tests {
         obj.sections.push(Section {
             name: ".текст_café_日本語".to_string(),
             kind: SectionKind::Text,
-            data: vec![0x90],
+            data: vec![0x90; 4],
             align: 16,
         });
         // Empty symbol name (mandatory STN_UNDEF entry)

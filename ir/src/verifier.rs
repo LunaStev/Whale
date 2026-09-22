@@ -1,9 +1,24 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{Instruction, Module, Terminator, Type, ValueId};
+use std::collections::HashSet;
+
+use crate::{BlockId, Instruction, Module, Terminator, Type, ValueId};
 
 #[derive(Debug)]
 pub enum VerifyError {
+    InvalidEntryBlock {
+        func: String,
+        entry: BlockId,
+    },
+    InvalidBranchTarget {
+        func: String,
+        block: BlockId,
+        target: BlockId,
+    },
+    MissingValueType {
+        func: String,
+        value: ValueId,
+    },
     UnterminatedBlock {
         func: String,
         block: String,
@@ -21,6 +36,13 @@ pub enum VerifyError {
 
 pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
     for f in &m.functions {
+        let blocks: HashSet<BlockId> = f.blocks.iter().map(|b| b.id).collect();
+        if !blocks.contains(&f.entry) {
+            return Err(VerifyError::InvalidEntryBlock {
+                func: f.name.clone(),
+                entry: f.entry,
+            });
+        }
         // value id set
         let mut defined = std::collections::HashSet::<ValueId>::new();
         for p in &f.params {
@@ -28,11 +50,41 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
         }
 
         for b in &f.blocks {
-            if b.terminator.is_none() {
+            let Some(terminator) = &b.terminator else {
                 return Err(VerifyError::UnterminatedBlock {
                     func: f.name.clone(),
                     block: b.name.clone(),
                 });
+            };
+
+            let check_target = |target: BlockId| {
+                if blocks.contains(&target) {
+                    Ok(())
+                } else {
+                    Err(VerifyError::InvalidBranchTarget {
+                        func: f.name.clone(),
+                        block: b.id,
+                        target,
+                    })
+                }
+            };
+            match terminator {
+                Terminator::Br { target } => check_target(*target)?,
+                Terminator::CBr {
+                    then_bb, else_bb, ..
+                } => {
+                    check_target(*then_bb)?;
+                    check_target(*else_bb)?;
+                }
+                Terminator::Switch {
+                    default_bb, cases, ..
+                } => {
+                    check_target(*default_bb)?;
+                    for (_, target) in cases {
+                        check_target(*target)?;
+                    }
+                }
+                Terminator::Ret { .. } | Terminator::Trap { .. } => {}
             }
 
             for ins in &b.instructions {
@@ -43,7 +95,7 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
             }
 
             // terminator uses
-            match b.terminator.as_ref().unwrap() {
+            match terminator {
                 Terminator::Br { .. } => {}
                 Terminator::CBr { cond, .. } => {
                     if !defined.contains(cond) {
@@ -75,6 +127,19 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                             return Err(VerifyError::UseOfUndefinedValue {
                                 func: f.name.clone(),
                                 value: *v,
+                            });
+                        }
+                        let value_ty =
+                            f.value_type(*v)
+                                .ok_or_else(|| VerifyError::MissingValueType {
+                                    func: f.name.clone(),
+                                    value: *v,
+                                })?;
+                        if f.ret_ty == Type::Void || value_ty != &f.ret_ty {
+                            return Err(VerifyError::RetTypeMismatch {
+                                func: f.name.clone(),
+                                expected: f.ret_ty.clone(),
+                                got: Some(value_ty.clone()),
                             });
                         }
                     } else if f.ret_ty != Type::Void {
