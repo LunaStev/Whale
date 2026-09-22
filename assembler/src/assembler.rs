@@ -1,7 +1,7 @@
+use crate::ast::AST;
+use crate::error::AsmError;
 use crate::tokens::tokenize;
 use crate::traits::ISA;
-use crate::error::{AsmError};
-use crate::ast::AST;
 
 pub struct AssemblerOutput {
     pub sections: Vec<AsmSection>,

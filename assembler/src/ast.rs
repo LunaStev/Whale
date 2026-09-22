@@ -44,7 +44,7 @@ pub enum Operand {
     Immediate(i64),
     Label(String),
     SymbolExpr { name: String, addend: i64 },
-    Memory(MemoryOperand)
+    Memory(MemoryOperand),
 }
 
 #[derive(Debug, Clone)]

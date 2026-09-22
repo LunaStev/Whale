@@ -1,7 +1,7 @@
-pub mod isa;
 pub mod assembler;
 pub mod ast;
 pub mod error;
+pub mod isa;
 pub mod tokens;
 pub mod traits;
 
@@ -74,7 +74,10 @@ _start:
     ret
 "#;
         let out = assemble(src, &AMD64).expect("extern symbols should be allowed");
-        let has_ext = out.symbols.iter().any(|s| s.name == "ext" && s.section_index.is_none());
+        let has_ext = out
+            .symbols
+            .iter()
+            .any(|s| s.name == "ext" && s.section_index.is_none());
         assert!(has_ext, "extern symbol should be present as undefined");
     }
 
@@ -114,7 +117,10 @@ _start:
             .find(|s| s.name == ".text")
             .expect("text section");
         assert_eq!(text.data, vec![0xB8, 0x08, 0x00, 0x00, 0x00, 0xC3]);
-        assert!(text.relocs.is_empty(), "equ immediate must not create relocations");
+        assert!(
+            text.relocs.is_empty(),
+            "equ immediate must not create relocations"
+        );
     }
 
     #[test]
@@ -164,7 +170,10 @@ far_target:
             .find(|s| s.name == ".text")
             .expect("text section");
 
-        assert!(text.relocs.is_empty(), "local same-section jumps must not use relocations");
+        assert!(
+            text.relocs.is_empty(),
+            "local same-section jumps must not use relocations"
+        );
         assert_eq!(text.data[0], 0xE9, "jmp must be near opcode");
         let jmp_disp = i32::from_le_bytes([text.data[1], text.data[2], text.data[3], text.data[4]]);
         assert_eq!(jmp_disp, 165);

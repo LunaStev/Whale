@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{BasicBlock, BinOp, Callee, CmpOp, ConstValue, Endian, Function, ICmpPred, Instruction, Module, Terminator, Type};
+use crate::{
+    BasicBlock, BinOp, Callee, CmpOp, ConstValue, Endian, Function, ICmpPred, Instruction, Module,
+    Terminator, Type,
+};
 
 pub fn print_module(m: &Module) -> String {
     let mut out = String::new();
@@ -94,7 +97,13 @@ fn print_instr(i: &Instruction) -> String {
         } => format!("{dst}: {ty} = {} {ty} {lhs}, {rhs}", fmt_binop(op)),
         Not { dst, ty, src } => format!("{dst}: {ty} = not {ty} {src}"),
 
-        Cmp { dst, op, ty, lhs, rhs } => {
+        Cmp {
+            dst,
+            op,
+            ty,
+            lhs,
+            rhs,
+        } => {
             format!("{dst}: i1 = cmp {} {ty} {lhs}, {rhs}", fmt_cmpop(op))
         }
 

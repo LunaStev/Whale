@@ -441,7 +441,10 @@ struct ConstEvalCtx<'a> {
     global_consts: &'a ConstMap,
 }
 
-fn eval_const_expr(expr: &frontend::Expr, ctx: &ConstEvalCtx<'_>) -> Result<(Type, ConstValue), LowerError> {
+fn eval_const_expr(
+    expr: &frontend::Expr,
+    ctx: &ConstEvalCtx<'_>,
+) -> Result<(Type, ConstValue), LowerError> {
     match expr {
         frontend::Expr::Lit(l) => lit_to_const(l),
 
@@ -500,7 +503,11 @@ fn eval_const_expr(expr: &frontend::Expr, ctx: &ConstEvalCtx<'_>) -> Result<(Typ
 fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
     Ok(match l {
         frontend::Lit::Bool(b) => (Type::I1, ConstValue::Bool(*b)),
-        frontend::Lit::Int { bits, signed, value } => {
+        frontend::Lit::Int {
+            bits,
+            signed,
+            value,
+        } => {
             let ty = super::support::int_type(*bits, *signed)?;
             if *signed {
                 (ty.clone(), ConstValue::I(wrap_i(*value, &ty)))
@@ -531,7 +538,10 @@ fn ty_int_bits(ty: &Type) -> Option<u32> {
 }
 
 fn is_signed_int(ty: &Type) -> bool {
-    matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
+    matches!(
+        ty,
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+    )
 }
 
 fn wrap_u(v: u128, ty: &Type) -> u128 {
@@ -671,10 +681,17 @@ fn const_cmp(
     Err(LowerError::UnsupportedExpr)
 }
 
-fn lower_lit_o0(fb: &mut crate::FunctionBuilder<'_>, lit: &frontend::Lit) -> Result<(ValueId, Type), LowerError> {
+fn lower_lit_o0(
+    fb: &mut crate::FunctionBuilder<'_>,
+    lit: &frontend::Lit,
+) -> Result<(ValueId, Type), LowerError> {
     match lit {
         frontend::Lit::Bool(b) => Ok((fb.const_bool(*b), Type::I1)),
-        frontend::Lit::Int { bits, signed, value } => {
+        frontend::Lit::Int {
+            bits,
+            signed,
+            value,
+        } => {
             let ty = super::support::int_type(*bits, *signed)?;
             if *signed {
                 Ok((fb.const_int(ty.clone(), wrap_i(*value, &ty)), ty))

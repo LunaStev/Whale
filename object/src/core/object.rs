@@ -1,6 +1,6 @@
+use crate::core::reloc::ObjectRelocation;
 use crate::core::section::{Section, SectionKind};
 use crate::core::symbol::ObjectSymbol;
-use crate::core::reloc::ObjectRelocation;
 
 pub enum ObjectFormat {
     ELF64,

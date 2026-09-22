@@ -16,7 +16,9 @@ pub struct ResolvedSymbol {
 
 impl SymbolTable {
     pub fn new() -> Self {
-        Self { symbols: HashMap::new() }
+        Self {
+            symbols: HashMap::new(),
+        }
     }
 
     pub fn resolve(&mut self, objects: &[ObjectFile]) -> Result<(), String> {
@@ -25,18 +27,22 @@ impl SymbolTable {
                 if sym.section_index.is_some() {
                     // Definition
                     if let Some(existing) = self.symbols.get(&sym.name) {
-                        if existing.section_index.is_some() && sym.binding == SymbolBinding::Global {
+                        if existing.section_index.is_some() && sym.binding == SymbolBinding::Global
+                        {
                             return Err(format!("Duplicate global symbol: {}", sym.name));
                         }
                     }
-                    self.symbols.insert(sym.name.clone(), ResolvedSymbol {
-                        name: sym.name.clone(),
-                        object_index: Some(obj_idx),
-                        section_index: sym.section_index,
-                        value: sym.value,
-                        size: sym.size,
-                        binding: sym.binding,
-                    });
+                    self.symbols.insert(
+                        sym.name.clone(),
+                        ResolvedSymbol {
+                            name: sym.name.clone(),
+                            object_index: Some(obj_idx),
+                            section_index: sym.section_index,
+                            value: sym.value,
+                            size: sym.size,
+                            binding: sym.binding,
+                        },
+                    );
                 }
             }
         }

@@ -133,7 +133,13 @@ pub enum Instruction {
         src: ValueId,
     },
 
-    Cmp { dst: ValueId, op: CmpOp, ty: Type, lhs: ValueId, rhs: ValueId },
+    Cmp {
+        dst: ValueId,
+        op: CmpOp,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    },
 
     ICmp {
         dst: ValueId,

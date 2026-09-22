@@ -208,7 +208,10 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         if end > section.data.len() {
             return Err(format!(
                 "relocation range {}..{} exceeds section {:?} size {}",
-                reloc.offset, end, section.name, section.data.len()
+                reloc.offset,
+                end,
+                section.name,
+                section.data.len()
             ));
         }
     }
@@ -509,12 +512,12 @@ fn visibility_to_stv(vis: SymbolVisibility) -> u8 {
 
 fn reloc_type(kind: RelocKind) -> u32 {
     match kind {
-        RelocKind::Absolute64 => 1, // R_X86_64_64
+        RelocKind::Absolute64 => 1,  // R_X86_64_64
         RelocKind::Absolute32 => 10, // R_X86_64_32
-        RelocKind::Relative32 => 2, // R_X86_64_PC32
-        RelocKind::Relative8 => 15, // R_X86_64_PC8
-        RelocKind::GOTPCREL => 9,   // R_X86_64_GOTPCREL
-        RelocKind::PLT32 => 4,      // R_X86_64_PLT32
+        RelocKind::Relative32 => 2,  // R_X86_64_PC32
+        RelocKind::Relative8 => 15,  // R_X86_64_PC8
+        RelocKind::GOTPCREL => 9,    // R_X86_64_GOTPCREL
+        RelocKind::PLT32 => 4,       // R_X86_64_PLT32
     }
 }
 
@@ -686,7 +689,9 @@ mod tests {
         let contains_nul_terminated = |bytes: &[u8], name: &str| {
             let mut pattern = name.as_bytes().to_vec();
             pattern.push(0);
-            bytes.windows(pattern.len()).any(|w| w == pattern.as_slice())
+            bytes
+                .windows(pattern.len())
+                .any(|w| w == pattern.as_slice())
         };
 
         assert!(contains_nul_terminated(&elf_bytes, ".текст_café_日本語"));
