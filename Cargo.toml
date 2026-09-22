@@ -5,10 +5,14 @@ members = [
     "linker", "ir",
 ]
 
+[workspace.package]
+rust-version = "1.86"
+
 [package]
 name = "whale"
 version = "0.1.0"
 edition = "2021"
+rust-version.workspace = true
 
 [features]
 default = []
