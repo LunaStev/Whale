@@ -48,7 +48,7 @@ pub fn parse(tokens: &[Token]) -> Result<AST, AsmError> {
                 items.push(parse_instruction(tokens, &mut pos)?);
             }
             TokenKind::Newline => pos += 1,
-            _ => pos += 1,
+            _ => return Err(parser_err(tokens, pos, "Unexpected token at top level")),
         }
     }
     Ok(AST { items })
@@ -152,32 +152,54 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
 fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError> {
     *pos += 1; // '['
 
-    let mut base: Option<String> = None;
-    let mut index: Option<String> = None;
-    let mut symbol: Option<String> = None;
-    let mut scale: u8 = 1;
-    let mut disp: i64 = 0;
-    let mut sign: i64 = 1;
+    let mut base = None;
+    let mut index = None;
+    let mut symbol = None;
+    let mut scale = 1;
+    let mut disp = 0i64;
+    let mut sign = 1i64;
 
-    while *pos < tokens.len() {
-        match &tokens[*pos].kind {
-            TokenKind::Identifier(name) => {
-                let raw = name.clone();
-                let lower = raw.to_ascii_lowercase();
-                *pos += 1;
+    // A leading sign is allowed; subsequent signs must separate complete terms.
+    match tokens.get(*pos).map(|t| &t.kind) {
+        Some(TokenKind::Plus) => *pos += 1,
+        Some(TokenKind::Minus) => {
+            sign = -1;
+            *pos += 1;
+        }
+        _ => {}
+    }
 
+    loop {
+        let term_pos = *pos;
+        let kind = tokens.get(*pos).map(|t| &t.kind);
+        match kind {
+            None | Some(TokenKind::Newline) => {
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Missing closing ']' in memory operand",
+                ));
+            }
+            Some(TokenKind::Identifier(name)) => {
+                if sign < 0 {
+                    return Err(parser_err(
+                        tokens,
+                        *pos,
+                        "Negative register or symbol terms are not supported in memory operands",
+                    ));
+                }
+                let lower = name.to_ascii_lowercase();
                 if is_register(&lower) {
                     if base.is_none() {
                         base = Some(lower);
+                        *pos += 1;
                     } else if index.is_none() {
-                        index = Some(lower.clone());
-                        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Multiply) {
+                        index = Some(lower);
+                        *pos += 1;
+                        if matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Multiply)) {
                             *pos += 1;
-                            if *pos >= tokens.len() {
-                                return Err(parser_err(tokens, *pos, "Invalid scale"));
-                            }
-                            match &tokens[*pos].kind {
-                                TokenKind::Number(n) if matches!(*n, 1 | 2 | 4 | 8) => {
+                            match tokens.get(*pos).map(|t| &t.kind) {
+                                Some(TokenKind::Number(n)) if matches!(*n, 1 | 2 | 4 | 8) => {
                                     scale = *n as u8;
                                     *pos += 1;
                                 }
@@ -185,44 +207,68 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                             }
                         }
                     } else {
-                        return Err(parser_err(tokens, *pos, "Too many registers in memory operand"));
+                        return Err(parser_err(
+                            tokens,
+                            term_pos,
+                            "Too many registers in memory operand",
+                        ));
                     }
                 } else if symbol.is_none() {
-                    symbol = Some(raw);
+                    symbol = Some(name.clone());
+                    *pos += 1;
                 } else {
-                    return Err(parser_err(tokens, *pos, "Multiple symbols in memory operand"));
+                    return Err(parser_err(
+                        tokens,
+                        term_pos,
+                        "Multiple symbols in memory operand",
+                    ));
                 }
             }
-            TokenKind::Number(n) => {
-                disp += sign * *n;
+            Some(TokenKind::Number(n)) => {
+                disp = n
+                    .checked_mul(sign)
+                    .and_then(|n| disp.checked_add(n))
+                    .ok_or_else(|| parser_err(tokens, term_pos, "Memory displacement overflow"))?;
+                *pos += 1;
+            }
+            _ => return Err(parser_err(tokens, *pos, "Expected term in memory operand")),
+        }
+
+        match tokens.get(*pos).map(|t| &t.kind) {
+            Some(TokenKind::RBracket) => {
+                *pos += 1;
+                return Ok(Operand::Memory(MemoryOperand {
+                    base,
+                    index,
+                    scale,
+                    disp,
+                    symbol,
+                }));
+            }
+            Some(TokenKind::Plus) => {
                 sign = 1;
                 *pos += 1;
             }
-            TokenKind::Plus => {
-                sign = 1;
-                *pos += 1;
-            }
-            TokenKind::Minus => {
+            Some(TokenKind::Minus) => {
                 sign = -1;
                 *pos += 1;
             }
-            TokenKind::RBracket => {
-                *pos += 1;
-                break;
+            None | Some(TokenKind::Newline) => {
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Missing closing ']' in memory operand",
+                ));
             }
             _ => {
-                return Err(parser_err(tokens, *pos, "Unexpected token in memory operand"));
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Expected '+', '-' or ']' in memory operand",
+                ))
             }
         }
     }
-
-    Ok(Operand::Memory(MemoryOperand {
-        base,
-        index,
-        scale,
-        disp,
-        symbol,
-    }))
 }
 
 fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmError> {

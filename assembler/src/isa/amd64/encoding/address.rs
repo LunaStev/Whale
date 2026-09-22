@@ -67,20 +67,23 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
         .ok_or_else(|| AsmError::EncodeError("Scale must be 1/2/4/8".into()))?;
 
     if let Some(idx) = index_code {
-        if (idx & 7) == 4 {
+        if idx == 4 {
             return Err(AsmError::EncodeError(
-                "rsp/r12 cannot be used as index register".into(),
+                "rsp/esp cannot be used as index register".into(),
             ));
         }
     }
 
     let disp = mem.disp;
+    let disp32 = i32::try_from(disp).map_err(|_| {
+        AsmError::EncodeError("memory displacement is out of signed 32-bit range".into())
+    })?;
     let disp_kind = if disp == 0 {
         None
     } else if (-128..=127).contains(&disp) {
         Some(DispKind::Disp8(disp as i8))
     } else {
-        Some(DispKind::Disp32(disp as i32))
+        Some(DispKind::Disp32(disp32))
     };
 
     let need_sib = index_code.is_some() || base_code.is_none() || base_code.map(|b| (b & 7) == 4).unwrap_or(false);
@@ -131,7 +134,7 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
             let index_low = idx & 7;
             (
                 0,
-                Some(DispKind::Disp32(disp as i32)),
+                Some(DispKind::Disp32(disp32)),
                 4,
                 Some((scale, index_low, 5)),
                 false,
