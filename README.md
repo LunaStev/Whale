@@ -1,89 +1,176 @@
-# Whale Toolchain
+# Whale
 
-Whale is a general-purpose low-level toolchain written in Rust. It is designed as a modern, lightweight backend for the **Wave** programming language.
+**A general-purpose compiler toolchain written in Rust.**
 
-## Capability status
+[![Rust CI](https://github.com/wavefnd/Whale/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/wavefnd/Whale/actions/workflows/rust.yml)
+[![Code quality](https://github.com/wavefnd/Whale/actions/workflows/quality.yml/badge.svg?branch=master)](https://github.com/wavefnd/Whale/actions/workflows/quality.yml)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 
-| Area | Status | Notes |
-|---|---|---|
-| Assembler (`whale asm`) | **Implemented** | AMD64 only. Output must be an ELF object (`.o`). |
-| Object CLI (`whale object`) | **Implemented** | Build ELF objects from binary / IR inputs. |
-| Linker (`whale link`) | **Planned** | CLI stub only — prints "coming soon", no resolution or relocation yet. |
-| IR tools (`whale ir`) | **Experimental** | Requires building with `--features socket-cli`. Subcommand: `ir lower`. |
+Whale brings together an intermediate representation, assembler, object-file
+library, and linker infrastructure. Developed within the
+[Wave ecosystem](https://github.com/wavefnd/Wave), its components are intended to
+serve language implementations and compiler tooling as reusable Rust libraries.
 
-Defined-behavior goals for a full native link path are tracked separately; this README only documents what the current tree actually runs.
+Whale is in active, early development. APIs and IR formats are evolving; the
+current capabilities are listed below.
 
-## Key components
+[Getting started](#getting-started) · [Usage](#usage) · [Development](#development) · [Contributing](#contributing) · [Support](#support)
 
-- **Whale Assembler (`asm`)** — AMD64 assembler with multi-section support, standard directives (`global`, `section`, `extern`), and ELF relocation generation into `.o` objects.
-- **Whale Object (`object`)** — Object-file library and CLI for sections, symbols, and ELF64 generation.
-- **Whale Linker (`linker`)** — Not implemented yet (placeholder CLI).
-- **Whale IR (`ir`)** — Experimental lower/print/verify demos behind the `socket-cli` feature.
+## Design goals
 
-## Project philosophy
+- **Defined behavior:** specify program behavior explicitly, including invalid
+  operations, with the goal of an IR without undefined behavior.
+- **Explicit O0 IR:** keep operations and required safety behavior visible in IR,
+  with optional optimizations separated from correctness transformations.
+- **Reusable components:** expose the IR, assembler, object model, and linker as
+  separate crates.
 
-1. **Modular** — Every component is a reusable Rust crate.
-2. **Transparent** — Built from scratch to avoid opaque legacy toolchain layers.
-3. **Performant** — Uses Rust's memory safety and zero-cost abstractions.
+These are project goals. Complete memory-safety semantics and an end-to-end
+native compilation pipeline are still being developed.
+
+## Current capabilities
+
+| Component | Available today | Status |
+| --- | --- | --- |
+| Assembler | AMD64 assembly, sections, symbols, and relocations emitted as ELF64 object files | Available |
+| IR | Typed IR construction, printing, verification, and scalar AST JSON lowering | Experimental |
+| Object library | Object model and ELF64 relocatable object serialization | Available |
+| Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
+| Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
+
+The current emitted object target is AMD64 ELF64. An object file is not a linked
+executable. CI runs host checks on Linux, Windows, and macOS; running Whale on a
+host does not imply support for that host's native object format or instruction
+set as an output target.
 
 ## Getting started
 
-### Installation
+You need Git and **Rust 1.86.0 or newer**, including Cargo. Stable Rust is
+recommended for development.
 
-```bash
-# Core CLI (asm / object / link stub)
-cargo build --release
-
-# Include experimental IR CLI (needed for `whale ir`)
-cargo build --release --features socket-cli
+```sh
+git clone https://github.com/wavefnd/Whale.git
+cd Whale
+cargo build --release --locked
 ```
 
-Install the binary from `target/release/whale`, or run via `cargo run -- ...`.
+The executable is written to `target/release/whale`, or
+`target/release/whale.exe` on Windows. The examples below use `cargo run` so that
+installing Whale on your `PATH` is optional.
 
-### Basic usage
+Enable the experimental IR command when building with:
 
-#### 1. Assemble source (ELF object)
-
-```bash
-whale asm --amd64 input.asm -o output.o
+```sh
+cargo build --release --locked --features socket-cli
 ```
 
-Raw `.bin` output is **not** supported by the current assembler CLI; it rejects non-`.o` outputs.
+## Usage
 
-#### 2. Create / inspect object files
+### Assemble an AMD64 object
 
-```bash
-whale object input.bin -o output.o
+Save the following as `example.asm`:
+
+```asm
+section .text
+global answer
+
+answer:
+    mov eax, 42
+    ret
 ```
 
-#### 3. Link objects (not available yet)
-
-```bash
-whale link obj1.o obj2.o -o executable
-# Currently prints a stub message only.
+```sh
+cargo run --release --locked -- asm --amd64 example.asm -o example.o
 ```
 
-#### 4. IR lower (feature-gated)
+This produces a relocatable ELF64 object. Assembly is implemented within Whale;
+no external assembler is needed.
 
-```bash
-cargo run --features socket-cli -- ir lower program.json -o out.wir
+### Lower an AST to IR
+
+Save this minimal typed AST as `program.json`:
+
+```json
+{
+  "globals": [],
+  "functions": [{
+    "name": "answer",
+    "parameters": [],
+    "return_type": {"Int": {"bits": 32, "signed": true}},
+    "body": [{"Return": {"Lit": {"Int": {
+      "bits": 32, "signed": true, "value": 42
+    }}}}]
+  }]
+}
 ```
 
-## Documentation
+```sh
+cargo run --release --locked --features socket-cli -- ir lower program.json -o program.wir
+```
 
-Detailed CLI notes live under `docs/cli`:
+The command lowers and verifies the module, then writes textual IR to
+`program.wir`. Omit `-o program.wir` to print it to standard output. The input
+schema is defined in [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-- [Assembler CLI](docs/cli/asm.md) — note: some prose there still describes `.bin` output; the live `asm` command requires `.o`.
-- [Object CLI](docs/cli/object.md)
+### Wrap raw bytes in an object
+
+For an existing raw binary file:
+
+```sh
+cargo run --release --locked -- object code.bin -o code.o
+```
+
+This places the input bytes in an ELF64 `.text` section and defines a global
+`start` symbol at offset zero. It does not compile textual IR or disassemble
+existing object files.
+
+## Development
+
+| Path | Responsibility |
+| --- | --- |
+| [assembler/](assembler/) | Assembly parsing and instruction encoding |
+| [ir/](ir/) | IR types, builders, lowering, verification, and printing |
+| [object/](object/) | Sections, symbols, relocations, and ELF serialization |
+| [linker/](linker/) | Symbol resolution and layout infrastructure |
+| [src/](src/) | Command-line interface |
+| [tests/](tests/) | CLI integration tests |
+| [tools/](tools/) | CI helpers and standalone CLI smoke checks |
+
+Run the workspace checks from the repository root:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --locked
+cargo test --workspace --all-features --locked
+```
+
+[GitHub Actions](https://github.com/wavefnd/Whale/actions) also covers native host
+configurations, the minimum supported Rust version, optimized tests, rustdoc,
+coverage, and scheduled maintenance. The checked-in
+[workflows](.github/workflows/) contain the commands used by CI.
 
 ## Contributing
 
-Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, signed-off commits,
-local checks, and updating a PR. Review contacts are listed in
-[MAINTAINERS](MAINTAINERS); community expectations are in the
-[Code of Conduct](CODE_OF_CONDUCT.md). See [docs/ci.md](docs/ci.md) for detailed
-CI reproduction and [ai.txt](ai.txt) for the repository AI-use policy.
+Contributions to correctness, diagnostics, tests, and toolchain capabilities are
+welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, and
+signed-off commits.
+
+- Find a bounded task in [good first issues](https://github.com/wavefnd/Whale/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
+- Follow planned work in the [toolchain backlog](https://github.com/wavefnd/Whale/issues/12).
+- [Report a bug or propose a feature](https://github.com/wavefnd/Whale/issues/new/choose).
+- See [MAINTAINERS](MAINTAINERS) for review contacts and the
+  [Code of Conduct](CODE_OF_CONDUCT.md) for community expectations.
+
+The repository's AI-use policy is recorded in [ai.txt](ai.txt).
+
+## Support
+
+Support development through [Open Collective](https://opencollective.com/wave-lang)
+or [GitHub Sponsors](https://github.com/sponsors/LunaStev).
 
 ## License
 
-This project is licensed under the MPL-2.0 License — see the [LICENSE](LICENSE) file for details.
+Whale is licensed under the [Mozilla Public License 2.0](LICENSE).
+See [COPYRIGHT](COPYRIGHT) and [NOTICE](NOTICE) for attribution and notices.
