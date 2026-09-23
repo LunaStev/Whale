@@ -13,13 +13,15 @@ descriptions and review comments should be written in English.
 Install Git and stable Rust through rustup, including `rustfmt` and `clippy`.
 Whale's minimum supported Rust version is 1.86.0, declared in
 [Cargo.toml](Cargo.toml). Python is needed for the CI helper and CLI smoke tests;
-CI uses Python 3.13. See [CI checks and local reproduction](docs/ci.md) for the
-complete host, MSRV, feature, and tool requirements.
+CI uses Python 3.13. The tracked [Rust workflow](.github/workflows/rust.yml)
+defines host, MSRV, and feature checks; the [quality workflow](.github/workflows/quality.yml)
+defines formatting, lint, documentation, and workflow validation requirements.
 
 The normal build and regression suite use Whale's own components. An LLVM SDK,
 Wave compiler installation, or external assembler is not required to follow the
 core contribution workflow. Optional cross-host and coverage checks have their
-own prerequisites in the CI guide.
+own prerequisites in the [Rust workflow](.github/workflows/rust.yml) and
+[coverage workflow](.github/workflows/coverage.yml).
 
 Fork `wavefnd/Whale` on GitHub, then replace `YOUR_USERNAME` below with your login:
 
@@ -47,7 +49,7 @@ change an unrelated remote silently. Start new work from the latest upstream
 | [src/](src/) | `whale` CLI and command integration |
 | [tests/](tests/) | Repository-level integration tests |
 | [tools/](tools/) | CI helpers, smoke checks, and their tests |
-| [docs/](docs/) | CLI and development documentation |
+| [README.md](README.md) | Public usage examples and current capability boundaries |
 | [.github/](.github/) | Contribution templates and CI configuration |
 
 [README.md](README.md) distinguishes implemented and experimental capabilities.
@@ -55,7 +57,32 @@ The `socket-cli` feature enables the experimental IR CLI; `--all-features` also
 exercises the socket lowering tests. A host on which Whale runs is not
 necessarily an architecture for which it can generate machine code.
 
+For a focused regression, start with the affected component:
+
+| Component | Source and test locations | Focused command from the repository root |
+| --- | --- | --- |
+| Assembler | [assembler/src/](assembler/src/) and [assembler/tests/](assembler/tests/) | `cargo test -p assembler --locked` |
+| Object | [object/src/](object/src/) | `cargo test -p object --locked` |
+| IR | [ir/src/](ir/src/) and [ir/tests/](ir/tests/) | `cargo test -p ir --all-features --locked` |
+| Linker | [linker/src/](linker/src/) | `cargo test -p linker --locked` |
+| CLI | [src/](src/) and [tests/](tests/) | `cargo test -p whale --all-features --locked` |
+| CI helpers | [tools/](tools/) | `python3 -m unittest discover -s tools -p 'test_*.py' -v` |
+
+Run the workspace checks in [Local verification](#5-local-verification) after
+the focused regression; a single component check does not cover its consumers.
+
 ## 3. Submit a contribution
+
+### Choosing a first issue
+
+Start with the [open good first issues](https://github.com/wavefnd/Whale/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
+Read the completion criteria and linked dependencies before choosing one. For
+example, [unknown-command exit status](https://github.com/wavefnd/Whale/issues/16)
+has a small CLI regression, while [symbol extent validation](https://github.com/wavefnd/Whale/issues/163)
+depends on the section-reference and BSS size rules. A label alone does not
+mean those prerequisites or design decisions are complete. Check that an issue
+is still open and unassigned, and comment with the bounded change you intend
+to make so other contributors can coordinate.
 
 ### GitHub pull requests
 
@@ -135,8 +162,11 @@ python3 tools/ci_smoke.py --binary target/debug/whale --socket enabled
 ```
 
 On Windows, use `target/debug/whale.exe` and the Python command installed on your
-host. See [docs/ci.md](docs/ci.md) for warning-free rustdoc, release-mode tests,
-MSRV checks, cross-host validation, coverage, and retained failure evidence.
+host. Consult the [Rust workflow](.github/workflows/rust.yml) for release-mode,
+MSRV, and cross-host checks, the [quality workflow](.github/workflows/quality.yml)
+for warning-free rustdoc, and the [coverage workflow](.github/workflows/coverage.yml)
+for coverage prerequisites. [tools/ci.py](tools/ci.py) retains command logs and
+execution metadata in `.ci-artifacts/` for reproducing failures.
 Those checks are not replaced by a successful `cargo check`.
 
 Record exact commands, results, host, and toolchain for the checks you ran.
@@ -158,7 +188,15 @@ negative and positive coverage. In particular:
 - IR changes should check the structured verifier result and preserve valid
   neighboring types and signatures.
 - CLI changes should cover exit status, diagnostics, and output-file behavior;
-  keep the matching [CLI documentation](docs/cli/) current.
+  keep the matching [README usage examples](README.md#usage) and command help current.
+
+For example, when fixing unknown-command status, add a CLI regression in
+`tests/` that runs `whale` with an unknown command, checks a nonzero exit status,
+and checks the diagnostic. Keep a positive case for an existing supported
+command. Run that named test with `cargo test -p whale --locked <test_name>`
+and confirm it fails for the reported behavior before changing the dispatch
+code. After the fix, rerun it and the default/all-feature workspace checks
+above. Describe the observed failure and passing results in the PR.
 
 Keep normal tests independent of an external assembler, linker, network access,
 or a contributor's personal filesystem. Use isolated fixtures where applicable.
