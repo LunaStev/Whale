@@ -198,7 +198,10 @@ fn every_branch_and_switch_destination_must_exist() {
         default_bb: here,
         cases: vec![(ConstValue::Bool(true), here)],
     });
-    assert!(ir::verify_module(&module).is_ok());
+    assert!(matches!(
+        ir::verify_module(&module),
+        Err(VerifyError::EntryHasPredecessor { .. })
+    ));
 }
 
 #[test]
@@ -222,13 +225,15 @@ fn a_target_in_another_function_is_not_a_local_destination() {
 fn valid_forward_branches_and_backedges_pass() {
     let mut builder = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut function = builder.begin_function("loop", vec![], Type::Void);
-    let entry = function.entry_block();
+    let header = function.create_block("header");
     let body = function.create_block("body");
     let exit = function.create_block("exit");
     let cond = function.const_bool(true);
+    function.br(header);
+    function.set_insert_point(header);
     function.cbr(cond, body, exit);
     function.set_insert_point(body);
-    function.br(entry);
+    function.br(header);
     function.set_insert_point(exit);
     function.ret(None);
     function.finish();

@@ -32,8 +32,6 @@ impl Linker {
     }
 
     fn link_elf64(&mut self) -> Result<Vec<u8>, String> {
-        // Implementation of ELF executable linking
-        // For now, a simplified version
-        Ok(vec![])
+        Err("ELF executable linking is not implemented".into())
     }
 }

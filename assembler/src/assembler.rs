@@ -33,7 +33,10 @@ pub struct Relocation {
 pub enum RelocKind {
     Absolute64,
     Absolute32,
+    /// A PC-relative data/address reference, independent of symbol definition.
     Relative32,
+    /// A near control transfer; an undefined target may require a PLT entry.
+    Branch32,
     Relative8,
 }
 

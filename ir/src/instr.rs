@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{BlockId, Type, ValueId};
+use crate::{BlockId, ConstExpr, Type, ValueId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConstValue {
@@ -104,6 +104,15 @@ pub enum Callee {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
+    /// A named compile-time declaration retained at its original IR position.
+    /// Its value is already evaluated; the expression is preserved for O0
+    /// inspection and validation, never executed as runtime arithmetic.
+    ConstDecl {
+        dst: ValueId,
+        name: String,
+        expression: ConstExpr,
+        value: ConstValue,
+    },
     Const {
         dst: ValueId,
         ty: Type,
@@ -172,6 +181,9 @@ pub enum Instruction {
         src: ValueId,
     },
 
+    /// Selects a value by predecessor block. Phis form a block's instruction
+    /// prefix, with one input per distinct predecessor (even if that block has
+    /// several edges to this block). Inputs are available at predecessor exit.
     Phi {
         dst: ValueId,
         ty: Type,
@@ -214,6 +226,11 @@ pub enum Instruction {
         align: u32,
     },
 
+    /// Computes an address without loading memory. The first integer index
+    /// offsets the base in units of its pointee type; subsequent indices select
+    /// array elements or literal struct/tuple fields. The result points to the
+    /// selected type. Empty indices preserve the original pointer type.
+    /// This type contract does not establish dynamic bounds or lifetime safety.
     Gep {
         dst: ValueId,
         dst_ty: Type,

@@ -132,9 +132,11 @@ fn globals_are_checked_even_without_functions() {
 fn function_and_global_namespaces_are_independent() {
     let mut m = constant(Type::I32, ConstValue::I(1));
     m.globals.push(ir::Global {
+        id: ir::GlobalId(0),
         name: "constant".into(),
         ty: Type::I32,
         init: ConstValue::I(2),
+        init_expr: ir::ConstExpr::literal(Type::I32, ConstValue::I(2)),
         align: 4,
     });
     assert!(ir::verify_module(&m).is_ok());
@@ -163,10 +165,17 @@ fn integers_cannot_implicitly_become_branch_select_or_trap_conditions() {
             let value = f.value_types[0].0;
             match kind {
                 0 => {
+                    let exit = ir::BlockId(99);
+                    f.blocks.push(ir::BasicBlock {
+                        id: exit,
+                        name: "exit".into(),
+                        instructions: vec![],
+                        terminator: f.blocks[0].terminator.clone(),
+                    });
                     f.blocks[0].terminator = Some(ir::Terminator::CBr {
                         cond: value,
-                        then_bb: f.entry,
-                        else_bb: f.entry,
+                        then_bb: exit,
+                        else_bb: exit,
                     })
                 }
                 1 => f.blocks[0].instructions.push(Instruction::TrapIf {

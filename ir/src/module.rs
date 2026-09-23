@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::{ConstValue, DataLayout, Function, Type};
+use crate::{ConstExpr, ConstValue, DataLayout, Function, GlobalId, Type};
 
 #[derive(Clone, Debug)]
 pub struct Global {
+    pub id: GlobalId,
     pub name: String,
     pub ty: Type,
     pub init: ConstValue,
+    pub init_expr: ConstExpr,
     pub align: u32,
 }
 

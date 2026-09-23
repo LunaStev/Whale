@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::assembler::{AsmSection, AsmSymbol, AssemblerOutput, RelocKind, Relocation};
 use crate::ast::*;
@@ -8,14 +8,90 @@ use crate::isa::amd64::tables::*;
 
 type LabelLocations = HashMap<String, (usize, usize)>;
 
+// Resolve the one-symbol constant dependency graph before encoding any use.
+// Worklist traversal avoids recursion and repeated whole-source rescans.
+fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
+    let mut definitions = Vec::new();
+    let mut positions = HashMap::new();
+    let mut reserved = HashSet::new();
+    let mut scope = None;
+    for node in &ast.items {
+        match node {
+            ASTNode::Label(name) => {
+                let resolved = resolve_symbol_name(name, &scope)?;
+                reserved.insert(resolved.clone());
+                if !name.starts_with('.') {
+                    scope = Some(resolved);
+                }
+            }
+            ASTNode::Extern(name) => {
+                reserved.insert(resolve_symbol_name(name, &scope)?);
+            }
+            ASTNode::Const { name, expr } => {
+                let name = resolve_symbol_name(name, &scope)?;
+                if positions.insert(name.clone(), definitions.len()).is_some() {
+                    return Err(AsmError::SymbolError(format!(
+                        "Duplicate constant definition '{name}'"
+                    )));
+                }
+                definitions.push((name, resolve_expr_symbols(expr, &scope)?));
+            }
+            _ => {}
+        }
+    }
+    let mut dependents = vec![Vec::new(); definitions.len()];
+    let mut ready = VecDeque::new();
+    for (position, (name, expr)) in definitions.iter().enumerate() {
+        if reserved.contains(name) {
+            return Err(AsmError::SymbolError(format!(
+                "Constant '{name}' conflicts with a label or extern symbol"
+            )));
+        }
+        match expr {
+            ExprValue::Number(_) => ready.push_back(position),
+            ExprValue::Symbol {
+                name: dependency, ..
+            } => {
+                let dependency = positions.get(dependency).ok_or_else(|| {
+                    AsmError::SymbolError(format!(
+                        "equ requires a constant expression; unresolved symbol '{dependency}'"
+                    ))
+                })?;
+                dependents[*dependency].push(position);
+            }
+        }
+    }
+    let mut values = HashMap::new();
+    while let Some(position) = ready.pop_front() {
+        let (name, expr) = &definitions[position];
+        let EvaluatedExpr::Number(value) = eval_expr(expr, &values)? else {
+            return Err(AsmError::SymbolError(format!(
+                "Unresolved constant dependency for '{name}'"
+            )));
+        };
+        values.insert(name.clone(), value);
+        ready.extend(dependents[position].iter().copied());
+    }
+    if let Some((name, _)) = definitions
+        .iter()
+        .find(|(name, _)| !values.contains_key(name))
+    {
+        return Err(AsmError::SymbolError(format!(
+            "Constant dependency cycle prevents resolving '{name}'"
+        )));
+    }
+    Ok(values)
+}
+
 pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
     const MAX_RELAX_ITERATIONS: usize = 8;
 
+    let consts = resolve_constants(ast)?;
     let mut prev_label_locs: Option<HashMap<String, (usize, usize)>> = None;
     let mut last_output: Option<AssemblerOutput> = None;
 
     for _ in 0..MAX_RELAX_ITERATIONS {
-        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref())?;
+        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref(), &consts)?;
         if let Some(prev) = &prev_label_locs {
             if *prev == label_locs {
                 return Ok(out);
@@ -31,11 +107,11 @@ pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
 fn encode_once(
     ast: &AST,
     jump_hint_locs: Option<&HashMap<String, (usize, usize)>>,
+    consts: &HashMap<String, i64>,
 ) -> Result<(AssemblerOutput, LabelLocations), AsmError> {
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
 
-    let mut consts = HashMap::<String, i64>::new();
     let mut defined_labels = HashSet::<String>::new();
     let mut label_locs = HashMap::<String, (usize, usize)>::new();
     let mut jump_known_locs = jump_hint_locs.cloned().unwrap_or_default();
@@ -77,7 +153,9 @@ fn encode_once(
                         resolved
                     )));
                 }
-                extern_symbols.insert(resolved.clone());
+                if !extern_symbols.insert(resolved.clone()) {
+                    continue;
+                }
                 symbols.push(AsmSymbol {
                     name: resolved,
                     section_index: None,
@@ -85,35 +163,7 @@ fn encode_once(
                     is_global: true,
                 });
             }
-            ASTNode::Const { name, expr } => {
-                let resolved_name = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if defined_labels.contains(&resolved_name)
-                    || extern_symbols.contains(&resolved_name)
-                {
-                    return Err(AsmError::SymbolError(format!(
-                        "Constant '{}' conflicts with an existing symbol",
-                        resolved_name
-                    )));
-                }
-                if consts.contains_key(&resolved_name) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate constant definition '{}'",
-                        resolved_name
-                    )));
-                }
-
-                let scoped_expr = resolve_expr_symbols(expr, &current_nonlocal_label)?;
-                let value = match eval_expr(&scoped_expr, &consts) {
-                    EvaluatedExpr::Number(v) => v,
-                    EvaluatedExpr::Symbol { name, .. } => {
-                        return Err(AsmError::SymbolError(format!(
-                            "equ requires a constant expression; unresolved symbol '{}'",
-                            name
-                        )))
-                    }
-                };
-                consts.insert(resolved_name, value);
-            }
+            ASTNode::Const { .. } => {}
             ASTNode::Label(name) => {
                 let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
                 if !name.starts_with('.') {
@@ -149,7 +199,7 @@ fn encode_once(
             }
             ASTNode::Instruction(ins) => {
                 let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
-                let inst = resolve_instruction_consts(&scoped, &consts);
+                let inst = resolve_instruction_consts(&scoped, consts)?;
                 let sec = &mut sections[current_section_idx];
                 let cur_off = sec.data.len();
                 encode_instruction(
@@ -164,7 +214,7 @@ fn encode_once(
             ASTNode::Directive(dir) => {
                 let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
                 let sec = &mut sections[current_section_idx];
-                encode_directive(&scoped, &mut sec.data, &mut sec.relocs, &consts)?;
+                encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
             }
         }
     }
@@ -177,10 +227,7 @@ fn encode_once(
 
     for sec in &sections {
         for reloc in &sec.relocs {
-            if !defined_labels.contains(&reloc.symbol)
-                && !extern_symbols.contains(&reloc.symbol)
-                && !consts.contains_key(&reloc.symbol)
-            {
+            if !defined_labels.contains(&reloc.symbol) && !extern_symbols.contains(&reloc.symbol) {
                 return Err(AsmError::SymbolError(format!(
                     "Undefined symbol '{}' (define it, declare with extern, or define with equ)",
                     reloc.symbol
@@ -234,12 +281,12 @@ fn resolve_expr_symbols(
     }
 }
 
-fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> EvaluatedExpr {
-    match expr {
+fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> Result<EvaluatedExpr, AsmError> {
+    Ok(match expr {
         ExprValue::Number(n) => EvaluatedExpr::Number(*n),
         ExprValue::Symbol { name, addend } => {
             if let Some(c) = consts.get(name) {
-                EvaluatedExpr::Number(c + addend)
+                EvaluatedExpr::Number(checked_expression_add(*c, *addend, name)?)
             } else {
                 EvaluatedExpr::Symbol {
                     name: name.clone(),
@@ -247,7 +294,21 @@ fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> EvaluatedExpr {
                 }
             }
         }
-    }
+    })
+}
+
+fn checked_expression_add(a: i64, b: i64, symbol: &str) -> Result<i64, AsmError> {
+    a.checked_add(b).ok_or_else(|| {
+        AsmError::EncodeError(format!(
+            "Signed expression overflow while resolving {symbol:?}"
+        ))
+    })
+}
+
+fn relative_addend(displacement: i64) -> Result<i64, AsmError> {
+    displacement
+        .checked_sub(4)
+        .ok_or_else(|| AsmError::EncodeError("Relative relocation addend overflow".into()))
 }
 
 fn resolve_instruction_symbols(
@@ -283,7 +344,10 @@ fn resolve_instruction_symbols(
     })
 }
 
-fn resolve_instruction_consts(ins: &Instruction, consts: &HashMap<String, i64>) -> Instruction {
+fn resolve_instruction_consts(
+    ins: &Instruction,
+    consts: &HashMap<String, i64>,
+) -> Result<Instruction, AsmError> {
     let mut resolved_ops = Vec::with_capacity(ins.operands.len());
     for op in &ins.operands {
         match op {
@@ -296,7 +360,9 @@ fn resolve_instruction_consts(ins: &Instruction, consts: &HashMap<String, i64>) 
             }
             Operand::SymbolExpr { name, addend } => {
                 if let Some(v) = consts.get(name) {
-                    resolved_ops.push(Operand::Immediate(*v + addend));
+                    resolved_ops.push(Operand::Immediate(checked_expression_add(
+                        *v, *addend, name,
+                    )?));
                 } else {
                     resolved_ops.push(op.clone());
                 }
@@ -305,7 +371,7 @@ fn resolve_instruction_consts(ins: &Instruction, consts: &HashMap<String, i64>) 
                 let mut mem = mem.clone();
                 if let Some(sym) = &mem.symbol {
                     if let Some(v) = consts.get(sym) {
-                        mem.disp += *v;
+                        mem.disp = checked_expression_add(mem.disp, *v, sym)?;
                         mem.symbol = None;
                     }
                 }
@@ -314,10 +380,10 @@ fn resolve_instruction_consts(ins: &Instruction, consts: &HashMap<String, i64>) 
             _ => resolved_ops.push(op.clone()),
         }
     }
-    Instruction {
+    Ok(Instruction {
         mnemonic: ins.mnemonic.clone(),
         operands: resolved_ops,
-    }
+    })
 }
 
 fn resolve_directive_symbols(
@@ -465,7 +531,7 @@ fn emit_reg_mem(
             offset: bytes.len(),
             symbol: sym.clone(),
             kind: RelocKind::Relative32,
-            addend: mem.disp - 4,
+            addend: relative_addend(mem.disp)?,
         });
         bytes.extend_from_slice(&0i32.to_le_bytes());
         return Ok(());
@@ -510,7 +576,7 @@ fn emit_mem_reg(
             offset: bytes.len(),
             symbol: sym.clone(),
             kind: RelocKind::Relative32,
-            addend: mem.disp - 4,
+            addend: relative_addend(mem.disp)?,
         });
         bytes.extend_from_slice(&0i32.to_le_bytes());
         return Ok(());
@@ -558,7 +624,7 @@ fn encode_instruction(
             JumpSpec {
                 near_opcode: JumpOpcode::One(0xE9),
                 short_opcode: Some(0xEB),
-                reloc_kind: RelocKind::Relative32,
+                reloc_kind: RelocKind::Branch32,
                 reloc_addend: -4,
                 near_len: 5,
             },
@@ -573,7 +639,7 @@ fn encode_instruction(
             JumpSpec {
                 near_opcode: JumpOpcode::One(0xE8),
                 short_opcode: None,
-                reloc_kind: RelocKind::Relative32,
+                reloc_kind: RelocKind::Branch32,
                 reloc_addend: -4,
                 near_len: 5,
             },
@@ -588,7 +654,7 @@ fn encode_instruction(
             JumpSpec {
                 near_opcode: JumpOpcode::Two(0x0F, 0x84),
                 short_opcode: Some(0x74),
-                reloc_kind: RelocKind::Relative32,
+                reloc_kind: RelocKind::Branch32,
                 reloc_addend: -4,
                 near_len: 6,
             },
@@ -939,7 +1005,7 @@ fn encode_imul(
                     offset: bytes.len(),
                     symbol: sym.clone(),
                     kind: RelocKind::Relative32,
-                    addend: mem.disp - 4,
+                    addend: relative_addend(mem.disp)?,
                 });
                 bytes.extend_from_slice(&0i32.to_le_bytes());
                 return Ok(());
@@ -1133,7 +1199,10 @@ fn encode_loop(
     Ok(())
 }
 
-fn eval_directive_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> EvaluatedExpr {
+fn eval_directive_expr(
+    expr: &ExprValue,
+    consts: &HashMap<String, i64>,
+) -> Result<EvaluatedExpr, AsmError> {
     eval_expr(expr, consts)
 }
 
@@ -1212,7 +1281,7 @@ fn reserve_bytes(
     }
 
     let count = match &values[0] {
-        DirectiveValue::Expr(expr) => match eval_directive_expr(expr, consts) {
+        DirectiveValue::Expr(expr) => match eval_directive_expr(expr, consts)? {
             EvaluatedExpr::Number(v) => v,
             EvaluatedExpr::Symbol { name, .. } => {
                 return Err(AsmError::EncodeError(format!(
@@ -1257,7 +1326,7 @@ fn encode_directive(
                 match v {
                     DirectiveValue::StringLiteral(s) => bytes.extend_from_slice(s.as_bytes()),
                     DirectiveValue::Expr(expr) => {
-                        let eval = eval_directive_expr(expr, consts);
+                        let eval = eval_directive_expr(expr, consts)?;
                         encode_data_expr(eval, 1, bytes, relocs)?;
                     }
                 }
@@ -1271,7 +1340,7 @@ fn encode_directive(
                         "dw only supports numeric expressions".into(),
                     ));
                 };
-                let eval = eval_directive_expr(expr, consts);
+                let eval = eval_directive_expr(expr, consts)?;
                 encode_data_expr(eval, 2, bytes, relocs)?;
             }
             Ok(())
@@ -1283,7 +1352,7 @@ fn encode_directive(
                         "dd only supports numeric expressions".into(),
                     ));
                 };
-                let eval = eval_directive_expr(expr, consts);
+                let eval = eval_directive_expr(expr, consts)?;
                 encode_data_expr(eval, 4, bytes, relocs)?;
             }
             Ok(())
@@ -1295,7 +1364,7 @@ fn encode_directive(
                         "dq only supports numeric expressions".into(),
                     ));
                 };
-                let eval = eval_directive_expr(expr, consts);
+                let eval = eval_directive_expr(expr, consts)?;
                 encode_data_expr(eval, 8, bytes, relocs)?;
             }
             Ok(())

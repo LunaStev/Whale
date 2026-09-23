@@ -1,6 +1,7 @@
 """Run CI commands with bounded logs, deadlines, and unmodified failure status."""
 
 import argparse
+import codecs
 import json
 import os
 from pathlib import Path
@@ -35,15 +36,18 @@ def run(command, name, timeout, artifacts, max_bytes=8 * 1024 * 1024):
             def capture():
                 nonlocal truncated
                 remaining = max_bytes
+                decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
                 try:
                     while chunk := process.stdout.read(8192):
                         kept = chunk[:remaining]
                         log.write(kept)
                         # Decode for consoles that do not use UTF-8 (notably Windows).
-                        sys.stdout.write(kept.decode("utf-8", errors="replace"))
+                        sys.stdout.write(decoder.decode(kept))
                         sys.stdout.flush()
                         remaining -= len(kept)
                         truncated |= len(kept) != len(chunk)
+                    sys.stdout.write(decoder.decode(b"", final=True))
+                    sys.stdout.flush()
                 except Exception as error:
                     errors.append(str(error))
 

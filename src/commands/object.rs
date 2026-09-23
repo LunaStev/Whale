@@ -82,12 +82,18 @@ pub fn run(args: Vec<String>) {
         visibility: object::SymbolVisibility::Default,
     });
 
-    let out_bytes = obj.write().expect("Failed to write ELF");
+    let out_bytes = obj.write().unwrap_or_else(|e| {
+        eprintln!("ELF build error: {e}");
+        process::exit(1);
+    });
     let elapsed = start_time.elapsed();
 
     if debug_mode && (show_bytes || dump_hex || dump_bin) { /* ... same as before ... */ }
 
-    fs::write(&output, &out_bytes).expect("Failed to write output");
+    super::output::publish(input.as_ref(), output.as_ref(), &out_bytes).unwrap_or_else(|e| {
+        eprintln!("Failed to write {output}: {e}");
+        process::exit(1);
+    });
 
     if debug_mode && show_stats {
         println!(
