@@ -1,11 +1,59 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::{BlockId, Instruction, Module, Terminator, Type, ValueId};
+use crate::{BlockId, ConstValue, Instruction, Module, Terminator, Type, ValueId};
 
 #[derive(Debug)]
 pub enum VerifyError {
+    DuplicateFunction {
+        name: String,
+    },
+    DuplicateGlobal {
+        name: String,
+    },
+    InvalidConstant {
+        func: String,
+        value: ValueId,
+        ty: Type,
+        payload: ConstValue,
+    },
+    InvalidGlobalInitializer {
+        name: String,
+        ty: Type,
+        payload: ConstValue,
+    },
+    InvalidGlobalAlignment {
+        name: String,
+        align: u32,
+    },
+    ConditionTypeMismatch {
+        func: String,
+        value: ValueId,
+        got: Type,
+    },
+    DuplicateBlock {
+        func: String,
+        block: BlockId,
+    },
+    DuplicateValue {
+        func: String,
+        value: ValueId,
+    },
+    DuplicateValueType {
+        func: String,
+        value: ValueId,
+    },
+    UnexpectedValueType {
+        func: String,
+        value: ValueId,
+    },
+    ValueTypeMismatch {
+        func: String,
+        value: ValueId,
+        expected: Type,
+        got: Type,
+    },
     InvalidEntryBlock {
         func: String,
         entry: BlockId,
@@ -39,8 +87,45 @@ pub enum VerifyError {
 }
 
 pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
+    let mut globals = HashSet::new();
+    for g in &m.globals {
+        if !globals.insert(&g.name) {
+            return Err(VerifyError::DuplicateGlobal {
+                name: g.name.clone(),
+            });
+        }
+        if !crate::constant::valid_constant(&g.ty, &g.init) {
+            return Err(VerifyError::InvalidGlobalInitializer {
+                name: g.name.clone(),
+                ty: g.ty.clone(),
+                payload: g.init.clone(),
+            });
+        }
+        if !g.align.is_power_of_two() {
+            return Err(VerifyError::InvalidGlobalAlignment {
+                name: g.name.clone(),
+                align: g.align,
+            });
+        }
+    }
+    let mut functions = HashSet::new();
     for f in &m.functions {
-        let blocks: HashSet<BlockId> = f.blocks.iter().map(|b| b.id).collect();
+        if !functions.insert(&f.name) {
+            return Err(VerifyError::DuplicateFunction {
+                name: f.name.clone(),
+            });
+        }
+    }
+    for f in &m.functions {
+        let mut blocks = HashSet::new();
+        for block in &f.blocks {
+            if !blocks.insert(block.id) {
+                return Err(VerifyError::DuplicateBlock {
+                    func: f.name.clone(),
+                    block: block.id,
+                });
+            }
+        }
         if !blocks.contains(&f.entry) {
             return Err(VerifyError::InvalidEntryBlock {
                 func: f.name.clone(),
@@ -56,7 +141,12 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                     param: p.name.clone(),
                 });
             }
-            defined.insert(p.id);
+            if !defined.insert(p.id) {
+                return Err(VerifyError::DuplicateValue {
+                    func: f.name.clone(),
+                    value: p.id,
+                });
+            }
         }
 
         for b in &f.blocks {
@@ -99,8 +189,29 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
 
             for ins in &b.instructions {
                 check_uses(ins, &defined, &f.name)?;
-                if let Some(dst) = instr_def(ins) {
-                    defined.insert(dst);
+                match ins {
+                    Instruction::Const { dst, ty, value } => {
+                        if !crate::constant::valid_constant(ty, value) {
+                            return Err(VerifyError::InvalidConstant {
+                                func: f.name.clone(),
+                                value: *dst,
+                                ty: ty.clone(),
+                                payload: value.clone(),
+                            });
+                        }
+                    }
+                    Instruction::Select { cond, .. } | Instruction::TrapIf { cond, .. } => {
+                        verify_condition(f, *cond)?;
+                    }
+                    _ => {}
+                }
+                if let Some((dst, _)) = instr_result(ins) {
+                    if !defined.insert(dst) {
+                        return Err(VerifyError::DuplicateValue {
+                            func: f.name.clone(),
+                            value: dst,
+                        });
+                    }
                 }
             }
 
@@ -114,6 +225,7 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                             value: *cond,
                         });
                     }
+                    verify_condition(f, *cond)?;
                 }
                 Terminator::Switch { value, .. } => {
                     if !defined.contains(value) {
@@ -162,35 +274,99 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                 }
             }
         }
+        verify_value_types(f)?;
     }
     Ok(())
 }
 
-fn instr_def(ins: &Instruction) -> Option<ValueId> {
+fn verify_condition(f: &crate::Function, value: ValueId) -> Result<(), VerifyError> {
+    let ty = f
+        .value_type(value)
+        .ok_or_else(|| VerifyError::MissingValueType {
+            func: f.name.clone(),
+            value,
+        })?;
+    if ty != &Type::Bool {
+        return Err(VerifyError::ConditionTypeMismatch {
+            func: f.name.clone(),
+            value,
+            got: ty.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn verify_value_types(f: &crate::Function) -> Result<(), VerifyError> {
+    let mut types = HashMap::new();
+    for (value, ty) in &f.value_types {
+        if types.insert(*value, ty).is_some() {
+            return Err(VerifyError::DuplicateValueType {
+                func: f.name.clone(),
+                value: *value,
+            });
+        }
+    }
+    let definitions = f.params.iter().map(|p| (p.id, p.ty.clone())).chain(
+        f.blocks
+            .iter()
+            .flat_map(|b| b.instructions.iter())
+            .filter_map(instr_result),
+    );
+    for (value, expected) in definitions {
+        let got = types
+            .remove(&value)
+            .ok_or_else(|| VerifyError::MissingValueType {
+                func: f.name.clone(),
+                value,
+            })?;
+        if got != &expected {
+            return Err(VerifyError::ValueTypeMismatch {
+                func: f.name.clone(),
+                value,
+                expected,
+                got: got.clone(),
+            });
+        }
+    }
+    // Iterate the source table rather than the hash map for deterministic diagnostics.
+    for (value, _) in &f.value_types {
+        if types.contains_key(value) {
+            return Err(VerifyError::UnexpectedValueType {
+                func: f.name.clone(),
+                value: *value,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
     use Instruction::*;
     match ins {
-        Const { dst, .. }
-        | Undef { dst, .. }
-        | Mov { dst, .. }
-        | Bin { dst, .. }
-        | Not { dst, .. }
-        | Cmp { dst, .. }
-        | ICmp { dst, .. }
-        | FCmp { dst, .. }
-        | Select { dst, .. }
-        | Cast { dst, .. }
-        | Phi { dst, .. }
-        | Extract { dst, .. }
-        | Checked { dst, .. }
-        | Alloca { dst, .. }
-        | Load { dst, .. }
-        | Gep { dst, .. } => Some(*dst),
+        Const { dst, ty, .. }
+        | Undef { dst, ty }
+        | Mov { dst, ty, .. }
+        | Bin { dst, ty, .. }
+        | Not { dst, ty, .. }
+        | Select { dst, ty, .. }
+        | Phi { dst, ty, .. }
+        | Load { dst, ty, .. } => Some((*dst, ty.clone())),
+        Cmp { dst, .. } | ICmp { dst, .. } | FCmp { dst, .. } => Some((*dst, Type::Bool)),
+        Cast { dst, dst_ty, .. } | Extract { dst, dst_ty, .. } | Gep { dst, dst_ty, .. } => {
+            Some((*dst, dst_ty.clone()))
+        }
+        Checked { dst, ty, .. } => Some((*dst, Type::Tuple(vec![ty.clone(), Type::Bool]))),
+        Alloca { dst, ty, .. } => Some((*dst, Type::ptr_to(ty.clone()))),
 
         Store { .. } | Memcpy { .. } | Memset { .. } | Call { dst: None, .. } | TrapIf { .. } => {
             None
         }
 
-        Call { dst: Some(v), .. } => Some(*v),
+        Call {
+            dst: Some(v),
+            ret_ty,
+            ..
+        } => Some((*v, ret_ty.clone())),
     }
 }
 

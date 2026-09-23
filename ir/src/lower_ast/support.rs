@@ -9,7 +9,7 @@ pub(crate) fn socket_type_to_whale(t: &frontend::TypeRef) -> Result<Type, LowerE
 
     Ok(match t {
         S::Void => Type::Void,
-        S::Bool => Type::I1,
+        S::Bool => Type::Bool,
 
         S::Int { bits, signed } => int_type(*bits, *signed)?,
         S::Float { bits } => float_type(*bits)?,
@@ -25,7 +25,8 @@ pub(crate) fn socket_type_to_whale(t: &frontend::TypeRef) -> Result<Type, LowerE
 
 pub(crate) fn int_type(bits: u16, signed: bool) -> Result<Type, LowerError> {
     Ok(match (bits, signed) {
-        (1, _) => Type::I1,
+        (1, true) => Type::I1,
+        (1, false) => Type::U1,
 
         (8, true) => Type::I8,
         (16, true) => Type::I16,
@@ -78,7 +79,7 @@ pub(crate) fn align_of(ty: &Type, ptr_bits: u32) -> u32 {
     match ty {
         Type::Void => 1,
 
-        Type::I1 | Type::I8 | Type::U8 => 1,
+        Type::Bool | Type::I1 | Type::U1 | Type::I8 | Type::U8 => 1,
         Type::I16 | Type::U16 | Type::F16 => 2,
         Type::I32 | Type::U32 | Type::F32 => 4,
         Type::I64 | Type::U64 | Type::F64 => 8,
@@ -104,6 +105,7 @@ fn is_int_like(ty: &Type) -> bool {
     matches!(
         ty,
         Type::I1
+            | Type::U1
             | Type::I8
             | Type::I16
             | Type::I32
@@ -129,8 +131,8 @@ pub(crate) fn map_cmp(op: frontend::CmpOpRef, ty: &Type) -> Result<CmpOp, LowerE
         });
     }
 
-    if is_int_like(ty) {
-        if matches!(ty, Type::I1) {
+    if matches!(ty, Type::Bool) || is_int_like(ty) {
+        if matches!(ty, Type::Bool) {
             return Ok(match op {
                 frontend::CmpOpRef::Eq => CmpOp::Eq,
                 frontend::CmpOpRef::Ne => CmpOp::Ne,
@@ -140,7 +142,7 @@ pub(crate) fn map_cmp(op: frontend::CmpOpRef, ty: &Type) -> Result<CmpOp, LowerE
 
         let signed = matches!(
             ty,
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+            Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
         );
 
         return Ok(match (op, signed) {

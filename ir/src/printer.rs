@@ -104,7 +104,7 @@ fn print_instr(i: &Instruction) -> String {
             lhs,
             rhs,
         } => {
-            format!("{dst}: i1 = cmp {} {ty} {lhs}, {rhs}", fmt_cmpop(op))
+            format!("{dst}: bool = cmp {} {ty} {lhs}, {rhs}", fmt_cmpop(op))
         }
 
         ICmp {
@@ -113,14 +113,14 @@ fn print_instr(i: &Instruction) -> String {
             ty,
             lhs,
             rhs,
-        } => format!("{dst}: i1 = icmp {} {ty} {lhs}, {rhs}", fmt_icmp(pred)),
+        } => format!("{dst}: bool = icmp {} {ty} {lhs}, {rhs}", fmt_icmp(pred)),
         FCmp {
             dst,
             pred,
             ty,
             lhs,
             rhs,
-        } => format!("{dst}: i1 = fcmp {} {ty} {lhs}, {rhs}", fmt_fcmp(pred)),
+        } => format!("{dst}: bool = fcmp {} {ty} {lhs}, {rhs}", fmt_fcmp(pred)),
 
         Select {
             dst,
@@ -128,7 +128,7 @@ fn print_instr(i: &Instruction) -> String {
             cond,
             on_true,
             on_false,
-        } => format!("{dst}: {ty} = select i1 {cond}, {ty} {on_true}, {ty} {on_false}"),
+        } => format!("{dst}: {ty} = select bool {cond}, {ty} {on_true}, {ty} {on_false}"),
 
         Cast {
             dst,
@@ -166,7 +166,7 @@ fn print_instr(i: &Instruction) -> String {
             lhs,
             rhs,
         } => format!(
-            "{dst}: tuple<{ty}, i1> = {}_chk {ty} {lhs}, {rhs}",
+            "{dst}: tuple<{ty}, bool> = {}_chk {ty} {lhs}, {rhs}",
             fmt_checked(op)
         ),
 
@@ -228,7 +228,7 @@ fn print_instr(i: &Instruction) -> String {
             s
         }
 
-        TrapIf { cond, reason } => format!("trap_if i1 {cond}, reason=\"{}\"", escape(reason)),
+        TrapIf { cond, reason } => format!("trap_if bool {cond}, reason=\"{}\"", escape(reason)),
     }
 }
 
@@ -240,7 +240,7 @@ fn print_term(t: &Terminator) -> String {
             cond,
             then_bb,
             else_bb,
-        } => format!("cbr i1 {cond}, label {}, label {}", then_bb.0, else_bb.0),
+        } => format!("cbr bool {cond}, label {}, label {}", then_bb.0, else_bb.0),
         Switch {
             ty,
             value,

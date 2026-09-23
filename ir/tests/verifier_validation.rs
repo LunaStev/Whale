@@ -18,11 +18,11 @@ fn return_checks_the_value_type_not_only_the_annotation() {
         ir::verify_module(&module),
         Err(VerifyError::RetTypeMismatch {
             expected: Type::I64,
-            got: Some(Type::I1),
+            got: Some(Type::Bool),
             ..
         })
     ));
-    assert!(ir::verify_module(&returning_bool(Type::I1)).is_ok());
+    assert!(ir::verify_module(&returning_bool(Type::Bool)).is_ok());
 }
 
 #[test]
@@ -34,9 +34,9 @@ fn void_returns_cannot_carry_a_value_and_nonvoid_returns_require_one() {
             ..
         })
     ));
-    let mut module = returning_bool(Type::I1);
+    let mut module = returning_bool(Type::Bool);
     module.functions[0].blocks[0].terminator = Some(Terminator::Ret {
-        ty: Type::I1,
+        ty: Type::Bool,
         value: None,
     });
     assert!(matches!(
@@ -53,7 +53,7 @@ fn void_returns_cannot_carry_a_value_and_nonvoid_returns_require_one() {
 
 #[test]
 fn returned_values_require_type_metadata_and_a_definition() {
-    let mut module = returning_bool(Type::I1);
+    let mut module = returning_bool(Type::Bool);
     module.functions[0].value_types.clear();
     assert!(matches!(
         ir::verify_module(&module),
@@ -63,7 +63,7 @@ fn returned_values_require_type_metadata_and_a_definition() {
         })
     ));
     module.functions[0].blocks[0].terminator = Some(Terminator::Ret {
-        ty: Type::I1,
+        ty: Type::Bool,
         value: Some(ValueId(999)),
     });
     assert!(matches!(
@@ -137,7 +137,7 @@ fn valid_parameter_returns_and_wrong_terminator_annotations() {
 
 #[test]
 fn entry_must_exist_in_a_nonempty_function_definition() {
-    let mut module = returning_bool(Type::I1);
+    let mut module = returning_bool(Type::Bool);
     module.functions[0].entry = BlockId(999);
     assert!(matches!(
         ir::verify_module(&module),
@@ -155,7 +155,7 @@ fn entry_must_exist_in_a_nonempty_function_definition() {
 
 #[test]
 fn every_branch_and_switch_destination_must_exist() {
-    let mut module = returning_bool(Type::I1);
+    let mut module = returning_bool(Type::Bool);
     let here = module.functions[0].entry;
     let missing = BlockId(999);
     for terminator in [
@@ -171,13 +171,13 @@ fn every_branch_and_switch_destination_must_exist() {
             else_bb: missing,
         },
         Terminator::Switch {
-            ty: Type::I1,
+            ty: Type::Bool,
             value: ValueId(0),
             default_bb: missing,
             cases: vec![],
         },
         Terminator::Switch {
-            ty: Type::I1,
+            ty: Type::Bool,
             value: ValueId(0),
             default_bb: here,
             cases: vec![(ConstValue::Bool(true), missing)],
@@ -193,7 +193,7 @@ fn every_branch_and_switch_destination_must_exist() {
         ));
     }
     module.functions[0].blocks[0].terminator = Some(Terminator::Switch {
-        ty: Type::I1,
+        ty: Type::Bool,
         value: ValueId(0),
         default_bb: here,
         cases: vec![(ConstValue::Bool(true), here)],
