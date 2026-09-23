@@ -6,3 +6,4 @@ target/
 
 .ci-artifacts/
 __pycache__/
+/docs/

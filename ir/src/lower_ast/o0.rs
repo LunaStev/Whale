@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{BlockId, ConstValue, DataLayout, Module, ModuleBuilder, Type, ValueId};
 
@@ -25,6 +25,22 @@ pub fn lower_o0(
     datalayout: DataLayout,
 ) -> Result<Module, LowerError> {
     let ptr_bits = datalayout.ptr_bits;
+    // Functions and globals have separate namespaces. Validate each before bodies.
+    let mut functions = HashSet::new();
+    for f in &program.functions {
+        if !functions.insert(&f.name) {
+            return Err(LowerError::DuplicateFunction(f.name.clone()));
+        }
+        let mut parameters = HashSet::new();
+        for p in &f.parameters {
+            if !parameters.insert(&p.name) {
+                return Err(LowerError::DuplicateParameter {
+                    func: f.name.clone(),
+                    param: p.name.clone(),
+                });
+            }
+        }
+    }
     let mut mb = ModuleBuilder::new(target, datalayout);
 
     let mut gconsts: ConstMap = HashMap::new();
@@ -132,6 +148,9 @@ fn lower_stmt_o0(
     match stmt {
         frontend::Stmt::Return(opt) => {
             if *func_ret_ty == Type::Void {
+                if opt.is_some() {
+                    return Err(LowerError::ValueReturnedFromVoid);
+                }
                 fb.ret(None);
                 return Ok(());
             }
@@ -238,9 +257,9 @@ fn lower_stmt_o0(
             else_body,
         } => {
             let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, ptr_bits)?;
-            if cty != Type::I1 {
+            if cty != Type::Bool {
                 return Err(LowerError::TypeMismatch {
-                    expected: Type::I1,
+                    expected: Type::Bool,
                     got: cty,
                 });
             }
@@ -302,9 +321,9 @@ fn lower_stmt_o0(
             // cond
             fb.set_insert_point(cond_bb);
             let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, ptr_bits)?;
-            if cty != Type::I1 {
+            if cty != Type::Bool {
                 return Err(LowerError::TypeMismatch {
-                    expected: Type::I1,
+                    expected: Type::Bool,
                     got: cty,
                 });
             }
@@ -419,7 +438,7 @@ fn lower_expr_o0(
 
             let cmp = super::support::map_cmp(*op, &lty)?;
             let out = fb.cmp(cmp, lty.clone(), lv, rv);
-            Ok((out, Type::I1))
+            Ok((out, Type::Bool))
         }
     }
 }
@@ -495,28 +514,35 @@ fn eval_const_expr(
             }
 
             let b = const_cmp(*op, &lt, &lv, &rv)?;
-            Ok((Type::I1, ConstValue::Bool(b)))
+            Ok((Type::Bool, ConstValue::Bool(b)))
         }
     }
 }
 
 fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
     Ok(match l {
-        frontend::Lit::Bool(b) => (Type::I1, ConstValue::Bool(*b)),
+        frontend::Lit::Bool(b) => (Type::Bool, ConstValue::Bool(*b)),
         frontend::Lit::Int {
             bits,
             signed,
             value,
         } => {
             let ty = super::support::int_type(*bits, *signed)?;
-            if *signed {
-                (ty.clone(), ConstValue::I(wrap_i(*value, &ty)))
+            let payload = if *signed {
+                ConstValue::I(*value)
             } else {
                 if *value < 0 {
-                    return Err(LowerError::UnsupportedExpr);
+                    return Err(LowerError::InvalidLiteral {
+                        ty,
+                        value: ConstValue::I(*value),
+                    });
                 }
-                (ty.clone(), ConstValue::U(wrap_u(*value as u128, &ty)))
+                ConstValue::U(*value as u128)
+            };
+            if !crate::constant::valid_constant(&ty, &payload) {
+                return Err(LowerError::InvalidLiteral { ty, value: payload });
             }
+            (ty, payload)
         }
         frontend::Lit::Float { bits, value } => {
             let ty = super::support::float_type(*bits)?;
@@ -527,7 +553,7 @@ fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
 
 fn ty_int_bits(ty: &Type) -> Option<u32> {
     Some(match ty {
-        Type::I1 => 1,
+        Type::I1 | Type::U1 => 1,
         Type::I8 | Type::U8 => 8,
         Type::I16 | Type::U16 => 16,
         Type::I32 | Type::U32 => 32,
@@ -540,7 +566,7 @@ fn ty_int_bits(ty: &Type) -> Option<u32> {
 fn is_signed_int(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
     )
 }
 
@@ -589,7 +615,7 @@ fn const_bin(
     }
 
     // int
-    if ty_int_bits(ty).is_some() && !matches!(ty, Type::I1) {
+    if ty_int_bits(ty).is_some() && !matches!(ty, Type::Bool) {
         if is_signed_int(ty) {
             let (ConstValue::I(a), ConstValue::I(b)) = (l, r) else {
                 return Err(LowerError::UnsupportedExpr);
@@ -637,8 +663,8 @@ fn const_cmp(
         });
     }
 
-    // bool(i1)은 eq/ne만
-    if matches!(ty, Type::I1) {
+    // bool은 eq/ne만
+    if matches!(ty, Type::Bool) {
         let (ConstValue::Bool(a), ConstValue::Bool(b)) = (l, r) else {
             return Err(LowerError::UnsupportedExpr);
         };
@@ -650,7 +676,7 @@ fn const_cmp(
     }
 
     // int
-    if ty_int_bits(ty).is_some() && !matches!(ty, Type::I1) {
+    if ty_int_bits(ty).is_some() && !matches!(ty, Type::Bool) {
         if is_signed_int(ty) {
             let (ConstValue::I(a), ConstValue::I(b)) = (l, r) else {
                 return Err(LowerError::UnsupportedExpr);
@@ -685,26 +711,12 @@ fn lower_lit_o0(
     fb: &mut crate::FunctionBuilder<'_>,
     lit: &frontend::Lit,
 ) -> Result<(ValueId, Type), LowerError> {
-    match lit {
-        frontend::Lit::Bool(b) => Ok((fb.const_bool(*b), Type::I1)),
-        frontend::Lit::Int {
-            bits,
-            signed,
-            value,
-        } => {
-            let ty = super::support::int_type(*bits, *signed)?;
-            if *signed {
-                Ok((fb.const_int(ty.clone(), wrap_i(*value, &ty)), ty))
-            } else {
-                if *value < 0 {
-                    return Err(LowerError::UnsupportedExpr);
-                }
-                Ok((fb.const_uint(ty.clone(), wrap_u(*value as u128, &ty)), ty))
-            }
-        }
-        frontend::Lit::Float { bits, value } => {
-            let ty = super::support::float_type(*bits)?;
-            Ok((fb.const_float(ty.clone(), *value), ty))
-        }
-    }
+    let (ty, value) = lit_to_const(lit)?;
+    let id = match value {
+        ConstValue::Bool(v) => fb.const_bool(v),
+        ConstValue::I(v) => fb.const_int(ty.clone(), v),
+        ConstValue::U(v) => fb.const_uint(ty.clone(), v),
+        ConstValue::F(v) => fb.const_float(ty.clone(), v),
+    };
+    Ok((id, ty))
 }

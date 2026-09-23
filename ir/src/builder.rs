@@ -173,10 +173,10 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn const_bool(&mut self, v: bool) -> ValueId {
-        let dst = self.define_value(Type::I1);
+        let dst = self.define_value(Type::Bool);
         self.cur_block_mut().instructions.push(Instruction::Const {
             dst,
-            ty: Type::I1,
+            ty: Type::Bool,
             value: ConstValue::Bool(v),
         });
         dst
@@ -217,7 +217,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn icmp(&mut self, pred: ICmpPred, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let dst = self.define_value(Type::I1);
+        let dst = self.define_value(Type::Bool);
         self.cur_block_mut().instructions.push(Instruction::ICmp {
             dst,
             pred,
@@ -229,7 +229,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn cmp(&mut self, op: CmpOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let dst = self.define_value(Type::I1);
+        let dst = self.define_value(Type::Bool);
         self.cur_block_mut().instructions.push(Instruction::Cmp {
             dst,
             op,
@@ -241,7 +241,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn checked(&mut self, op: CheckedOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let dst_ty = Type::Tuple(vec![ty.clone(), Type::I1]);
+        let dst_ty = Type::Tuple(vec![ty.clone(), Type::Bool]);
         let dst = self.define_value(dst_ty);
         self.cur_block_mut()
             .instructions

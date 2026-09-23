@@ -88,7 +88,7 @@ pub enum BinOp {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CheckedOp {
-    // returns tuple<T, i1>
+    // returns tuple<T, bool>
     UAdd,
     USub,
     UMul,

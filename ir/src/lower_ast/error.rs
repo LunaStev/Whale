@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::Type;
+use crate::{ConstValue, Type};
 
 #[derive(Debug)]
 pub enum LowerError {
@@ -13,6 +13,10 @@ pub enum LowerError {
     BreakOutsideLoop,
     ContinueOutsideLoop,
     DuplicateGlobal(String),
+    DuplicateFunction(String),
+    DuplicateParameter { func: String, param: String },
+    ValueReturnedFromVoid,
+    InvalidLiteral { ty: Type, value: ConstValue },
     AssignToConst(String),
     NonConstExpr,
 }

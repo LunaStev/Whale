@@ -2,6 +2,7 @@
 
 pub mod block;
 pub mod builder;
+mod constant;
 pub mod function;
 pub mod instr;
 pub mod module;
@@ -219,7 +220,7 @@ mod tests {
         let s = printer::print_module(&module);
         assert!(s.contains("fn @max"));
         assert!(s.contains("cmp sgt i32"));
-        assert!(s.contains("cbr i1"));
+        assert!(s.contains("cbr bool"));
         assert!(s.contains("ret i32"));
     }
     #[test]
@@ -300,7 +301,7 @@ mod tests {
         assert!(txt.contains("while.cond:"));
         assert!(txt.contains("while.body:"));
         assert!(txt.contains("while.exit:"));
-        assert!(txt.contains("cbr i1"));
+        assert!(txt.contains("cbr bool"));
         assert!(txt.contains("ret i32"));
     }
     #[test]

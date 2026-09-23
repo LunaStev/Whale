@@ -27,7 +27,9 @@ impl DataLayout {
 pub enum Type {
     Void,
 
+    Bool,
     I1,
+    U1,
     I8,
     I16,
     I32,
@@ -61,7 +63,9 @@ impl fmt::Display for Type {
         match self {
             Type::Void => write!(f, "void"),
 
+            Type::Bool => write!(f, "bool"),
             Type::I1 => write!(f, "i1"),
+            Type::U1 => write!(f, "u1"),
             Type::I8 => write!(f, "i8"),
             Type::I16 => write!(f, "i16"),
             Type::I32 => write!(f, "i32"),
