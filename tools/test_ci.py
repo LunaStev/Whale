@@ -14,10 +14,10 @@ from ci_smoke import text_section
 
 
 class RunnerTests(unittest.TestCase):
-    def execute(self, source, timeout=10, max_bytes=1024):
+    def execute(self, source, timeout=10, max_bytes=1024, console=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with contextlib.redirect_stdout(io.StringIO()):
+            with contextlib.redirect_stdout(console if console is not None else io.StringIO()):
                 code = run([sys.executable, "-c", source], "check", timeout, root, max_bytes)
             return code, (root / "check.log").read_bytes(), json.loads(
                 (root / "check.json").read_text(encoding="utf-8")
@@ -42,6 +42,38 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(log), 256)
         self.assertTrue(data["log_truncated"])
+
+    def test_utf8_output_survives_read_boundaries(self):
+        for character in ["é", "고", "🐋"]:
+            for split in range(1, len(character.encode())):
+                with self.subTest(character=character, split=split):
+                    payload = "x" * (8192 - split) + character + "END"
+                    console = io.StringIO()
+                    code, log, data = self.execute(
+                        f"import sys; sys.stdout.buffer.write({payload.encode()!r})",
+                        max_bytes=16384, console=console,
+                    )
+                    self.assertEqual(code, 0)
+                    self.assertEqual(log, payload.encode())
+                    self.assertTrue(console.getvalue().startswith(payload))
+                    self.assertFalse(data["errors"])
+
+    def test_incomplete_or_invalid_utf8_is_replaced_only_on_console(self):
+        for payload, limit, expected, truncated in [
+            (b"ok\xffend", 1024, "ok\ufffdend", False),
+            (b"ok\xf0\x9f", 1024, "ok\ufffd", False),
+            ("고래".encode(), 4, "고\ufffd", True),
+        ]:
+            with self.subTest(payload=payload, limit=limit):
+                console = io.StringIO()
+                code, log, data = self.execute(
+                    f"import sys; sys.stdout.buffer.write({payload!r})",
+                    max_bytes=limit, console=console,
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(log, payload[:limit])
+                self.assertTrue(console.getvalue().startswith(expected + "{"))
+                self.assertEqual(data["log_truncated"], truncated)
 
     def test_missing_program_fails_with_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
