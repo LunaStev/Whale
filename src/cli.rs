@@ -18,6 +18,7 @@ pub fn run() {
         _ => {
             eprintln!("Unknown command: {}", cmd);
             print_help();
+            std::process::exit(2);
         }
     }
 }

@@ -106,7 +106,7 @@ pub fn run(args: Vec<String>) {
 
     // 6) output
     if let Some(out) = output {
-        fs::write(&out, txt.as_bytes()).unwrap_or_else(|e| {
+        super::output::publish(input.as_ref(), out.as_ref(), txt.as_bytes()).unwrap_or_else(|e| {
             eprintln!("Failed to write {}: {}", out, e);
             process::exit(1);
         });

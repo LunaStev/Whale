@@ -23,3 +23,5 @@ assembler = { path = "assembler" }
 object = { path = "object" }
 ir = { path = "ir", version = "0.1.0", default-features = false }
 serde_json = { version = "1", optional = true }
+same-file = "1"
+tempfile = "3"

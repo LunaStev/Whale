@@ -1,6 +1,7 @@
 pub mod asm;
 pub mod linker;
 pub mod object;
+mod output;
 
 #[cfg(feature = "socket-cli")]
 pub mod ir;

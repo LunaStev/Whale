@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::core::object::ObjectFile;
 use crate::core::reloc::RelocKind;
@@ -148,6 +148,12 @@ struct SymBuild {
 
 pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     for section in &obj.sections {
+        if section.kind == SectionKind::Bss && section.data.iter().any(|byte| *byte != 0) {
+            return Err(format!(
+                "BSS section {:?} has a nonzero initializer",
+                section.name
+            ));
+        }
         if section.name.contains('\0') {
             return Err(format!(
                 "section name {:?} contains embedded NUL byte",
@@ -163,12 +169,36 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         }
     }
 
+    // Relocations in the current object API name symbols by string. Until typed
+    // symbol references are available, duplicate names are ambiguous even when
+    // their metadata happens to agree.
+    let mut symbol_names = HashSet::new();
     for sym in &obj.symbols {
         if sym.name.contains('\0') {
             return Err(format!(
                 "symbol name {:?} contains embedded NUL byte",
                 sym.name
             ));
+        }
+        if !symbol_names.insert(&sym.name) {
+            return Err(format!("duplicate symbol name {:?}", sym.name));
+        }
+        if let Some(index) = sym.section_index {
+            let section = obj.sections.get(index).ok_or_else(|| {
+                format!("symbol {:?} references invalid section {index}", sym.name)
+            })?;
+            let end = sym
+                .value
+                .checked_add(sym.size)
+                .ok_or_else(|| format!("symbol range overflow for {:?}", sym.name))?;
+            if end > section.data.len() as u64 {
+                return Err(format!(
+                    "symbol range for {:?} exceeds section {:?} size {}",
+                    sym.name,
+                    section.name,
+                    section.data.len()
+                ));
+            }
         }
     }
 

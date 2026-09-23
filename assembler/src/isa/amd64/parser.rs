@@ -364,7 +364,10 @@ where
                     *pos += 1;
                 }
                 TokenKind::Number(n) => {
-                    let term = ExprValue::Number(sign * *n);
+                    let term =
+                        ExprValue::Number(sign.checked_mul(*n).ok_or_else(|| {
+                            parser_err(tokens, *pos, "Signed expression overflow")
+                        })?);
                     acc = Some(combine_expr(tokens, *pos, acc, term)?);
                     *pos += 1;
                     sign = 1;
@@ -431,14 +434,22 @@ fn combine_expr(
 ) -> Result<ExprValue, AsmError> {
     match (left, right) {
         (None, r) => Ok(r),
-        (Some(ExprValue::Number(a)), ExprValue::Number(b)) => Ok(ExprValue::Number(a + b)),
+        (Some(ExprValue::Number(a)), ExprValue::Number(b)) => {
+            Ok(ExprValue::Number(a.checked_add(b).ok_or_else(|| {
+                parser_err(tokens, pos, "Signed expression overflow")
+            })?))
+        }
         (Some(ExprValue::Number(a)), ExprValue::Symbol { name, addend }) => Ok(ExprValue::Symbol {
             name,
-            addend: addend + a,
+            addend: addend
+                .checked_add(a)
+                .ok_or_else(|| parser_err(tokens, pos, "Symbol addend overflow"))?,
         }),
         (Some(ExprValue::Symbol { name, addend }), ExprValue::Number(b)) => Ok(ExprValue::Symbol {
             name,
-            addend: addend + b,
+            addend: addend
+                .checked_add(b)
+                .ok_or_else(|| parser_err(tokens, pos, "Symbol addend overflow"))?,
         }),
         (Some(ExprValue::Symbol { .. }), ExprValue::Symbol { .. }) => Err(parser_err(
             tokens,

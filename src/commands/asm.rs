@@ -154,7 +154,7 @@ pub fn run(args: Vec<String>) {
         process::exit(1);
     });
 
-    fs::write(&output, &final_bytes).unwrap_or_else(|e| {
+    super::output::publish(input.as_ref(), output.as_ref(), &final_bytes).unwrap_or_else(|e| {
         eprintln!("Failed to write {}: {}", output, e);
         process::exit(1);
     });
@@ -237,7 +237,8 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
             let kind = match reloc.kind {
                 assembler::assembler::RelocKind::Absolute64 => ObjectRelocKind::Absolute64,
                 assembler::assembler::RelocKind::Absolute32 => ObjectRelocKind::Absolute32,
-                assembler::assembler::RelocKind::Relative32 => {
+                assembler::assembler::RelocKind::Relative32 => ObjectRelocKind::Relative32,
+                assembler::assembler::RelocKind::Branch32 => {
                     if is_undefined_symbol {
                         ObjectRelocKind::PLT32
                     } else {
