@@ -22,12 +22,14 @@ pub fn print_module(m: &Module) -> String {
 
     for g in &m.globals {
         out.push_str(&format!(
-            "  global @{}: {} = const {} {}, align {}\n",
+            "  global @{}: {} = const {} {}, align {}, id @g{}, init_expr {}\n",
             g.name,
             g.ty,
             g.ty,
             fmt_const(&g.init),
-            g.align
+            g.align,
+            g.id.0,
+            print_const_expr(&g.init_expr)
         ));
     }
     if !m.globals.is_empty() {
@@ -84,6 +86,19 @@ fn print_block(b: &BasicBlock) -> String {
 fn print_instr(i: &Instruction) -> String {
     use Instruction::*;
     match i {
+        ConstDecl {
+            dst,
+            name,
+            expression,
+            value,
+        } => format!(
+            "{dst}: {} = const_decl \"{}\" {} => const {} {}",
+            expression.ty,
+            escape(name),
+            print_const_expr(expression),
+            expression.ty,
+            fmt_const(value)
+        ),
         Const { dst, ty, value } => format!("{dst}: {ty} = const {ty} {}", fmt_const(value)),
         Undef { dst, ty } => format!("{dst}: {ty} = undef {ty}"),
         Mov { dst, ty, src } => format!("{dst}: {ty} = mov {ty} {src}"),
@@ -229,6 +244,40 @@ fn print_instr(i: &Instruction) -> String {
         }
 
         TrapIf { cond, reason } => format!("trap_if bool {cond}, reason=\"{}\"", escape(reason)),
+    }
+}
+
+pub fn print_const_expr(expr: &crate::ConstExpr) -> String {
+    use crate::{ConstBinaryOp as B, ConstCompareOp as C, ConstExprKind as K, ConstRef};
+    match &expr.kind {
+        K::Literal(value) => format!("{} {}", expr.ty, fmt_const(value)),
+        K::Reference(reference) => match reference {
+            ConstRef::Global(id) => format!("{} @g{}", expr.ty, id.0),
+            ConstRef::Local(id) => format!("{} {id}", expr.ty),
+        },
+        K::Binary { op, left, right } => format!(
+            "{}({}, {})",
+            match op {
+                B::Add => "add",
+                B::Sub => "sub",
+                B::Mul => "mul",
+            },
+            print_const_expr(left),
+            print_const_expr(right)
+        ),
+        K::Compare { op, left, right } => format!(
+            "{}({}, {})",
+            match op {
+                C::Eq => "eq",
+                C::Ne => "ne",
+                C::Lt => "lt",
+                C::Le => "le",
+                C::Gt => "gt",
+                C::Ge => "ge",
+            },
+            print_const_expr(left),
+            print_const_expr(right)
+        ),
     }
 }
 

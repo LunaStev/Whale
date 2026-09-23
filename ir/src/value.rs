@@ -2,6 +2,10 @@
 
 use core::fmt;
 
+/// Stable identity of a global inside one module, independent of its name/order.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct GlobalId(pub u32);
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ValueId(pub u32);
 

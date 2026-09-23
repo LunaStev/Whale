@@ -2,6 +2,7 @@
 
 pub mod block;
 pub mod builder;
+pub mod const_expr;
 mod constant;
 pub mod function;
 pub mod instr;
@@ -21,6 +22,7 @@ pub use lower_ast::*;
 
 pub use block::*;
 pub use builder::*;
+pub use const_expr::*;
 pub use function::*;
 pub use instr::*;
 pub use module::*;

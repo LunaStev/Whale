@@ -2,7 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{BlockId, ConstValue, DataLayout, Module, ModuleBuilder, Type, ValueId};
+use crate::{
+    BlockId, ConstBinaryOp, ConstCompareOp, ConstExpr, ConstExprKind, ConstRef, ConstValue,
+    DataLayout, GlobalId, Module, ModuleBuilder, Type, ValueId,
+};
 
 use super::{
     binding::Binding,
@@ -17,7 +20,7 @@ struct LoopCtx {
     exit_bb: BlockId,
 }
 
-type ConstMap = HashMap<String, (Type, ConstValue)>;
+type ConstMap = HashMap<String, (GlobalId, Type, ConstValue)>;
 
 pub fn lower_o0(
     program: &frontend::Program,
@@ -50,7 +53,7 @@ pub fn lower_o0(
         }
 
         let decl_ty = socket_type_to_whale(&g.ty)?;
-        let (vty, v) = eval_const_expr(
+        let (expression, v) = eval_const_expr(
             &g.init,
             &ConstEvalCtx {
                 local_consts: None,
@@ -58,6 +61,7 @@ pub fn lower_o0(
             },
         )?;
 
+        let vty = expression.ty.clone();
         if vty != decl_ty {
             return Err(LowerError::TypeMismatch {
                 expected: decl_ty,
@@ -66,8 +70,8 @@ pub fn lower_o0(
         }
 
         let align = align_of(&vty, ptr_bits);
-        mb.add_global(g.name.clone(), vty.clone(), v.clone(), align);
-        gconsts.insert(g.name.clone(), (vty, v));
+        let id = mb.add_global_const(g.name.clone(), expression, v.clone(), align);
+        gconsts.insert(g.name.clone(), (id, vty, v));
     }
 
     for f in &program.functions {
@@ -142,7 +146,11 @@ fn lower_stmt_o0(
     ptr_bits: u32,
 ) -> Result<(), LowerError> {
     if fb.is_current_block_terminated() {
-        return Ok(());
+        // Keep source statements after return/break/continue visible at O0.
+        // A new block has no incoming edge from the terminated block, so the
+        // preserved statements cannot change the original execution path.
+        let dead = fb.create_block("unreachable.cont");
+        fb.set_insert_point(dead);
     }
 
     match stmt {
@@ -172,7 +180,7 @@ fn lower_stmt_o0(
         frontend::Stmt::ConstDecl { name, ty, init } => {
             let decl_ty = socket_type_to_whale(ty)?;
 
-            let (cty, cv) = eval_const_expr(
+            let (expression, cv) = eval_const_expr(
                 init,
                 &ConstEvalCtx {
                     local_consts: Some(env),
@@ -180,6 +188,7 @@ fn lower_stmt_o0(
                 },
             )?;
 
+            let cty = expression.ty.clone();
             if cty != decl_ty {
                 return Err(LowerError::TypeMismatch {
                     expected: decl_ty,
@@ -187,7 +196,15 @@ fn lower_stmt_o0(
                 });
             }
 
-            env.insert(name.clone(), Binding::Const { ty: cty, value: cv });
+            let id = fb.const_decl(name.clone(), expression, cv.clone());
+            env.insert(
+                name.clone(),
+                Binding::Const {
+                    id,
+                    ty: cty,
+                    value: cv,
+                },
+            );
             Ok(())
         }
 
@@ -392,14 +409,11 @@ fn lower_expr_o0(
                         let v = fb.load(ty.clone(), ptr, align);
                         Ok((v, ty))
                     }
-                    Binding::Const { ty, value } => {
-                        let v = emit_const_value(fb, &ty, &value);
-                        Ok((v, ty))
-                    }
+                    Binding::Const { id, ty, .. } => Ok((id, ty)),
                 };
             }
 
-            if let Some((ty, value)) = global_consts.get(name).cloned() {
+            if let Some((_, ty, value)) = global_consts.get(name).cloned() {
                 let v = emit_const_value(fb, &ty, &value);
                 return Ok((v, ty));
             }
@@ -463,58 +477,98 @@ struct ConstEvalCtx<'a> {
 fn eval_const_expr(
     expr: &frontend::Expr,
     ctx: &ConstEvalCtx<'_>,
-) -> Result<(Type, ConstValue), LowerError> {
+) -> Result<(ConstExpr, ConstValue), LowerError> {
+    let expression = preserve_const_expr(expr, ctx)?;
+    let value = expression
+        .evaluate(&|reference| match reference {
+            ConstRef::Global(id) => ctx
+                .global_consts
+                .values()
+                .find(|(other, _, _)| *other == id)
+                .map(|(_, ty, value)| (ty.clone(), value.clone())),
+            ConstRef::Local(id) => ctx.local_consts.and_then(|env| {
+                env.values().find_map(|binding| match binding {
+                    Binding::Const {
+                        id: other,
+                        ty,
+                        value,
+                    } if *other == id => Some((ty.clone(), value.clone())),
+                    _ => None,
+                })
+            }),
+        })
+        .map_err(|_| LowerError::UnsupportedExpr)?;
+    Ok((expression, value))
+}
+
+fn preserve_const_expr(
+    expr: &frontend::Expr,
+    ctx: &ConstEvalCtx<'_>,
+) -> Result<ConstExpr, LowerError> {
     match expr {
-        frontend::Expr::Lit(l) => lit_to_const(l),
-
+        frontend::Expr::Lit(literal) => {
+            let (ty, value) = lit_to_const(literal)?;
+            Ok(ConstExpr::literal(ty, value))
+        }
         frontend::Expr::Var(name) => {
-            // local const 우선
-            if let Some(env) = ctx.local_consts {
-                if let Some(Binding::Const { ty, value }) = env.get(name) {
-                    return Ok((ty.clone(), value.clone()));
-                }
-                // Addr면 const-eval에서 못 씀
-                if env.contains_key(name) {
-                    return Err(LowerError::NonConstExpr);
-                }
+            if let Some(binding) = ctx.local_consts.and_then(|env| env.get(name)) {
+                return match binding {
+                    Binding::Const { id, ty, .. } => Ok(ConstExpr {
+                        ty: ty.clone(),
+                        kind: ConstExprKind::Reference(ConstRef::Local(*id)),
+                    }),
+                    Binding::Addr { .. } => Err(LowerError::NonConstExpr),
+                };
             }
-
-            // global const
-            if let Some((ty, v)) = ctx.global_consts.get(name) {
-                return Ok((ty.clone(), v.clone()));
-            }
-
-            Err(LowerError::UnknownVariable(name.clone()))
+            let (id, ty, _) = ctx
+                .global_consts
+                .get(name)
+                .ok_or_else(|| LowerError::UnknownVariable(name.clone()))?;
+            Ok(ConstExpr {
+                ty: ty.clone(),
+                kind: ConstExprKind::Reference(ConstRef::Global(*id)),
+            })
         }
-
         frontend::Expr::Binary { left, op, right } => {
-            let (lv_ty, lv) = eval_const_expr(left, ctx)?;
-            let (rv_ty, rv) = eval_const_expr(right, ctx)?;
-
-            if lv_ty != rv_ty {
+            let left = Box::new(preserve_const_expr(left, ctx)?);
+            let right = Box::new(preserve_const_expr(right, ctx)?);
+            if left.ty != right.ty {
                 return Err(LowerError::TypeMismatch {
-                    expected: lv_ty,
-                    got: rv_ty,
+                    expected: left.ty,
+                    got: right.ty,
                 });
             }
-
-            let out = const_bin(*op, &lv_ty, &lv, &rv)?;
-            Ok((lv_ty, out))
+            let op = match op {
+                frontend::BinOpRef::Add => ConstBinaryOp::Add,
+                frontend::BinOpRef::Sub => ConstBinaryOp::Sub,
+                frontend::BinOpRef::Mul => ConstBinaryOp::Mul,
+            };
+            Ok(ConstExpr {
+                ty: left.ty.clone(),
+                kind: ConstExprKind::Binary { op, left, right },
+            })
         }
-
         frontend::Expr::Cmp { left, op, right } => {
-            let (lt, lv) = eval_const_expr(left, ctx)?;
-            let (rt, rv) = eval_const_expr(right, ctx)?;
-
-            if lt != rt {
+            let left = Box::new(preserve_const_expr(left, ctx)?);
+            let right = Box::new(preserve_const_expr(right, ctx)?);
+            if left.ty != right.ty {
                 return Err(LowerError::TypeMismatch {
-                    expected: lt,
-                    got: rt,
+                    expected: left.ty,
+                    got: right.ty,
                 });
             }
-
-            let b = const_cmp(*op, &lt, &lv, &rv)?;
-            Ok((Type::Bool, ConstValue::Bool(b)))
+            let op = match op {
+                frontend::CmpOpRef::Eq => ConstCompareOp::Eq,
+                frontend::CmpOpRef::Ne => ConstCompareOp::Ne,
+                frontend::CmpOpRef::Lt => ConstCompareOp::Lt,
+                frontend::CmpOpRef::Le => ConstCompareOp::Le,
+                frontend::CmpOpRef::Gt => ConstCompareOp::Gt,
+                frontend::CmpOpRef::Ge => ConstCompareOp::Ge,
+            };
+            Ok(ConstExpr {
+                ty: Type::Bool,
+                kind: ConstExprKind::Compare { op, left, right },
+            })
         }
     }
 }
@@ -549,162 +603,6 @@ fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
             (ty, ConstValue::F(*value))
         }
     })
-}
-
-fn ty_int_bits(ty: &Type) -> Option<u32> {
-    Some(match ty {
-        Type::I1 | Type::U1 => 1,
-        Type::I8 | Type::U8 => 8,
-        Type::I16 | Type::U16 => 16,
-        Type::I32 | Type::U32 => 32,
-        Type::I64 | Type::U64 => 64,
-        Type::I128 | Type::U128 => 128,
-        _ => return None,
-    })
-}
-
-fn is_signed_int(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-    )
-}
-
-fn wrap_u(v: u128, ty: &Type) -> u128 {
-    let bits = ty_int_bits(ty).unwrap_or(128);
-    if bits >= 128 {
-        return v;
-    }
-    let mask = (1u128 << bits) - 1;
-    v & mask
-}
-
-fn wrap_i(v: i128, ty: &Type) -> i128 {
-    let bits = ty_int_bits(ty).unwrap_or(128);
-    if bits >= 128 {
-        return v;
-    }
-    let mask = (1u128 << bits) - 1;
-    let u = (v as u128) & mask;
-    let sign = 1u128 << (bits - 1);
-    if (u & sign) != 0 {
-        // sign-extend
-        (u | (!mask)) as i128
-    } else {
-        u as i128
-    }
-}
-
-fn const_bin(
-    op: frontend::BinOpRef,
-    ty: &Type,
-    l: &ConstValue,
-    r: &ConstValue,
-) -> Result<ConstValue, LowerError> {
-    // float
-    if matches!(ty, Type::F16 | Type::F32 | Type::F64) {
-        let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
-            return Err(LowerError::UnsupportedExpr);
-        };
-        let out = match op {
-            frontend::BinOpRef::Add => a + b,
-            frontend::BinOpRef::Sub => a - b,
-            frontend::BinOpRef::Mul => a * b,
-        };
-        return Ok(ConstValue::F(out));
-    }
-
-    // int
-    if ty_int_bits(ty).is_some() && !matches!(ty, Type::Bool) {
-        if is_signed_int(ty) {
-            let (ConstValue::I(a), ConstValue::I(b)) = (l, r) else {
-                return Err(LowerError::UnsupportedExpr);
-            };
-            let raw = match op {
-                frontend::BinOpRef::Add => a.wrapping_add(*b),
-                frontend::BinOpRef::Sub => a.wrapping_sub(*b),
-                frontend::BinOpRef::Mul => a.wrapping_mul(*b),
-            };
-            return Ok(ConstValue::I(wrap_i(raw, ty)));
-        } else {
-            let (ConstValue::U(a), ConstValue::U(b)) = (l, r) else {
-                return Err(LowerError::UnsupportedExpr);
-            };
-            let raw = match op {
-                frontend::BinOpRef::Add => a.wrapping_add(*b),
-                frontend::BinOpRef::Sub => a.wrapping_sub(*b),
-                frontend::BinOpRef::Mul => a.wrapping_mul(*b),
-            };
-            return Ok(ConstValue::U(wrap_u(raw, ty)));
-        }
-    }
-
-    Err(LowerError::UnsupportedExpr)
-}
-
-fn const_cmp(
-    op: frontend::CmpOpRef,
-    ty: &Type,
-    l: &ConstValue,
-    r: &ConstValue,
-) -> Result<bool, LowerError> {
-    // float
-    if matches!(ty, Type::F16 | Type::F32 | Type::F64) {
-        let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
-            return Err(LowerError::UnsupportedExpr);
-        };
-        return Ok(match op {
-            frontend::CmpOpRef::Eq => a == b,
-            frontend::CmpOpRef::Ne => a != b,
-            frontend::CmpOpRef::Lt => a < b,
-            frontend::CmpOpRef::Le => a <= b,
-            frontend::CmpOpRef::Gt => a > b,
-            frontend::CmpOpRef::Ge => a >= b,
-        });
-    }
-
-    // bool은 eq/ne만
-    if matches!(ty, Type::Bool) {
-        let (ConstValue::Bool(a), ConstValue::Bool(b)) = (l, r) else {
-            return Err(LowerError::UnsupportedExpr);
-        };
-        return Ok(match op {
-            frontend::CmpOpRef::Eq => a == b,
-            frontend::CmpOpRef::Ne => a != b,
-            _ => return Err(LowerError::UnsupportedExpr),
-        });
-    }
-
-    // int
-    if ty_int_bits(ty).is_some() && !matches!(ty, Type::Bool) {
-        if is_signed_int(ty) {
-            let (ConstValue::I(a), ConstValue::I(b)) = (l, r) else {
-                return Err(LowerError::UnsupportedExpr);
-            };
-            return Ok(match op {
-                frontend::CmpOpRef::Eq => a == b,
-                frontend::CmpOpRef::Ne => a != b,
-                frontend::CmpOpRef::Lt => a < b,
-                frontend::CmpOpRef::Le => a <= b,
-                frontend::CmpOpRef::Gt => a > b,
-                frontend::CmpOpRef::Ge => a >= b,
-            });
-        } else {
-            let (ConstValue::U(a), ConstValue::U(b)) = (l, r) else {
-                return Err(LowerError::UnsupportedExpr);
-            };
-            return Ok(match op {
-                frontend::CmpOpRef::Eq => a == b,
-                frontend::CmpOpRef::Ne => a != b,
-                frontend::CmpOpRef::Lt => a < b,
-                frontend::CmpOpRef::Le => a <= b,
-                frontend::CmpOpRef::Gt => a > b,
-                frontend::CmpOpRef::Ge => a >= b,
-            });
-        }
-    }
-
-    Err(LowerError::UnsupportedExpr)
 }
 
 fn lower_lit_o0(

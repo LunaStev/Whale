@@ -4,8 +4,59 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{BlockId, ConstValue, Instruction, Module, Terminator, Type, ValueId};
 
+mod cfg;
+mod constants;
+mod operands;
+
 #[derive(Debug)]
 pub enum VerifyError {
+    InvalidConstExpression {
+        scope: String,
+        declaration: crate::ConstRef,
+        reason: crate::ConstEvalError,
+    },
+    NonDominatingValue {
+        func: String,
+        value: ValueId,
+        block: BlockId,
+    },
+    InvalidPhi {
+        func: String,
+        block: BlockId,
+        value: ValueId,
+        reason: &'static str,
+    },
+    InvalidGep {
+        func: String,
+        value: ValueId,
+        index: Option<usize>,
+        reason: &'static str,
+    },
+    InvalidInstructionType {
+        func: String,
+        operation: &'static str,
+        ty: Type,
+    },
+    OperandTypeMismatch {
+        func: String,
+        value: ValueId,
+        expected: Type,
+        got: Type,
+    },
+    InvalidMemoryAlignment {
+        func: String,
+        align: u32,
+    },
+    InvalidSwitchCase {
+        func: String,
+        block: BlockId,
+        index: usize,
+    },
+    DuplicateSwitchCase {
+        func: String,
+        block: BlockId,
+        index: usize,
+    },
     DuplicateFunction {
         name: String,
     },
@@ -58,6 +109,11 @@ pub enum VerifyError {
         func: String,
         entry: BlockId,
     },
+    EntryHasPredecessor {
+        func: String,
+        entry: BlockId,
+        predecessor: BlockId,
+    },
     InvalidBranchTarget {
         func: String,
         block: BlockId,
@@ -108,6 +164,7 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
             });
         }
     }
+    let constant_globals = constants::verify_globals(m)?;
     let mut functions = HashSet::new();
     for f in &m.functions {
         if !functions.insert(&f.name) {
@@ -146,6 +203,20 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                     func: f.name.clone(),
                     value: p.id,
                 });
+            }
+        }
+        // Collect identities before inspecting uses. Physical block storage
+        // order does not describe execution order or loop backedges.
+        for block in &f.blocks {
+            for ins in &block.instructions {
+                if let Some((dst, _)) = instr_result(ins) {
+                    if !defined.insert(dst) {
+                        return Err(VerifyError::DuplicateValue {
+                            func: f.name.clone(),
+                            value: dst,
+                        });
+                    }
+                }
             }
         }
 
@@ -205,14 +276,6 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                     }
                     _ => {}
                 }
-                if let Some((dst, _)) = instr_result(ins) {
-                    if !defined.insert(dst) {
-                        return Err(VerifyError::DuplicateValue {
-                            func: f.name.clone(),
-                            value: dst,
-                        });
-                    }
-                }
             }
 
             // terminator uses
@@ -227,12 +290,44 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
                     }
                     verify_condition(f, *cond)?;
                 }
-                Terminator::Switch { value, .. } => {
+                Terminator::Switch {
+                    value, ty, cases, ..
+                } => {
                     if !defined.contains(value) {
                         return Err(VerifyError::UseOfUndefinedValue {
                             func: f.name.clone(),
                             value: *value,
                         });
+                    }
+                    operands::verify_type_category(
+                        f,
+                        "switch",
+                        ty,
+                        operands::is_integer(ty) || *ty == Type::Bool,
+                    )?;
+                    operands::verify_operand(f, *value, ty)?;
+                    let mut keys = HashSet::new();
+                    for (index, (key, _)) in cases.iter().enumerate() {
+                        if !crate::constant::valid_constant(ty, key) {
+                            return Err(VerifyError::InvalidSwitchCase {
+                                func: f.name.clone(),
+                                block: b.id,
+                                index,
+                            });
+                        }
+                        let bits = match key {
+                            ConstValue::I(value) => *value as u128,
+                            ConstValue::U(value) => *value,
+                            ConstValue::Bool(value) => u128::from(*value),
+                            _ => unreachable!("validated integer key"),
+                        };
+                        if !keys.insert(bits) {
+                            return Err(VerifyError::DuplicateSwitchCase {
+                                func: f.name.clone(),
+                                block: b.id,
+                                index,
+                            });
+                        }
                     }
                 }
                 Terminator::Trap { .. } => {}
@@ -275,6 +370,16 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
             }
         }
         verify_value_types(f)?;
+        constants::verify_locals(f, &constant_globals)?;
+        cfg::verify(f)?;
+        // Operand checks consume the type table only after its definition/type
+        // correspondence has been validated, so metadata corruption is not
+        // misreported as a consumer's operand mismatch.
+        for block in &f.blocks {
+            for instruction in &block.instructions {
+                operands::verify_instruction(f, instruction)?;
+            }
+        }
     }
     Ok(())
 }
@@ -343,6 +448,9 @@ fn verify_value_types(f: &crate::Function) -> Result<(), VerifyError> {
 fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
     use Instruction::*;
     match ins {
+        ConstDecl {
+            dst, expression, ..
+        } => Some((*dst, expression.ty.clone())),
         Const { dst, ty, .. }
         | Undef { dst, ty }
         | Mov { dst, ty, .. }
@@ -389,6 +497,14 @@ fn check_uses(
 fn instr_uses(ins: &Instruction) -> Vec<ValueId> {
     use Instruction::*;
     match ins {
+        ConstDecl { expression, .. } => expression
+            .references()
+            .into_iter()
+            .filter_map(|r| match r {
+                crate::ConstRef::Local(value) => Some(value),
+                crate::ConstRef::Global(_) => None,
+            })
+            .collect(),
         Const { .. } | Undef { .. } => vec![],
 
         Mov { src, .. } => vec![*src],

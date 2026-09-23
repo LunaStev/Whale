@@ -9,6 +9,7 @@ pub struct ModuleBuilder {
     module: Module,
     next_value: u32,
     next_block: u32,
+    next_global: u32,
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -72,16 +73,43 @@ impl ModuleBuilder {
             module: Module::new(target, datalayout),
             next_value: 0,
             next_block: 0,
+            next_global: 0,
         }
     }
 
-    pub fn add_global(&mut self, name: impl Into<String>, ty: Type, init: ConstValue, align: u32) {
-        self.module.globals.push(Global {
-            name: name.into(),
-            ty,
+    pub fn add_global(
+        &mut self,
+        name: impl Into<String>,
+        ty: Type,
+        init: ConstValue,
+        align: u32,
+    ) -> crate::GlobalId {
+        self.add_global_const(
+            name,
+            crate::ConstExpr::literal(ty, init.clone()),
             init,
             align,
+        )
+    }
+
+    pub fn add_global_const(
+        &mut self,
+        name: impl Into<String>,
+        expression: crate::ConstExpr,
+        init: ConstValue,
+        align: u32,
+    ) -> crate::GlobalId {
+        let id = crate::GlobalId(self.next_global);
+        self.next_global += 1;
+        self.module.globals.push(Global {
+            id,
+            name: name.into(),
+            ty: expression.ty.clone(),
+            init,
+            init_expr: expression,
+            align,
         });
+        id
     }
 
     pub fn begin_function(
@@ -146,6 +174,24 @@ pub struct FunctionBuilder<'a> {
 impl<'a> FunctionBuilder<'a> {
     pub fn param_value(&self, index: usize) -> ValueId {
         self.func.params[index].id
+    }
+
+    pub fn const_decl(
+        &mut self,
+        name: impl Into<String>,
+        expression: crate::ConstExpr,
+        value: ConstValue,
+    ) -> ValueId {
+        let dst = self.define_value(expression.ty.clone());
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::ConstDecl {
+                dst,
+                name: name.into(),
+                expression,
+                value,
+            });
+        dst
     }
 
     pub fn create_block(&mut self, name: &str) -> BlockId {

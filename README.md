@@ -21,7 +21,12 @@ current capabilities are listed below.
 - **Defined behavior:** specify program behavior explicitly, including invalid
   operations, with the goal of an IR without undefined behavior.
 - **Explicit O0 IR:** keep operations and required safety behavior visible in IR,
-  with optional optimizations separated from correctness transformations.
+  preserving unused operations and unreachable blocks for debugging. O0 is the
+  current development priority; O1 and higher optimizations are future work.
+  Verification diagnoses invalid IR without removing or simplifying it.
+  Explicit constant declarations retain their typed initializer expressions and
+  evaluated values, including unused local declarations. Their compile-time
+  evaluation does not introduce runtime arithmetic instructions.
 - **Reusable components:** expose the IR, assembler, object model, and linker as
   separate crates.
 
