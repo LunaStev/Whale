@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "assembler",
+    "target-spec",
     "object",
     "linker", "ir",
 ]

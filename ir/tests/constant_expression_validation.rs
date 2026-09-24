@@ -20,14 +20,14 @@ fn add(left: ConstExpr, right: ConstExpr) -> ConstExpr {
     }
 }
 fn module(expression: ConstExpr, result: ConstValue) -> Module {
-    let mut mb = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut mb = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     mb.add_global_const("value", expression, result, 4);
     mb.finish()
 }
 
 #[test]
 fn global_expressions_preserve_trees_and_resolve_by_identity_not_storage_order() {
-    let mut mb = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut mb = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let a = mb.add_global_const("a", add(literal(1), literal(2)), ConstValue::I(3), 4);
     mb.add_global_const(
         "b",
@@ -158,7 +158,7 @@ fn float_literals_compare_payloads_without_nan_or_signed_zero_false_matches() {
 
 #[test]
 fn local_constant_results_types_and_dependency_cycles_are_checked() {
-    let mut mb = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut mb = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = mb.begin_function("f", vec![], Type::Void);
     let a = f.const_decl("a", add(literal(1), literal(2)), ConstValue::I(3));
     let b = f.const_decl(
@@ -201,7 +201,7 @@ fn local_constant_results_types_and_dependency_cycles_are_checked() {
 
 #[test]
 fn named_compile_time_integer_constants_can_select_gep_fields() {
-    let mut mb = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut mb = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = mb.begin_function("f", vec![], Type::Void);
     let base = f.alloca(Type::Struct(vec![Type::I32, Type::Bool]), 4);
     let zero = f.const_i32(0);

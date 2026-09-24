@@ -1,7 +1,7 @@
 use ir::{DataLayout, Instruction, Module, ModuleBuilder, Type, ValueId};
 
 fn module() -> Module {
-    let mut m = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = m.begin_function("f", vec![("p".into(), Type::I32)], Type::I32);
     let v = f.const_i32(1);
     f.ret(Some(v));
@@ -70,7 +70,7 @@ fn ids_are_local_to_functions_and_metadata_order_does_not_matter() {
 
 #[test]
 fn derived_result_types_match_builder_metadata() {
-    let mut builder = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut builder = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = builder.begin_function("derived", vec![], Type::Void);
     let value = f.const_i32(1);
     let comparison = f.icmp(ir::ICmpPred::Eq, Type::I32, value, value);

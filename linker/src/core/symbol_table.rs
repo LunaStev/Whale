@@ -32,6 +32,11 @@ impl SymbolTable {
     pub fn resolve(&mut self, objects: &[ObjectFile]) -> Result<(), String> {
         // A resolution attempt describes only these inputs, including on failure.
         self.symbols.clear();
+        for (index, obj) in objects.iter().enumerate() {
+            obj.target
+                .validate()
+                .map_err(|e| format!("link input {index}: {e}"))?;
+        }
         let mut symbols: HashMap<SymbolKey, ResolvedSymbol> = HashMap::new();
         for (obj_idx, obj) in objects.iter().enumerate() {
             for sym in &obj.symbols {

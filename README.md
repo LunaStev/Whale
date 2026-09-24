@@ -43,7 +43,17 @@ native compilation pipeline are still being developed.
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
 
-The current emitted object target is AMD64 ELF64. An object file is not a linked
+The IR target selector accepts only `x86_64-whale-linux`; unknown targets fail
+with the supported choice, including with `--no-verify`. Its output data layout
+is 64-bit little endian on every build host. Library lowering and verification
+reject target/layout mismatches. Aggregate size, field-offset, and stride
+calculation remain pending.
+
+The current emitted object target is AMD64 ELF64. Object metadata records the machine,
+format, byte order, and address width; writers and linker inputs reject unsupported
+combinations. `ObjectFile::new(ObjectFormat::ELF64)` remains an AMD64 convenience
+constructor; explicit identities use `ObjectFile::with_target`, and format access
+is now `object.target.format`. An object file is not a linked
 executable. CI runs host checks on Linux, Windows, and macOS; running Whale on a
 host does not imply support for that host's native object format or instruction
 set as an output target.

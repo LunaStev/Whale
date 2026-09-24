@@ -109,7 +109,12 @@ fn shadowed_names_keep_distinct_declarations_and_resolved_references() {
             ],
         }],
     };
-    let m = lower_o0(&program, "test", DataLayout::default_64bit_le()).unwrap();
+    let m = lower_o0(
+        &program,
+        "x86_64-whale-linux",
+        DataLayout::default_64bit_le(),
+    )
+    .unwrap();
     ir::verify_module(&m).unwrap();
     let declarations = m.functions[0].blocks[0]
         .instructions

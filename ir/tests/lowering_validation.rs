@@ -13,7 +13,11 @@ fn function(name: &str, ty: ast::TypeRef, expr: Option<ast::Expr>) -> ast::Funct
 }
 
 fn lower(program: ast::Program) -> Result<ir::Module, LowerError> {
-    lower_o0(&program, "test", DataLayout::default_64bit_le())
+    lower_o0(
+        &program,
+        "x86_64-whale-linux",
+        DataLayout::default_64bit_le(),
+    )
 }
 
 fn int(bits: u16, signed: bool, value: i128) -> ast::Expr {

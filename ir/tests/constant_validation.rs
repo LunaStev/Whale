@@ -1,7 +1,7 @@
 use ir::{ConstValue, DataLayout, Instruction, Module, ModuleBuilder, Type, VerifyError};
 
 fn constant(ty: Type, value: ConstValue) -> Module {
-    let mut m = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+    let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = m.begin_function("constant", vec![], ty.clone());
     let v = f.undef(ty.clone());
     f.ret(Some(v));
@@ -104,14 +104,14 @@ fn constant_categories_do_not_implicitly_convert() {
 #[test]
 fn globals_are_checked_even_without_functions() {
     for align in [0, 3, 6, u32::MAX] {
-        let mut m = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+        let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
         m.add_global("bad", Type::I32, ConstValue::I(1), align);
         assert!(
             matches!(ir::verify_module(&m.finish()), Err(VerifyError::InvalidGlobalAlignment { name, align: got }) if name == "bad" && got == align)
         );
     }
     for align in [1, 2, 4, 8, 1 << 31] {
-        let mut m = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+        let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
         m.add_global("valid", Type::I32, ConstValue::I(1), align);
         assert!(ir::verify_module(&m.finish()).is_ok());
     }
@@ -120,7 +120,7 @@ fn globals_are_checked_even_without_functions() {
         (Type::U8, ConstValue::U(256)),
         (Type::Bool, ConstValue::I(1)),
     ] {
-        let mut m = ModuleBuilder::new("test", DataLayout::default_64bit_le());
+        let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
         m.add_global("bad", ty, value, 1);
         assert!(
             matches!(ir::verify_module(&m.finish()), Err(VerifyError::InvalidGlobalInitializer { name, .. }) if name == "bad")

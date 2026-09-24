@@ -1,7 +1,7 @@
 use std::{fs, process};
 
 use ir::lower_ast::{frontend, lower_o0};
-use ir::{printer, verifier, DataLayout};
+use ir::{printer, verifier, Target};
 
 pub fn run(args: Vec<String>) {
     if args.is_empty() {
@@ -75,6 +75,11 @@ pub fn run(args: Vec<String>) {
         process::exit(1);
     });
 
+    let target = Target::lookup(&target).unwrap_or_else(|e| {
+        eprintln!("Error: {e}");
+        process::exit(1);
+    });
+
     // 1) Read socket json
     let src = fs::read_to_string(&input).unwrap_or_else(|e| {
         eprintln!("Failed to read {}: {}", input, e);
@@ -88,7 +93,7 @@ pub fn run(args: Vec<String>) {
     });
 
     // 3) lower
-    let module = lower_o0(&program, &target, DataLayout::default_64bit_le()).unwrap_or_else(|e| {
+    let module = lower_o0(&program, target.name(), target.data_layout()).unwrap_or_else(|e| {
         eprintln!("lower_o0 failed: {:?}", e);
         process::exit(1);
     });
@@ -125,7 +130,7 @@ fn print_help() {
     println!();
     println!("Options (ir lower):");
     println!("  -o <path>        Write printed IR text to file (default: stdout)");
-    println!("  --target <t>     Target triple string (default: x86_64-whale-linux)");
+    println!("  --target <t>     Output target (default and supported: x86_64-whale-linux)");
     println!("  --no-verify      Skip verifier");
     println!("  --no-print       Do not print IR text to stdout (useful with -o)");
     println!("  --trace          Print trace logs (parse/lower/verify/write steps)");

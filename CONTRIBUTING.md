@@ -44,6 +44,7 @@ change an unrelated remote silently. Start new work from the latest upstream
 | --- | --- |
 | [assembler/](assembler/) | Assembly tokenization, parsing, AMD64 encoding, symbols, and relocations |
 | [object/](object/) | Object model and ELF serialization |
+| [target-spec/](target-spec/) | Supported output targets, data layouts, and object identities |
 | [ir/](ir/) | Shared IR, builders, verification, and feature-gated socket lowering |
 | [linker/](linker/) | Linker component; consult the current capability status before assuming a full native link path exists |
 | [src/](src/) | `whale` CLI and command integration |

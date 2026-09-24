@@ -10,6 +10,7 @@ mod operands;
 
 #[derive(Debug)]
 pub enum VerifyError {
+    Target(crate::TargetError),
     InvalidConstExpression {
         scope: String,
         declaration: crate::ConstRef,
@@ -143,6 +144,10 @@ pub enum VerifyError {
 }
 
 pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
+    let target = crate::Target::lookup(&m.target).map_err(VerifyError::Target)?;
+    target
+        .validate_layout(m.datalayout)
+        .map_err(VerifyError::Target)?;
     let mut globals = HashSet::new();
     for g in &m.globals {
         if !globals.insert(&g.name) {
