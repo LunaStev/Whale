@@ -9,4 +9,5 @@ default = []
 socket = ["dep:serde"]
 
 [dependencies]
+whale-target = { path = "../target-spec" }
 serde = { version = "1", features = ["derive"], optional = true }

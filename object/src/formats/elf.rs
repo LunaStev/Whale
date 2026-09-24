@@ -147,6 +147,7 @@ struct SymBuild {
 }
 
 pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
+    let machine = obj.target.elf_machine().map_err(|e| e.to_string())?;
     for section in &obj.sections {
         if section.kind == SectionKind::Bss && section.data.iter().any(|byte| *byte != 0) {
             return Err(format!(
@@ -458,8 +459,8 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     let shoff = align_up(current_offset, 8);
     let hdr = Elf64Header {
         ident: [0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        type_: 1,    // ET_REL
-        machine: 62, // EM_X86_64
+        type_: 1, // ET_REL
+        machine,
         version: 1,
         shoff,
         ehsize: ELF_HDR_SIZE as u16,

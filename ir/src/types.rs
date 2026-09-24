@@ -2,26 +2,7 @@
 
 use core::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Endian {
-    Little,
-    Big,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DataLayout {
-    pub ptr_bits: u32,
-    pub endian: Endian,
-}
-
-impl DataLayout {
-    pub fn default_64bit_le() -> Self {
-        Self {
-            ptr_bits: 64,
-            endian: Endian::Little,
-        }
-    }
-}
+pub use whale_target::{DataLayout, Endian, Target, TargetError};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {

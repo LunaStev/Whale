@@ -27,7 +27,11 @@ pub fn lower_o0(
     target: &str,
     datalayout: DataLayout,
 ) -> Result<Module, LowerError> {
-    let ptr_bits = datalayout.ptr_bits;
+    let selected = crate::Target::lookup(target).map_err(LowerError::Target)?;
+    selected
+        .validate_layout(datalayout)
+        .map_err(LowerError::Target)?;
+    let ptr_bits = selected.data_layout().ptr_bits;
     // Functions and globals have separate namespaces. Validate each before bodies.
     let mut functions = HashSet::new();
     for f in &program.functions {

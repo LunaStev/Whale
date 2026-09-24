@@ -22,6 +22,11 @@ impl Linker {
     }
 
     pub fn link(&mut self) -> Result<Vec<u8>, String> {
+        for (index, obj) in self.objects.iter().enumerate() {
+            obj.target
+                .validate()
+                .map_err(|e| format!("link input {index}: {e}"))?;
+        }
         // 1. Symbol Resolution
         // 2. Section Merging & Layout
         // 3. Relocation Processing
