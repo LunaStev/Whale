@@ -10,7 +10,7 @@ use crate::{
 use super::{
     binding::Binding,
     frontend,
-    support::{align_of, map_binop, socket_type_to_whale},
+    support::{map_binop, socket_type_to_whale},
     LowerError,
 };
 
@@ -31,7 +31,7 @@ pub fn lower_o0(
     selected
         .validate_layout(datalayout)
         .map_err(LowerError::Target)?;
-    let ptr_bits = selected.data_layout().ptr_bits;
+    let target = selected;
     // Functions and globals have separate namespaces. Validate each before bodies.
     let mut functions = HashSet::new();
     for f in &program.functions {
@@ -48,7 +48,7 @@ pub fn lower_o0(
             }
         }
     }
-    let mut mb = ModuleBuilder::new(target, datalayout);
+    let mut mb = ModuleBuilder::new(target.name(), datalayout);
 
     let mut gconsts: ConstMap = HashMap::new();
     for g in &program.globals {
@@ -73,13 +73,13 @@ pub fn lower_o0(
             });
         }
 
-        let align = align_of(&vty, ptr_bits);
+        let align = crate::allocation_align(&vty, target).map_err(LowerError::Layout)?;
         let id = mb.add_global_const(g.name.clone(), expression, v.clone(), align);
         gconsts.insert(g.name.clone(), (id, vty, v));
     }
 
     for f in &program.functions {
-        lower_function_o0(&mut mb, f, &gconsts, ptr_bits)?;
+        lower_function_o0(&mut mb, f, &gconsts, target)?;
     }
 
     Ok(mb.finish())
@@ -89,7 +89,7 @@ fn lower_function_o0(
     mb: &mut ModuleBuilder,
     f: &frontend::Function,
     global_consts: &ConstMap,
-    ptr_bits: u32,
+    target: crate::Target,
 ) -> Result<(), LowerError> {
     let ret_ty = socket_type_to_whale(&f.return_type)?;
 
@@ -108,7 +108,7 @@ fn lower_function_o0(
     for (i, p) in f.parameters.iter().enumerate() {
         let param_val = fb.param_value(i);
         let ty = socket_type_to_whale(&p.ty)?;
-        let align = align_of(&ty, ptr_bits);
+        let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
 
         let slot = fb.alloca_in_entry(ty.clone(), align);
         fb.store(ty.clone(), param_val, slot, align);
@@ -124,7 +124,7 @@ fn lower_function_o0(
             &mut loop_stack,
             s,
             &ret_ty,
-            ptr_bits,
+            target,
         )?;
     }
 
@@ -147,7 +147,7 @@ fn lower_stmt_o0(
     loop_stack: &mut Vec<LoopCtx>,
     stmt: &frontend::Stmt,
     func_ret_ty: &Type,
-    ptr_bits: u32,
+    target: crate::Target,
 ) -> Result<(), LowerError> {
     if fb.is_current_block_terminated() {
         // Keep source statements after return/break/continue visible at O0.
@@ -168,7 +168,7 @@ fn lower_stmt_o0(
             }
 
             let e = opt.as_ref().ok_or(LowerError::UnsupportedStmt)?;
-            let (v, ty) = lower_expr_o0(fb, env, global_consts, e, ptr_bits)?;
+            let (v, ty) = lower_expr_o0(fb, env, global_consts, e, target)?;
 
             if ty != *func_ret_ty {
                 return Err(LowerError::TypeMismatch {
@@ -214,10 +214,10 @@ fn lower_stmt_o0(
 
         frontend::Stmt::VarDecl { name, ty, init } => {
             let decl_ty = socket_type_to_whale(ty)?;
-            let align = align_of(&decl_ty, ptr_bits);
+            let align = crate::allocation_align(&decl_ty, target).map_err(LowerError::Layout)?;
 
             let (v, vty) = if let Some(init_expr) = init.as_ref() {
-                lower_expr_o0(fb, env, global_consts, init_expr, ptr_bits)?
+                lower_expr_o0(fb, env, global_consts, init_expr, target)?
             } else {
                 let v = fb.undef(decl_ty.clone());
                 (v, decl_ty.clone())
@@ -244,7 +244,7 @@ fn lower_stmt_o0(
         }
 
         frontend::Stmt::Assign { name, value } => {
-            let (v, vty) = lower_expr_o0(fb, env, global_consts, value, ptr_bits)?;
+            let (v, vty) = lower_expr_o0(fb, env, global_consts, value, target)?;
 
             let b = env
                 .get(name)
@@ -260,7 +260,7 @@ fn lower_stmt_o0(
                             got: vty,
                         });
                     }
-                    let align = align_of(&ty, ptr_bits);
+                    let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
                     fb.store(ty, v, ptr, align);
                     Ok(())
                 }
@@ -268,7 +268,7 @@ fn lower_stmt_o0(
         }
 
         frontend::Stmt::ExprStmt(e) => {
-            let _ = lower_expr_o0(fb, env, global_consts, e, ptr_bits)?;
+            let _ = lower_expr_o0(fb, env, global_consts, e, target)?;
             Ok(())
         }
 
@@ -277,7 +277,7 @@ fn lower_stmt_o0(
             then_body,
             else_body,
         } => {
-            let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, ptr_bits)?;
+            let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, target)?;
             if cty != Type::Bool {
                 return Err(LowerError::TypeMismatch {
                     expected: Type::Bool,
@@ -302,7 +302,7 @@ fn lower_stmt_o0(
                     loop_stack,
                     s,
                     func_ret_ty,
-                    ptr_bits,
+                    target,
                 )?;
             }
             if !fb.is_current_block_terminated() {
@@ -320,7 +320,7 @@ fn lower_stmt_o0(
                     loop_stack,
                     s,
                     func_ret_ty,
-                    ptr_bits,
+                    target,
                 )?;
             }
             if !fb.is_current_block_terminated() {
@@ -341,7 +341,7 @@ fn lower_stmt_o0(
 
             // cond
             fb.set_insert_point(cond_bb);
-            let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, ptr_bits)?;
+            let (cv, cty) = lower_expr_o0(fb, env, global_consts, cond, target)?;
             if cty != Type::Bool {
                 return Err(LowerError::TypeMismatch {
                     expected: Type::Bool,
@@ -363,7 +363,7 @@ fn lower_stmt_o0(
                     loop_stack,
                     s,
                     func_ret_ty,
-                    ptr_bits,
+                    target,
                 )?;
             }
             if !fb.is_current_block_terminated() {
@@ -402,14 +402,15 @@ fn lower_expr_o0(
     env: &mut HashMap<String, Binding>,
     global_consts: &ConstMap,
     expr: &frontend::Expr,
-    ptr_bits: u32,
+    target: crate::Target,
 ) -> Result<(ValueId, Type), LowerError> {
     match expr {
         frontend::Expr::Var(name) => {
             if let Some(b) = env.get(name).cloned() {
                 return match b {
                     Binding::Addr { ptr, ty } => {
-                        let align = align_of(&ty, ptr_bits);
+                        let align =
+                            crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
                         let v = fb.load(ty.clone(), ptr, align);
                         Ok((v, ty))
                     }
@@ -428,8 +429,8 @@ fn lower_expr_o0(
         frontend::Expr::Lit(lit) => lower_lit_o0(fb, lit),
 
         frontend::Expr::Binary { left, op, right } => {
-            let (lv, lty) = lower_expr_o0(fb, env, global_consts, left, ptr_bits)?;
-            let (rv, rty) = lower_expr_o0(fb, env, global_consts, right, ptr_bits)?;
+            let (lv, lty) = lower_expr_o0(fb, env, global_consts, left, target)?;
+            let (rv, rty) = lower_expr_o0(fb, env, global_consts, right, target)?;
 
             if lty != rty {
                 return Err(LowerError::TypeMismatch {
@@ -444,8 +445,8 @@ fn lower_expr_o0(
         }
 
         frontend::Expr::Cmp { left, op, right } => {
-            let (lv, lty) = lower_expr_o0(fb, env, global_consts, left, ptr_bits)?;
-            let (rv, rty) = lower_expr_o0(fb, env, global_consts, right, ptr_bits)?;
+            let (lv, lty) = lower_expr_o0(fb, env, global_consts, left, target)?;
+            let (rv, rty) = lower_expr_o0(fb, env, global_consts, right, target)?;
 
             if lty != rty {
                 return Err(LowerError::TypeMismatch {
