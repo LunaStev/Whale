@@ -146,14 +146,25 @@ struct SymBuild {
     visibility: SymbolVisibility,
 }
 
+/// Default serialized-output budget. Call `write_elf_with_limit` to override it.
+pub const DEFAULT_MAX_OUTPUT_SIZE: u64 = 256 * 1024 * 1024;
+
 pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
+    write_elf_with_limit(obj, DEFAULT_MAX_OUTPUT_SIZE)
+}
+
+pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u8>, String> {
     let machine = obj.target.elf_machine().map_err(|e| e.to_string())?;
+    let relocation_sections: HashSet<_> = obj.relocations.iter().map(|r| r.section_index).collect();
+    checked_section_count(obj.sections.len(), relocation_sections.len())?;
+    let mut input_payload_size = 0u64;
     for section in &obj.sections {
-        if section.kind == SectionKind::Bss && section.data.iter().any(|byte| *byte != 0) {
-            return Err(format!(
-                "BSS section {:?} has a nonzero initializer",
-                section.name
-            ));
+        section.memory_size()?;
+        input_payload_size = input_payload_size
+            .checked_add(section.file_size())
+            .ok_or("ELF payload size overflow")?;
+        if input_payload_size > max_output_size {
+            return Err("ELF output exceeds configured size limit".into());
         }
         if section.name.contains('\0') {
             return Err(format!(
@@ -192,12 +203,12 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
                 .value
                 .checked_add(sym.size)
                 .ok_or_else(|| format!("symbol range overflow for {:?}", sym.name))?;
-            if end > section.data.len() as u64 {
+            if end > section.memory_size()? {
                 return Err(format!(
                     "symbol range for {:?} exceeds section {:?} size {}",
                     sym.name,
                     section.name,
-                    section.data.len()
+                    section.memory_size()?
                 ));
             }
         }
@@ -259,9 +270,9 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
 
     let mut section_to_shdr_idx = vec![0usize; obj.sections.len()];
     for (sec_idx, section) in obj.sections.iter().enumerate() {
-        let name_idx = push_name(&mut shstrtab, &section.name);
+        let name_idx = push_name(&mut shstrtab, &section.name)?;
         let (type_, flags) = section_type_and_flags(section.kind);
-        let data_size = section.data.len() as u64;
+        let data_size = section.memory_size()?;
 
         section_to_shdr_idx[sec_idx] = shdrs.len();
         shdrs.push(Elf64Shdr {
@@ -294,7 +305,7 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         .collect();
 
     for reloc in &obj.relocations {
-        if symbols.iter().all(|s| s.name != reloc.symbol) {
+        if symbol_names.insert(&reloc.symbol) {
             symbols.push(SymBuild {
                 name: reloc.symbol.clone(),
                 section_index: None,
@@ -323,7 +334,16 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         .take_while(|s| s.binding == SymbolBinding::Local)
         .count();
 
-    let mut elf_syms = Vec::with_capacity(1 + ordered_syms.len());
+    let symbol_count = ordered_syms
+        .len()
+        .checked_add(1)
+        .ok_or("ELF symbol count overflow")?;
+    checked_u32(symbol_count, "symbol count")?;
+    checked_table_bytes(symbol_count, ELF_SYM_SIZE as usize, max_output_size)?;
+    let mut elf_syms = Vec::new();
+    elf_syms
+        .try_reserve_exact(symbol_count)
+        .map_err(|_| "ELF symbol allocation failed")?;
     elf_syms.push(Elf64Sym::default()); // STN_UNDEF
 
     let mut symbol_index_by_name: HashMap<String, usize> = HashMap::new();
@@ -331,13 +351,15 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         let name_idx = if sym.name.is_empty() {
             0
         } else {
-            push_name(&mut strtab, &sym.name)
+            push_name(&mut strtab, &sym.name)?
         };
 
-        let shndx = sym
-            .section_index
-            .and_then(|idx| section_to_shdr_idx.get(idx).copied())
-            .unwrap_or(0) as u16;
+        let shndx = u16::try_from(
+            sym.section_index
+                .and_then(|idx| section_to_shdr_idx.get(idx).copied())
+                .unwrap_or(0),
+        )
+        .map_err(|_| "ELF symbol section index overflow")?;
 
         let elf_sym = Elf64Sym {
             name: name_idx,
@@ -365,14 +387,20 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         }
 
         let rela_name = format!(".rela{}", obj.sections[sec_idx].name);
-        let name_idx = push_name(&mut shstrtab, &rela_name);
+        let name_idx = push_name(&mut shstrtab, &rela_name)?;
 
-        let mut rela_data = Vec::with_capacity(relocs.len() * ELF_RELA_SIZE as usize);
+        let capacity = checked_table_bytes(relocs.len(), ELF_RELA_SIZE as usize, max_output_size)?;
+        let mut rela_data = Vec::new();
+        rela_data
+            .try_reserve_exact(capacity)
+            .map_err(|_| "ELF relocation allocation failed")?;
         for reloc in relocs {
-            let sym_idx = symbol_index_by_name
-                .get(&reloc.symbol)
-                .copied()
-                .unwrap_or(0) as u64;
+            let sym_idx = u64::from(checked_u32(
+                *symbol_index_by_name
+                    .get(&reloc.symbol)
+                    .ok_or("ELF relocation symbol missing")?,
+                "relocation symbol index",
+            )?);
             let rtype = reloc_type(reloc.kind) as u64;
 
             let rela = Elf64Rela {
@@ -383,7 +411,7 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
             rela_data.extend_from_slice(&rela.to_bytes());
         }
 
-        let target_sec_idx = section_to_shdr_idx[sec_idx] as u32;
+        let target_sec_idx = checked_u32(section_to_shdr_idx[sec_idx], "relocation section index")?;
         let idx = shdrs.len();
         shdrs.push(Elf64Shdr {
             name: name_idx,
@@ -399,16 +427,20 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         rela_shdr_indices.push(idx);
     }
 
-    let symtab_name = push_name(&mut shstrtab, ".symtab");
+    let symtab_name = push_name(&mut shstrtab, ".symtab")?;
     let symtab_idx = shdrs.len();
-    let mut symtab_data = Vec::with_capacity(elf_syms.len() * ELF_SYM_SIZE as usize);
+    let capacity = checked_table_bytes(elf_syms.len(), ELF_SYM_SIZE as usize, max_output_size)?;
+    let mut symtab_data = Vec::new();
+    symtab_data
+        .try_reserve_exact(capacity)
+        .map_err(|_| "ELF symbol table allocation failed")?;
     for sym in &elf_syms {
         symtab_data.extend_from_slice(&sym.to_bytes());
     }
     shdrs.push(Elf64Shdr {
         name: symtab_name,
         type_: SHT_SYMTAB,
-        info: first_global_index as u32,
+        info: checked_u32(first_global_index, "first global symbol index")?,
         addralign: 8,
         entsize: ELF_SYM_SIZE,
         size: symtab_data.len() as u64,
@@ -416,7 +448,7 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     });
     payloads.push(Some(symtab_data));
 
-    let strtab_name = push_name(&mut shstrtab, ".strtab");
+    let strtab_name = push_name(&mut shstrtab, ".strtab")?;
     let strtab_idx = shdrs.len();
     shdrs.push(Elf64Shdr {
         name: strtab_name,
@@ -427,12 +459,12 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     });
     payloads.push(Some(strtab.clone()));
 
-    shdrs[symtab_idx].link = strtab_idx as u32;
+    shdrs[symtab_idx].link = checked_u32(strtab_idx, "string table index")?;
     for idx in rela_shdr_indices {
-        shdrs[idx].link = symtab_idx as u32;
+        shdrs[idx].link = checked_u32(symtab_idx, "symbol table index")?;
     }
 
-    let shstrtab_name = push_name(&mut shstrtab, ".shstrtab");
+    let shstrtab_name = push_name(&mut shstrtab, ".shstrtab")?;
     let shstrtab_idx = shdrs.len();
     shdrs.push(Elf64Shdr {
         name: shstrtab_name,
@@ -446,17 +478,22 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     let mut current_offset = ELF_HDR_SIZE;
     for idx in 1..shdrs.len() {
         let align = shdrs[idx].addralign.max(1);
-        current_offset = align_up(current_offset, align);
-        shdrs[idx].offset = current_offset;
+        let offset = align_up(current_offset, align)?;
+        shdrs[idx].offset = offset;
 
         if shdrs[idx].type_ != SHT_NOBITS {
             let size = payloads[idx].as_ref().map(|p| p.len()).unwrap_or(0) as u64;
             shdrs[idx].size = size;
-            current_offset += size;
+            current_offset = offset.checked_add(size).ok_or("ELF file layout overflow")?;
         }
     }
 
-    let shoff = align_up(current_offset, 8);
+    let shoff = align_up(current_offset, 8)?;
+    let section_bytes = checked_table_bytes(shdrs.len(), ELF_SHDR_SIZE as usize, max_output_size)?;
+    let total_size = shoff
+        .checked_add(section_bytes as u64)
+        .ok_or("ELF header layout overflow")?;
+    let output_capacity = checked_output_size(total_size, max_output_size)?;
     let hdr = Elf64Header {
         ident: [0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         type_: 1, // ET_REL
@@ -465,19 +502,23 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         shoff,
         ehsize: ELF_HDR_SIZE as u16,
         shentsize: ELF_SHDR_SIZE,
-        shnum: shdrs.len() as u16,
-        shstrndx: shstrtab_idx as u16,
+        shnum: checked_section_count(obj.sections.len(), relocation_sections.len())?,
+        shstrndx: u16::try_from(shstrtab_idx)
+            .map_err(|_| "ELF section-name table index overflow")?,
         ..Default::default()
     };
 
     let mut out = Vec::new();
+    out.try_reserve_exact(output_capacity)
+        .map_err(|_| "ELF output allocation failed")?;
     out.extend_from_slice(&hdr.to_bytes());
 
     for idx in 1..shdrs.len() {
         if shdrs[idx].type_ == SHT_NOBITS {
             continue;
         }
-        let offset = shdrs[idx].offset as usize;
+        let offset =
+            usize::try_from(shdrs[idx].offset).map_err(|_| "ELF offset exceeds host capacity")?;
         if out.len() < offset {
             out.resize(offset, 0);
         }
@@ -486,8 +527,9 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
         }
     }
 
-    if out.len() < shoff as usize {
-        out.resize(shoff as usize, 0);
+    let shoff = usize::try_from(shoff).map_err(|_| "ELF header offset exceeds host capacity")?;
+    if out.len() < shoff {
+        out.resize(shoff, 0);
     }
 
     for shdr in &shdrs {
@@ -497,24 +539,65 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn align_up(value: u64, align: u64) -> u64 {
-    if align <= 1 {
-        value
-    } else {
-        (value + align - 1) & !(align - 1)
+fn align_up(value: u64, align: u64) -> Result<u64, String> {
+    if !align.is_power_of_two() {
+        return Err("ELF alignment must be a power of two".into());
     }
+    value
+        .checked_add(value.wrapping_neg() & (align - 1))
+        .ok_or_else(|| "ELF alignment overflow".into())
 }
 
-fn push_name(table: &mut Vec<u8>, name: &str) -> u32 {
-    debug_assert!(
-        !name.contains('\0'),
-        "push_name received embedded NUL in {:?}",
-        name
-    );
-    let idx = table.len() as u32;
+fn checked_u32(value: usize, field: &str) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| format!("ELF {field} exceeds 32-bit range"))
+}
+
+fn checked_section_count(input: usize, relocation_sections: usize) -> Result<u16, String> {
+    let count = input
+        .checked_add(relocation_sections)
+        .and_then(|n| n.checked_add(4))
+        .ok_or("ELF section count overflow")?;
+    // ELF reserves indices >= SHN_LORESERVE. Extended numbering is not supported.
+    if count >= 0xff00 {
+        return Err("ELF extended section numbering is not supported".into());
+    }
+    Ok(count as u16)
+}
+
+fn checked_output_size(size: u64, limit: u64) -> Result<usize, String> {
+    if size > limit {
+        return Err("ELF output exceeds configured size limit".into());
+    }
+    let size = usize::try_from(size).map_err(|_| "ELF output exceeds host capacity")?;
+    if size > isize::MAX as usize {
+        return Err("ELF output exceeds host capacity".into());
+    }
+    Ok(size)
+}
+
+fn checked_table_bytes(count: usize, stride: usize, limit: u64) -> Result<usize, String> {
+    let size = count.checked_mul(stride).ok_or("ELF table size overflow")?;
+    checked_output_size(size as u64, limit)
+}
+
+fn checked_name_end(current: usize, name_len: usize) -> Result<usize, String> {
+    let end = current
+        .checked_add(name_len)
+        .and_then(|n| n.checked_add(1))
+        .ok_or("ELF string table overflow")?;
+    checked_u32(end, "string table size")?;
+    Ok(end)
+}
+
+fn push_name(table: &mut Vec<u8>, name: &str) -> Result<u32, String> {
+    let end = checked_name_end(table.len(), name.len())?;
+    let index = checked_u32(table.len(), "string offset")?;
+    table
+        .try_reserve(end - table.len())
+        .map_err(|_| "ELF string allocation failed")?;
     table.extend_from_slice(name.as_bytes());
     table.push(0);
-    idx
+    Ok(index)
 }
 
 fn section_type_and_flags(kind: SectionKind) -> (u32, u64) {
@@ -574,6 +657,7 @@ mod tests {
                 name: bad_name.to_string(),
                 kind: SectionKind::Text,
                 data: vec![0x90],
+                zero_fill: 0,
                 align: 16,
             });
 
@@ -608,6 +692,7 @@ mod tests {
                 name: ".text".to_string(),
                 kind: SectionKind::Text,
                 data: vec![0x90],
+                zero_fill: 0,
                 align: 16,
             });
             obj.symbols.push(ObjectSymbol {
@@ -650,6 +735,7 @@ mod tests {
                 name: ".text".to_string(),
                 kind: SectionKind::Text,
                 data: vec![0x90; 8],
+                zero_fill: 0,
                 align: 16,
             });
             obj.relocations.push(ObjectRelocation {
@@ -685,6 +771,7 @@ mod tests {
             name: ".текст_café_日本語".to_string(),
             kind: SectionKind::Text,
             data: vec![0x90; 4],
+            zero_fill: 0,
             align: 16,
         });
         // Empty symbol name (mandatory STN_UNDEF entry)
@@ -728,5 +815,32 @@ mod tests {
         assert!(contains_nul_terminated(&elf_bytes, ".текст_café_日本語"));
         assert!(contains_nul_terminated(&elf_bytes, "функция_café"));
         assert!(contains_nul_terminated(&elf_bytes, "внешний_sym"));
+    }
+}
+
+#[cfg(test)]
+mod layout_boundary_tests {
+    use super::*;
+    #[test]
+    fn synthetic_metadata_checks_reserved_indices_and_integer_widths() {
+        assert_eq!(checked_section_count(0xff00 - 5, 0).unwrap(), 0xfeff);
+        assert!(checked_section_count(0xff00 - 5, 1).is_err());
+        assert!(checked_section_count(usize::MAX, 1).is_err());
+        assert_eq!(checked_u32(u32::MAX as usize, "index").unwrap(), u32::MAX);
+        if let Ok(too_large) = usize::try_from(u64::from(u32::MAX) + 1) {
+            assert!(checked_u32(too_large, "index").is_err());
+        }
+        assert_eq!(checked_name_end(1, 3).unwrap(), 5);
+        assert!(checked_name_end(u32::MAX as usize, 1).is_err());
+        assert!(checked_name_end(usize::MAX, 1).is_err());
+        assert!(checked_table_bytes(usize::MAX, 24, u64::MAX).is_err());
+    }
+    #[test]
+    fn checked_alignment_handles_aligned_maximum_and_overflow() {
+        assert_eq!(align_up(u64::MAX, 1).unwrap(), u64::MAX);
+        assert_eq!(align_up(u64::MAX - 7, 8).unwrap(), u64::MAX - 7);
+        assert!(align_up(u64::MAX, 8).is_err());
+        assert!(align_up(1, 3).is_err());
+        assert!(align_up(1, 0).is_err());
     }
 }

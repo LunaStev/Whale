@@ -6,7 +6,7 @@ use crate::error::AsmError;
 use crate::isa::amd64::encoding::{encode_address, DispKind, EncodedAddress, ModRM, REX};
 use crate::isa::amd64::tables::*;
 
-type LabelLocations = HashMap<String, (usize, usize)>;
+type LabelLocations = HashMap<String, (usize, u64)>;
 
 // Resolve the one-symbol constant dependency graph before encoding any use.
 // Worklist traversal avoids recursion and repeated whole-source rescans.
@@ -87,7 +87,7 @@ pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
     const MAX_RELAX_ITERATIONS: usize = 8;
 
     let consts = resolve_constants(ast)?;
-    let mut prev_label_locs: Option<HashMap<String, (usize, usize)>> = None;
+    let mut prev_label_locs: Option<HashMap<String, (usize, u64)>> = None;
     let mut last_output: Option<AssemblerOutput> = None;
 
     for _ in 0..MAX_RELAX_ITERATIONS {
@@ -106,14 +106,14 @@ pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
 
 fn encode_once(
     ast: &AST,
-    jump_hint_locs: Option<&HashMap<String, (usize, usize)>>,
+    jump_hint_locs: Option<&HashMap<String, (usize, u64)>>,
     consts: &HashMap<String, i64>,
 ) -> Result<(AssemblerOutput, LabelLocations), AsmError> {
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
 
     let mut defined_labels = HashSet::<String>::new();
-    let mut label_locs = HashMap::<String, (usize, usize)>::new();
+    let mut label_locs = HashMap::<String, (usize, u64)>::new();
     let mut jump_known_locs = jump_hint_locs.cloned().unwrap_or_default();
     let mut extern_symbols = HashSet::<String>::new();
     let mut global_symbols = HashSet::<String>::new();
@@ -121,6 +121,7 @@ fn encode_once(
     sections.push(AsmSection {
         name: ".text".to_string(),
         data: Vec::new(),
+        zero_fill: 0,
         relocs: Vec::new(),
     });
 
@@ -136,6 +137,7 @@ fn encode_once(
                     sections.push(AsmSection {
                         name: name.clone(),
                         data: Vec::new(),
+                        zero_fill: 0,
                         relocs: Vec::new(),
                     });
                     current_section_idx = sections.len() - 1;
@@ -187,7 +189,10 @@ fn encode_once(
                         resolved
                     )));
                 }
-                let offset = sections[current_section_idx].data.len();
+                let section = &sections[current_section_idx];
+                let offset = (section.data.len() as u64)
+                    .checked_add(section.zero_fill)
+                    .ok_or_else(|| AsmError::EncodeError("section size overflow".into()))?;
                 label_locs.insert(resolved.clone(), (current_section_idx, offset));
                 jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
                 symbols.push(AsmSymbol {
@@ -201,6 +206,11 @@ fn encode_once(
                 let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
                 let inst = resolve_instruction_consts(&scoped, consts)?;
                 let sec = &mut sections[current_section_idx];
+                if sec.name == ".bss" {
+                    return Err(AsmError::EncodeError(
+                        "instructions are not valid in BSS".into(),
+                    ));
+                }
                 let cur_off = sec.data.len();
                 encode_instruction(
                     &inst,
@@ -214,7 +224,11 @@ fn encode_once(
             ASTNode::Directive(dir) => {
                 let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
                 let sec = &mut sections[current_section_idx];
-                encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
+                if sec.name == ".bss" {
+                    encode_bss_directive(&scoped, sec, consts)?;
+                } else {
+                    encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
+                }
             }
         }
     }
@@ -603,7 +617,7 @@ fn encode_instruction(
     relocs: &mut Vec<Relocation>,
     current_section: usize,
     current_offset: usize,
-    label_locs: &HashMap<String, (usize, usize)>,
+    label_locs: &HashMap<String, (usize, u64)>,
 ) -> Result<(), AsmError> {
     match ins.mnemonic.as_str() {
         "ret" | "nop" | "syscall" | "int3" if !ins.operands.is_empty() => Err(
@@ -1093,7 +1107,7 @@ fn encode_jump(
     relocs: &mut Vec<Relocation>,
     current_section: usize,
     current_offset: usize,
-    label_locs: &HashMap<String, (usize, usize)>,
+    label_locs: &HashMap<String, (usize, u64)>,
 ) -> Result<(), AsmError> {
     if ins.operands.len() != 1 {
         return Err(AsmError::EncodeError(format!(
@@ -1157,7 +1171,7 @@ fn encode_loop(
     relocs: &mut Vec<Relocation>,
     current_section: usize,
     current_offset: usize,
-    label_locs: &HashMap<String, (usize, usize)>,
+    label_locs: &HashMap<String, (usize, u64)>,
 ) -> Result<(), AsmError> {
     if ins.operands.len() != 1 {
         return Err(AsmError::EncodeError("loop expects 1 operand".into()));
@@ -1268,12 +1282,11 @@ fn encode_data_expr(
     }
 }
 
-fn reserve_bytes(
-    bytes: &mut Vec<u8>,
-    unit: usize,
+fn reservation_size(
+    unit: u64,
     values: &[DirectiveValue],
     consts: &HashMap<String, i64>,
-) -> Result<(), AsmError> {
+) -> Result<u64, AsmError> {
     if values.len() != 1 {
         return Err(AsmError::EncodeError(
             "res* expects exactly one count operand".into(),
@@ -1302,15 +1315,56 @@ fn reserve_bytes(
             "res* count must be non-negative".into(),
         ));
     }
-    let count = count as usize;
-    let extra = count
+    (count as u64)
         .checked_mul(unit)
-        .ok_or_else(|| AsmError::EncodeError("res* size overflow".into()))?;
+        .ok_or_else(|| AsmError::EncodeError("res* size overflow".into()))
+}
+
+fn reserve_bytes(
+    bytes: &mut Vec<u8>,
+    unit: u64,
+    values: &[DirectiveValue],
+    consts: &HashMap<String, i64>,
+) -> Result<(), AsmError> {
+    let extra = usize::try_from(reservation_size(unit, values, consts)?)
+        .map_err(|_| AsmError::EncodeError("res* size exceeds host capacity".into()))?;
     let new_len = bytes
         .len()
         .checked_add(extra)
         .ok_or_else(|| AsmError::EncodeError("res* size overflow".into()))?;
+    bytes
+        .try_reserve(extra)
+        .map_err(|_| AsmError::EncodeError("res* allocation failed".into()))?;
     bytes.resize(new_len, 0);
+    Ok(())
+}
+
+fn encode_bss_directive(
+    dir: &Directive,
+    section: &mut AsmSection,
+    consts: &HashMap<String, i64>,
+) -> Result<(), AsmError> {
+    let extra = match dir.name.as_str() {
+        "resb" => reservation_size(1, &dir.values, consts)?,
+        "resw" => reservation_size(2, &dir.values, consts)?,
+        "resd" => reservation_size(4, &dir.values, consts)?,
+        "resq" => reservation_size(8, &dir.values, consts)?,
+        _ => {
+            let mut data = Vec::new();
+            let mut relocs = Vec::new();
+            encode_directive(dir, &mut data, &mut relocs, consts)?;
+            if !relocs.is_empty() || data.iter().any(|b| *b != 0) {
+                return Err(AsmError::EncodeError(
+                    "BSS has a nonzero initializer or relocation".into(),
+                ));
+            }
+            data.len() as u64
+        }
+    };
+    section.zero_fill = section
+        .zero_fill
+        .checked_add(extra)
+        .ok_or_else(|| AsmError::EncodeError("BSS size overflow".into()))?;
     Ok(())
 }
 

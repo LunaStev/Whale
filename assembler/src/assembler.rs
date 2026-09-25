@@ -11,13 +11,15 @@ pub struct AssemblerOutput {
 pub struct AsmSection {
     pub name: String,
     pub data: Vec<u8>,
+    /// Unbacked zero storage, used by .bss instead of allocating bytes.
+    pub zero_fill: u64,
     pub relocs: Vec<Relocation>,
 }
 
 pub struct AsmSymbol {
     pub name: String,
     pub section_index: Option<usize>,
-    pub offset: usize,
+    pub offset: u64,
     pub is_global: bool,
 }
 
