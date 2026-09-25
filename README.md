@@ -1,7 +1,5 @@
 # Whale
 
-**A general-purpose compiler toolchain written in Rust.**
-
 [![Rust CI](https://github.com/wavefnd/Whale/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/wavefnd/Whale/actions/workflows/rust.yml)
 [![Code quality](https://github.com/wavefnd/Whale/actions/workflows/quality.yml/badge.svg?branch=master)](https://github.com/wavefnd/Whale/actions/workflows/quality.yml)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
