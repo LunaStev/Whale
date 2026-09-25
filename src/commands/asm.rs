@@ -199,6 +199,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
         let align = if sec.name == ".text" { 16 } else { 1 };
         let idx = obj.add_section(&sec.name, kind, align);
         obj.sections[idx].data = sec.data.clone();
+        obj.sections[idx].zero_fill = sec.zero_fill;
         section_map.push(idx);
     }
 
@@ -210,7 +211,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
         obj.symbols.push(ObjectSymbol {
             name: sym.name.clone(),
             section_index,
-            value: sym.offset as u64,
+            value: sym.offset,
             size: 0,
             binding: if sym.is_global {
                 SymbolBinding::Global

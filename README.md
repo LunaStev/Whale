@@ -50,6 +50,14 @@ reject target/layout mismatches. The IR layout API computes checked sizes,
 field offsets, array strides, and natural/allocation alignments for this target.
 It does not implement aggregate ABI passing or native code generation.
 
+BSS reservations retain a logical `zero_fill` count instead of allocating their
+zero bytes. Object section memory size is `data.len() + zero_fill`; non-BSS
+sections require zero `zero_fill`. ELF output uses checked field conversions and
+layout arithmetic and rejects extended section numbering. Its default output
+budget is 256 MiB; library clients can override it with `write_with_limit`.
+The linker layout API returns `Result` and records separate file/memory positions
+and sizes for every input section. It does not yet emit executable segments.
+
 The current emitted object target is AMD64 ELF64. Object metadata records the machine,
 format, byte order, and address width; writers and linker inputs reject unsupported
 combinations. `ObjectFile::new(ObjectFormat::ELF64)` remains an AMD64 convenience

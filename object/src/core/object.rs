@@ -35,9 +35,16 @@ impl ObjectFile {
             name: name.to_string(),
             kind,
             data: Vec::new(),
+            zero_fill: 0,
             align,
         });
         self.sections.len() - 1
+    }
+
+    pub fn write_with_limit(&self, max_output_size: u64) -> Result<Vec<u8>, String> {
+        match self.target.format {
+            ObjectFormat::ELF64 => crate::formats::elf::write_elf_with_limit(self, max_output_size),
+        }
     }
 
     pub fn write(&self) -> Result<Vec<u8>, String> {
