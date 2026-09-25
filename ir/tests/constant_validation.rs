@@ -74,7 +74,10 @@ fn signed_and_unsigned_boundaries_include_real_one_bit_integers() {
 #[test]
 fn constant_categories_do_not_implicitly_convert() {
     for (ty, value) in [
-        (Type::I32, ConstValue::F(1.5)),
+        (
+            Type::I32,
+            ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits())),
+        ),
         (Type::F32, ConstValue::I(1)),
         (Type::Bool, ConstValue::I(1)),
         (Type::Bool, ConstValue::U(0)),
@@ -97,7 +100,21 @@ fn constant_categories_do_not_implicitly_convert() {
         assert!(ir::verify_module(&constant(Type::Bool, ConstValue::Bool(value))).is_ok());
     }
     for ty in [Type::F16, Type::F32, Type::F64] {
-        assert!(ir::verify_module(&constant(ty, ConstValue::F(1.5))).is_ok());
+        assert!(ir::verify_module(&constant(
+            ty.clone(),
+            ConstValue::F(
+                ir::FloatBits::from_f64(
+                    match ty {
+                        Type::F16 => 16,
+                        Type::F32 => 32,
+                        _ => 64,
+                    },
+                    1.5
+                )
+                .expect("supported float width")
+            )
+        ))
+        .is_ok());
     }
 }
 
@@ -116,7 +133,10 @@ fn globals_are_checked_even_without_functions() {
         assert!(ir::verify_module(&m.finish()).is_ok());
     }
     for (ty, value) in [
-        (Type::I32, ConstValue::F(1.5)),
+        (
+            Type::I32,
+            ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits())),
+        ),
         (Type::U8, ConstValue::U(256)),
         (Type::Bool, ConstValue::I(1)),
     ] {

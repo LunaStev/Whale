@@ -24,7 +24,7 @@ fn int(bits: u16, signed: bool, value: i128) -> ast::Expr {
     ast::Expr::Lit(ast::Lit::Int {
         bits,
         signed,
-        value,
+        value: value.to_string(),
     })
 }
 
@@ -185,7 +185,10 @@ fn integer_literals_have_the_same_range_in_globals_and_function_bodies() {
                 }
                 Err(e) => {
                     assert!(!valid, "{e:?}");
-                    assert!(matches!(e, LowerError::InvalidLiteral { .. }));
+                    assert!(matches!(
+                        e,
+                        LowerError::InvalidLiteral { .. } | LowerError::NumericLiteral(_)
+                    ));
                 }
             }
         }

@@ -3,12 +3,14 @@
 use crate::{ConstValue, Type};
 
 /// Check a literal's category and range without rounding or wrapping its value.
-/// Floating precision/NaN preservation is a separate serialization contract.
+/// Floating payload widths must match the declared type.
 pub(crate) fn valid_constant(ty: &Type, value: &ConstValue) -> bool {
     use Type::*;
     match (ty, value) {
         (Bool, ConstValue::Bool(_)) => true,
-        (F16 | F32 | F64, ConstValue::F(_)) => true,
+        (F16, ConstValue::F(crate::FloatBits::F16(_)))
+        | (F32, ConstValue::F(crate::FloatBits::F32(_)))
+        | (F64, ConstValue::F(crate::FloatBits::F64(_))) => true,
         (I128, ConstValue::I(_)) | (U128, ConstValue::U(_)) => true,
         (I1 | I8 | I16 | I32 | I64, ConstValue::I(v)) => {
             let bits = match ty {

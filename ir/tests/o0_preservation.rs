@@ -7,7 +7,7 @@ fn literal(value: i128) -> ast::Expr {
     ast::Expr::Lit(ast::Lit::Int {
         bits: 32,
         signed: true,
-        value,
+        value: value.to_string(),
     })
 }
 fn expression(value: i128) -> ast::Stmt {

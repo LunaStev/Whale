@@ -30,7 +30,11 @@ fn switch_checks_scrutinee_category_range_and_duplicates() {
         (Type::I32, Type::I32, vec![ConstValue::Bool(true)]),
         (Type::I32, Type::I32, vec![ConstValue::U(1)]),
         (Type::I8, Type::I8, vec![ConstValue::I(128)]),
-        (Type::I32, Type::I32, vec![ConstValue::F(1.0)]),
+        (
+            Type::I32,
+            Type::I32,
+            vec![ConstValue::F(ir::FloatBits::F64(1.0f64.to_bits()))],
+        ),
         (Type::F32, Type::F32, vec![]),
         (
             Type::Bool,

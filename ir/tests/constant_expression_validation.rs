@@ -147,11 +147,14 @@ fn float_literals_compare_payloads_without_nan_or_signed_zero_false_matches() {
         f64::from_bits(0x7ff8_0000_0000_0042),
     ] {
         let mut m = module(
-            ConstExpr::literal(Type::F64, ConstValue::F(value)),
-            ConstValue::F(value),
+            ConstExpr::literal(
+                Type::F64,
+                ConstValue::F(ir::FloatBits::F64(value.to_bits())),
+            ),
+            ConstValue::F(ir::FloatBits::F64(value.to_bits())),
         );
         verify_module(&m).unwrap();
-        m.globals[0].init = ConstValue::F(f64::from_bits(value.to_bits() ^ 1));
+        m.globals[0].init = ConstValue::F(ir::FloatBits::F64(value.to_bits() ^ 1));
         assert!(verify_module(&m).is_err());
     }
 }

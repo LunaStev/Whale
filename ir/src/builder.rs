@@ -389,6 +389,18 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn const_float(&mut self, ty: Type, v: f64) -> ValueId {
+        let width = match ty {
+            Type::F16 => 16,
+            Type::F32 => 32,
+            _ => 64,
+        };
+        self.const_float_bits(
+            ty,
+            crate::FloatBits::from_f64(width, v).expect("supported float width"),
+        )
+    }
+
+    pub fn const_float_bits(&mut self, ty: Type, v: crate::FloatBits) -> ValueId {
         let dst = self.define_value(ty.clone());
         self.cur_block_mut().instructions.push(Instruction::Const {
             dst,

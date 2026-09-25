@@ -114,15 +114,37 @@ Save this minimal typed AST as `program.json`:
 
 ```json
 {
-  "globals": [],
-  "functions": [{
-    "name": "answer",
-    "parameters": [],
-    "return_type": {"Int": {"bits": 32, "signed": true}},
-    "body": [{"Return": {"Lit": {"Int": {
-      "bits": 32, "signed": true, "value": 42
-    }}}}]
-  }]
+  "format_version": 1,
+  "semantics_version": 1,
+  "features": [],
+  "program": {
+    "globals": [],
+    "functions": [
+      {
+        "name": "answer",
+        "parameters": [],
+        "return_type": {
+          "Int": {
+            "bits": 32,
+            "signed": true
+          }
+        },
+        "body": [
+          {
+            "Return": {
+              "Lit": {
+                "Int": {
+                  "bits": 32,
+                  "signed": true,
+                  "value": "42"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -132,7 +154,40 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is defined in [the frontend AST types](ir/src/lower_ast/frontend.rs).
+schema is documented in [AST JSON Schema](ir/schema/ast-v1.schema.json) and
+[the frontend AST types](ir/src/lower_ast/frontend.rs).
+
+The envelope requires `format_version: 1`, `semantics_version: 1`, and
+`features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
+JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
+entry point is `ir::lower_ast::interchange::decode`; its default input limit is
+8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
+f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
+For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
+Replace old bare Program payloads with this envelope and numeric JSON values with
+strings. AST and printed typed IR have independent format versions and a shared
+semantics version; printed IR includes both version fields. Text parsing is still
+unavailable.
+
+The AST supports scalar literals, variables/constants, add/sub/mul, comparisons,
+assignment, return, if/while and break/continue. Function-call expressions and
+aggregate expressions are not supported. Unsupported forms fail explicitly.
+If the binary lacks `socket-cli`, `whale ir` exits with status 2 and prints the
+feature-enabled recovery command shown above.
+
+For a complete invalid input, save the following as `invalid.json`:
+
+```json
+{"format_version":99,"semantics_version":1,"features":[],"program":{"globals":[],"functions":[]}}
+```
+
+```sh
+cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
+```
+
+This exits nonzero with `unsupported AST format_version 99; expected 1`. It does
+not create `rejected.wir`; an existing output is preserved. Lowering/type errors
+likewise fail before output publication.
 
 ### Wrap raw bytes in an object
 
@@ -145,6 +200,36 @@ cargo run --release --locked -- object code.bin -o code.o
 This places the input bytes in an ELF64 `.text` section and defines a global
 `start` symbol at offset zero. It does not compile textual IR or disassemble
 existing object files.
+
+### Optional Wave ELF record implementation
+
+The default Rust path needs no Wave compiler. An explicit build can use Wave for
+ELF64 header, section, symbol and RELA record serialization. Layout, validation,
+allocation and symbol resolution remain in Rust. This bootstrap supports a Linux
+x86_64 host building a Linux x86_64 Whale binary; it does not add an output target.
+
+With Rust, LLVM 21 development libraries, a C linker and `ar` installed:
+
+```sh
+git clone https://github.com/wavefnd/Wave.git /tmp/whale-wave-bootstrap
+git -C /tmp/whale-wave-bootstrap checkout --detach 8a465e30aeea4b817d925cdd0e8d08c1bb029c9a
+python3 tools/build_wave_elf.py --wave-source /tmp/whale-wave-bootstrap --out-dir /tmp/whale-wave-elf
+WHALE_WAVE_ELF_DIR=/tmp/whale-wave-elf cargo build --locked --all-features
+WHALE_WAVE_ELF_DIR=/tmp/whale-wave-elf cargo test --locked --workspace --all-features
+```
+
+The script verifies the source revision and tracked modifications, builds the
+bootstrap compiler with its lockfile, then compiles `object/wave/elf_records.wave`
+with its LLVM backend. The Wave object is linked statically; the resulting Whale
+needs no `wavec` at runtime. An invalid requested archive/host is a build error,
+not an automatic fallback. Unset `WHALE_WAVE_ELF_DIR` to build the Rust path.
+`object::formats::elf::WAVE_ELF_ENABLED` reports the selected build path.
+
+The ABI uses u64 field arrays and caller-owned output buffers with explicit
+counts/capacity. No allocator ownership crosses the boundary. The Wave routine
+rejects unsupported records, short buffers and field overflow before writing.
+Dedicated tests compare complete ELF output with the Rust path. This is the
+first partial Wave implementation, not a self-hosted Whale build.
 
 ## Development
 

@@ -4,6 +4,7 @@ pub mod block;
 pub mod builder;
 pub mod const_expr;
 mod constant;
+pub mod float;
 pub mod function;
 pub mod instr;
 pub mod layout;
@@ -24,7 +25,12 @@ pub use lower_ast::*;
 pub use block::*;
 pub use builder::*;
 pub use const_expr::*;
+pub use float::*;
 pub use function::*;
+
+/// Independently versioned printed typed IR and shared execution semantics.
+pub const IR_FORMAT_VERSION: u32 = 1;
+pub const SEMANTICS_VERSION: u32 = 1;
 pub use instr::*;
 pub use layout::*;
 pub use module::*;
@@ -84,7 +90,7 @@ mod tests {
                 init: s::Expr::Lit(s::Lit::Int {
                     bits: 32,
                     signed: true,
-                    value: 123,
+                    value: (123).to_string(),
                 }),
             }],
             functions: vec![s::Function {
@@ -190,7 +196,7 @@ mod tests {
                         init: Some(s::Expr::Lit(s::Lit::Int {
                             bits: 32,
                             signed: true,
-                            value: 0,
+                            value: (0).to_string(),
                         })),
                     },
                     s::Stmt::If {
@@ -239,7 +245,7 @@ mod tests {
             s::Expr::Lit(s::Lit::Int {
                 bits: 32,
                 signed: true,
-                value: v,
+                value: (v).to_string(),
             })
         };
 
@@ -332,7 +338,7 @@ mod tests {
                         init: Some(s::Expr::Lit(s::Lit::Int {
                             bits: 32,
                             signed: true,
-                            value: 0,
+                            value: (0).to_string(),
                         })),
                     },
                     s::Stmt::While {
@@ -343,7 +349,7 @@ mod tests {
                                 value: s::Expr::Lit(s::Lit::Int {
                                     bits: 32,
                                     signed: true,
-                                    value: 1,
+                                    value: (1).to_string(),
                                 }),
                             },
                             s::Stmt::Break,
@@ -352,7 +358,7 @@ mod tests {
                                 value: s::Expr::Lit(s::Lit::Int {
                                     bits: 32,
                                     signed: true,
-                                    value: 2,
+                                    value: (2).to_string(),
                                 }),
                             },
                         ],

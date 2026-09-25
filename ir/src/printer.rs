@@ -8,6 +8,11 @@ use crate::{
 pub fn print_module(m: &Module) -> String {
     let mut out = String::new();
     out.push_str("module {\n");
+    out.push_str(&format!(
+        "  format_version {}\n  semantics_version {}\n",
+        crate::IR_FORMAT_VERSION,
+        crate::SEMANTICS_VERSION
+    ));
     out.push_str(&format!("  target \"{}\"\n", m.target));
     out.push_str("  datalayout { ");
     out.push_str(&format!(
@@ -432,17 +437,7 @@ fn fmt_const(c: &ConstValue) -> String {
         }
         ConstValue::I(i) => i.to_string(),
         ConstValue::U(u) => u.to_string(),
-        ConstValue::F(x) => {
-            if x.is_nan() {
-                "nan".into()
-            } else if x.is_infinite() && x.is_sign_positive() {
-                "+inf".into()
-            } else if x.is_infinite() {
-                "-inf".into()
-            } else {
-                x.to_string()
-            }
-        }
+        ConstValue::F(x) => x.to_string(),
     }
 }
 
