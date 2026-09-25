@@ -150,3 +150,12 @@ fn every_float_width_preserves_zero_infinity_and_nan_storage() {
         }
     }
 }
+
+#[test]
+fn unit_variant_objects_have_the_same_meaning_and_encode_canonically() {
+    let source = r#"{"format_version":1,"semantics_version":1,"features":[],"program":{"globals":[],"functions":[{"name":"empty","parameters":[],"return_type":{"Void":null},"body":[{"Return":null}]}]}}"#;
+    let encoded = encode(decode(source).unwrap()).unwrap();
+    assert!(encoded.contains("\"return_type\": \"Void\""));
+    ir::verify_module(&lower(source).unwrap()).unwrap();
+    assert!(decode(&source.replace("\"Void\":null", "\"Void\":{\"extra\":0}")).is_err());
+}

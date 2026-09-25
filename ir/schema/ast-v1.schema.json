@@ -141,6 +141,30 @@
             "Void",
             "Bool"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Void": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Void"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Bool": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Bool"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -548,6 +572,30 @@
             "Break",
             "Continue"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Break": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Break"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Continue": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Continue"
+          ],
+          "additionalProperties": false
         }
       ]
     },
