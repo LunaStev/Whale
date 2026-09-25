@@ -133,7 +133,7 @@ impl ConstExpr {
 pub(crate) fn same_value(left: &ConstValue, right: &ConstValue) -> bool {
     match (left, right) {
         // Compare the stored payload, including signed zero and NaN bits.
-        (ConstValue::F(a), ConstValue::F(b)) => a.to_bits() == b.to_bits(),
+        (ConstValue::F(a), ConstValue::F(b)) => a == b,
         _ => left == right,
     }
 }
@@ -194,12 +194,23 @@ fn const_bin(
         let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
             return Err(ConstEvalError::UnsupportedOperation);
         };
+        let width = a.width();
+        let (a, b) = (a.to_f64(), b.to_f64());
         let out = match op {
             ConstBinaryOp::Add => a + b,
             ConstBinaryOp::Sub => a - b,
             ConstBinaryOp::Mul => a * b,
         };
-        return Ok(ConstValue::F(out));
+        let value = if out.is_nan() {
+            match width {
+                16 => crate::FloatBits::F16(0x7e00),
+                32 => crate::FloatBits::F32(0x7fc00000),
+                _ => crate::FloatBits::F64(0x7ff8000000000000),
+            }
+        } else {
+            crate::FloatBits::from_f64(width, out).expect("supported float width")
+        };
+        return Ok(ConstValue::F(value));
     }
 
     // int
@@ -241,6 +252,7 @@ fn const_cmp(
         let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
             return Err(ConstEvalError::UnsupportedOperation);
         };
+        let (a, b) = (a.to_f64(), b.to_f64());
         return Ok(match op {
             ConstCompareOp::Eq => a == b,
             ConstCompareOp::Ne => a != b,

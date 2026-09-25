@@ -467,7 +467,7 @@ fn emit_const_value(fb: &mut crate::FunctionBuilder<'_>, ty: &Type, v: &ConstVal
         ConstValue::Bool(b) => fb.const_bool(*b),
         ConstValue::I(i) => fb.const_int(ty.clone(), *i),
         ConstValue::U(u) => fb.const_uint(ty.clone(), *u),
-        ConstValue::F(x) => fb.const_float(ty.clone(), *x),
+        ConstValue::F(x) => fb.const_float_bits(ty.clone(), *x),
     }
 }
 
@@ -587,17 +587,25 @@ fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
             value,
         } => {
             let ty = super::support::int_type(*bits, *signed)?;
-            let payload = if *signed {
-                ConstValue::I(*value)
-            } else {
-                if *value < 0 {
-                    return Err(LowerError::InvalidLiteral {
-                        ty,
-                        value: ConstValue::I(*value),
-                    });
-                }
-                ConstValue::U(*value as u128)
-            };
+            let digits = value.strip_prefix('-').unwrap_or(value);
+            if digits.is_empty()
+                || !digits.bytes().all(|b| b.is_ascii_digit())
+                || (!*signed && value.starts_with('-'))
+            {
+                return Err(LowerError::NumericLiteral(
+                    "expected decimal digits with an optional signed minus".into(),
+                ));
+            }
+            let payload =
+                if *signed {
+                    ConstValue::I(value.parse().map_err(|_| {
+                        LowerError::NumericLiteral("integer exceeds i128 range".into())
+                    })?)
+                } else {
+                    ConstValue::U(value.parse().map_err(|_| {
+                        LowerError::NumericLiteral("integer exceeds u128 range".into())
+                    })?)
+                };
             if !crate::constant::valid_constant(&ty, &payload) {
                 return Err(LowerError::InvalidLiteral { ty, value: payload });
             }
@@ -605,7 +613,12 @@ fn lit_to_const(l: &frontend::Lit) -> Result<(Type, ConstValue), LowerError> {
         }
         frontend::Lit::Float { bits, value } => {
             let ty = super::support::float_type(*bits)?;
-            (ty, ConstValue::F(*value))
+            (
+                ty,
+                ConstValue::F(
+                    crate::FloatBits::parse(*bits, value).map_err(LowerError::NumericLiteral)?,
+                ),
+            )
         }
     })
 }
@@ -619,7 +632,7 @@ fn lower_lit_o0(
         ConstValue::Bool(v) => fb.const_bool(v),
         ConstValue::I(v) => fb.const_int(ty.clone(), v),
         ConstValue::U(v) => fb.const_uint(ty.clone(), v),
-        ConstValue::F(v) => fb.const_float(ty.clone(), v),
+        ConstValue::F(v) => fb.const_float_bits(ty.clone(), v),
     };
     Ok((id, ty))
 }

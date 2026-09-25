@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub struct Program {
     pub globals: Vec<GlobalConst>,
@@ -8,6 +9,7 @@ pub struct Program {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub struct GlobalConst {
     pub name: String,
@@ -16,6 +18,7 @@ pub struct GlobalConst {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub struct Function {
     pub name: String,
@@ -25,6 +28,7 @@ pub struct Function {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub struct Parameter {
     pub name: String,
@@ -32,6 +36,7 @@ pub struct Parameter {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum TypeRef {
     Void,
@@ -44,6 +49,7 @@ pub enum TypeRef {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Return(Option<Expr>),
@@ -78,6 +84,7 @@ pub enum Stmt {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Expr {
     Var(String),
@@ -95,6 +102,7 @@ pub enum Expr {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Copy)]
 pub enum CmpOpRef {
     Eq,
@@ -106,21 +114,23 @@ pub enum CmpOpRef {
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Lit {
     Bool(bool),
     Int {
         bits: u16,
         signed: bool,
-        value: i128,
+        value: String,
     },
     Float {
         bits: u16,
-        value: f64,
+        value: String,
     },
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, Copy)]
 pub enum BinOpRef {
     Add,

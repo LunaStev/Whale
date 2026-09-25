@@ -7,7 +7,7 @@ pub enum ConstValue {
     Bool(bool),
     I(i128),
     U(u128),
-    F(f64),
+    F(crate::FloatBits),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

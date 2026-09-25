@@ -1,6 +1,6 @@
-use std::{fs, process};
+use std::{fs, io::Read, process};
 
-use ir::lower_ast::{frontend, lower_o0};
+use ir::lower_ast::{interchange, lower_o0};
 use ir::{printer, verifier, Target};
 
 pub fn run(args: Vec<String>) {
@@ -81,13 +81,20 @@ pub fn run(args: Vec<String>) {
     });
 
     // 1) Read socket json
-    let src = fs::read_to_string(&input).unwrap_or_else(|e| {
+    let src = (|| -> std::io::Result<String> {
+        let mut source = String::new();
+        fs::File::open(&input)?
+            .take((interchange::DEFAULT_MAX_INPUT_BYTES + 1) as u64)
+            .read_to_string(&mut source)?;
+        Ok(source)
+    })()
+    .unwrap_or_else(|e| {
         eprintln!("Failed to read {}: {}", input, e);
         process::exit(1);
     });
 
     // 2) JSON -> frontend::Program
-    let program: frontend::Program = serde_json::from_str(&src).unwrap_or_else(|e| {
+    let program = interchange::decode(&src).unwrap_or_else(|e| {
         eprintln!("Failed to parse socket JSON: {}", e);
         process::exit(1);
     });
@@ -137,8 +144,11 @@ fn print_help() {
     println!("  --help           Show this help");
     println!();
     println!("Input format:");
-    println!("  <socket.json> must be a JSON that matches ir::lower_ast::frontend::Program");
-    println!("  (SOCKET_VERSION must match the current socket version in ir::lower_ast)");
+    println!(
+        "  Required envelope: format_version: 1, semantics_version: 1, features: [], program: AST"
+    );
+    println!("  Integer values are decimal strings; float values are exact-width 0x bit strings.");
+    println!("  Unknown fields/features, duplicate keys and unversioned input are rejected.");
     println!();
     println!("Examples:");
     println!("  whale ir lower program.json");

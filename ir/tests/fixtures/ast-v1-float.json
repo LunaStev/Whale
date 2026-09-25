@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "semantics_version": 1,
+  "features": [],
+  "program": {
+    "globals": [],
+    "functions": [
+      {
+        "name": "answer",
+        "parameters": [],
+        "return_type": {
+          "Float": {
+            "bits": 32
+          }
+        },
+        "body": [
+          {
+            "Return": {
+              "Lit": {
+                "Float": {
+                  "bits": 32,
+                  "value": "0xffc01234"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

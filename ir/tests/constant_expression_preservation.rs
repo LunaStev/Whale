@@ -7,7 +7,7 @@ fn int(value: i128) -> ast::Expr {
     ast::Expr::Lit(ast::Lit::Int {
         bits: 32,
         signed: true,
-        value,
+        value: value.to_string(),
     })
 }
 fn sum(left: ast::Expr, right: ast::Expr) -> ast::Expr {

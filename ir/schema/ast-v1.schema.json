@@ -1,0 +1,634 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Whale AST format 1, semantics 1",
+  "$comment": "Duplicate raw keys must be rejected before JSON Schema validation. Declared integer ranges and expression/type compatibility are checked by lowering; not all represented types can be used by every scalar operation.",
+  "type": "object",
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "semantics_version": {
+      "const": 1
+    },
+    "features": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "program": {
+      "$ref": "#/$defs/Program"
+    }
+  },
+  "required": [
+    "format_version",
+    "semantics_version",
+    "features",
+    "program"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Type": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Int": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    1,
+                    8,
+                    16,
+                    32,
+                    64,
+                    128
+                  ]
+                },
+                "signed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "bits",
+                "signed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Int"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Float": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    16,
+                    32,
+                    64
+                  ]
+                }
+              },
+              "required": [
+                "bits"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Float"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Ptr": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "Ptr"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Array": {
+              "type": "object",
+              "properties": {
+                "elem": {
+                  "$ref": "#/$defs/Type"
+                },
+                "len": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                }
+              },
+              "required": [
+                "elem",
+                "len"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Array"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Opaque": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Opaque"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "enum": [
+            "Void",
+            "Bool"
+          ]
+        }
+      ]
+    },
+    "Literal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "Bool"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Int": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    1,
+                    8,
+                    16,
+                    32,
+                    64,
+                    128
+                  ]
+                },
+                "signed": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+$"
+                }
+              },
+              "required": [
+                "bits",
+                "signed",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Int"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Float": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 16
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{4}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 32
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{8}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{16}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "Float"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Expr": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Var": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Var"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Lit": {
+              "$ref": "#/$defs/Literal"
+            }
+          },
+          "required": [
+            "Lit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Binary": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "op": {
+                  "enum": [
+                    "Add",
+                    "Sub",
+                    "Mul"
+                  ]
+                },
+                "right": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Binary"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Cmp": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "op": {
+                  "enum": [
+                    "Eq",
+                    "Ne",
+                    "Lt",
+                    "Le",
+                    "Gt",
+                    "Ge"
+                  ]
+                },
+                "right": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Cmp"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Stmt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Return": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Expr"
+                }
+              ]
+            }
+          },
+          "required": [
+            "Return"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ConstDecl": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "init": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "name",
+                "ty",
+                "init"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "ConstDecl"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VarDecl": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "init": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Expr"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "ty"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "VarDecl"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Assign": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Assign"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ExprStmt": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "ExprStmt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "If": {
+              "type": "object",
+              "properties": {
+                "cond": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "then_body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                },
+                "else_body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                }
+              },
+              "required": [
+                "cond",
+                "then_body",
+                "else_body"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "If"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "While": {
+              "type": "object",
+              "properties": {
+                "cond": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                }
+              },
+              "required": [
+                "cond",
+                "body"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "While"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "enum": [
+            "Break",
+            "Continue"
+          ]
+        }
+      ]
+    },
+    "Program": {
+      "type": "object",
+      "properties": {
+        "globals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "ty": {
+                "$ref": "#/$defs/Type"
+              },
+              "init": {
+                "$ref": "#/$defs/Expr"
+              }
+            },
+            "required": [
+              "name",
+              "ty",
+              "init"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "ty": {
+                      "$ref": "#/$defs/Type"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "ty"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "return_type": {
+                "$ref": "#/$defs/Type"
+              },
+              "body": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Stmt"
+                }
+              }
+            },
+            "required": [
+              "name",
+              "parameters",
+              "return_type",
+              "body"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "globals",
+        "functions"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
