@@ -75,28 +75,6 @@ pub(crate) fn map_binop(op: frontend::BinOpRef, ty: &Type) -> Result<BinOp, Lowe
     }
 }
 
-pub(crate) fn align_of(ty: &Type, ptr_bits: u32) -> u32 {
-    match ty {
-        Type::Void => 1,
-
-        Type::Bool | Type::I1 | Type::U1 | Type::I8 | Type::U8 => 1,
-        Type::I16 | Type::U16 | Type::F16 => 2,
-        Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 => 8,
-        Type::I128 | Type::U128 => 16,
-
-        Type::Ptr(_) => (ptr_bits / 8).max(1),
-
-        Type::Array(elem, _) => align_of(elem, ptr_bits),
-
-        Type::Struct(fields) | Type::Tuple(fields) => fields
-            .iter()
-            .map(|t| align_of(t, ptr_bits))
-            .max()
-            .unwrap_or(1),
-    }
-}
-
 fn is_float(ty: &Type) -> bool {
     matches!(ty, Type::F16 | Type::F32 | Type::F64)
 }

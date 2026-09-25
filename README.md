@@ -46,8 +46,9 @@ native compilation pipeline are still being developed.
 The IR target selector accepts only `x86_64-whale-linux`; unknown targets fail
 with the supported choice, including with `--no-verify`. Its output data layout
 is 64-bit little endian on every build host. Library lowering and verification
-reject target/layout mismatches. Aggregate size, field-offset, and stride
-calculation remain pending.
+reject target/layout mismatches. The IR layout API computes checked sizes,
+field offsets, array strides, and natural/allocation alignments for this target.
+It does not implement aggregate ABI passing or native code generation.
 
 The current emitted object target is AMD64 ELF64. Object metadata records the machine,
 format, byte order, and address width; writers and linker inputs reject unsupported

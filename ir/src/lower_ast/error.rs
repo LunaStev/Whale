@@ -5,6 +5,7 @@ use crate::{ConstValue, Type};
 #[derive(Debug)]
 pub enum LowerError {
     Target(crate::TargetError),
+    Layout(crate::LayoutError),
     UnsupportedType(String),
     UnknownVariable(String),
     TypeMismatch { expected: Type, got: Type },
