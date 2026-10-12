@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-use crate::{CallError, Callee, Function, Instruction, Module, Type, VerifyError};
+use crate::{CallError, Callee, Instruction, Module, Type, VerifyError};
 use std::collections::HashSet;
 
 fn error(name: &str, reason: CallError) -> VerifyError {
@@ -70,7 +70,7 @@ pub(super) fn verify_declarations(m: &Module, limits: crate::IrLimits) -> Result
 
 pub(super) fn verify_instruction(
     m: &Module,
-    f: &Function,
+    f: &super::IndexedFunction<'_>,
     ins: &Instruction,
     limits: crate::IrLimits,
 ) -> Result<(), VerifyError> {

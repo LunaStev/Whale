@@ -5,6 +5,14 @@ use crate::{ConstEvalError, ConstExpr, ConstRef, ConstValue, Function, Instructi
 
 type Values = HashMap<ConstRef, (Type, ConstValue)>;
 
+fn lookup<'a>(
+    locals: &'a Values,
+    globals: &'a Values,
+    reference: ConstRef,
+) -> Option<&'a (Type, ConstValue)> {
+    locals.get(&reference).or_else(|| globals.get(&reference))
+}
+
 struct Definition<'a> {
     id: ConstRef,
     ty: &'a Type,
@@ -16,6 +24,7 @@ fn evaluate(
     scope: &str,
     definitions: Vec<Definition<'_>>,
     mut values: Values,
+    globals: &Values,
     limits: crate::IrLimits,
 ) -> Result<Values, VerifyError> {
     let error = |declaration, reason| VerifyError::InvalidConstExpression {
@@ -25,7 +34,9 @@ fn evaluate(
     };
     let mut indices = HashMap::new();
     for (i, definition) in definitions.iter().enumerate() {
-        if indices.insert(definition.id, i).is_some() || values.contains_key(&definition.id) {
+        if indices.insert(definition.id, i).is_some()
+            || lookup(&values, globals, definition.id).is_some()
+        {
             return Err(error(
                 definition.id,
                 ConstEvalError::DuplicateDefinition(definition.id),
@@ -41,7 +52,7 @@ fn evaluate(
     for (i, definition) in definitions.iter().enumerate() {
         let mut seen = HashSet::new();
         for reference in definition.expression.references() {
-            if !seen.insert(reference) || values.contains_key(&reference) {
+            if !seen.insert(reference) || lookup(&values, globals, reference).is_some() {
                 continue;
             }
             let &dependency = indices
@@ -59,7 +70,10 @@ fn evaluate(
         let definition = &definitions[i];
         let result = definition
             .expression
-            .evaluate_with_limits(&|reference| values.get(&reference).cloned(), limits)
+            .evaluate_with_limits(
+                &|reference| lookup(&values, globals, reference).cloned(),
+                limits,
+            )
             .map_err(|reason| error(definition.id, reason))?;
         if !crate::const_expr::same_value(&result, definition.result) {
             return Err(error(definition.id, ConstEvalError::ResultMismatch));
@@ -92,6 +106,7 @@ pub(super) fn verify_globals(m: &Module, limits: crate::IrLimits) -> Result<Valu
             })
             .collect(),
         Values::new(),
+        &Values::new(),
         limits,
     )
 }
@@ -101,7 +116,7 @@ pub(super) fn verify_locals(
     globals: &Values,
     limits: crate::IrLimits,
 ) -> Result<(), VerifyError> {
-    let mut values = globals.clone();
+    let mut values = Values::new();
     let mut definitions = Vec::new();
     for ins in f.blocks.iter().flat_map(|b| &b.instructions) {
         match ins {
@@ -122,5 +137,30 @@ pub(super) fn verify_locals(
             _ => {}
         }
     }
-    evaluate(&f.name, definitions, values, limits).map(|_| ())
+    evaluate(&f.name, definitions, values, globals, limits).map(|_| ())
+}
+
+#[cfg(test)]
+mod sharing_tests {
+    use super::*;
+    #[test]
+    fn overlay_borrows_the_verified_global_entry() {
+        let id = ConstRef::Global(crate::GlobalId(7));
+        let globals = Values::from([(id, (Type::I32, ConstValue::I(42)))]);
+        let mut locals = Values::new();
+        locals.insert(
+            ConstRef::Local(crate::ValueId(7)),
+            (Type::I32, ConstValue::I(9)),
+        );
+        assert!(std::ptr::eq(
+            lookup(&locals, &globals, id).unwrap(),
+            globals.get(&id).unwrap()
+        ));
+        assert_eq!(
+            lookup(&locals, &globals, ConstRef::Local(crate::ValueId(7)))
+                .unwrap()
+                .1,
+            ConstValue::I(9)
+        );
+    }
 }

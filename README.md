@@ -323,6 +323,25 @@ likewise fail before output publication.
 
 ### Typed IR output and validation
 
+Verification builds one borrowed SSA type index per function and shares verified
+global constants through a read-only overlay. Dominance queries use intervals
+in an iteratively constructed dominator tree; expensive CFG construction,
+intersection and phi work use the module-wide `IrLimits::max_analysis_work`
+budget (default 16,777,216 units). Exhaustion returns an `AnalysisWork` resource
+error. `verify_module_with_stats` reports type lookups, dominance queries and
+analysis work without changing IR identities or ordering.
+
+Repeatable scaling probes can be run explicitly; they record operation counts
+and timings without timing-based pass/fail assertions:
+
+```sh
+cargo test -p ir --locked --test verification_scaling -- --ignored --nocapture
+cargo test -p object --locked --test relocation_grouping -- --ignored --nocapture
+```
+
+ELF serialization groups validated relocations in one input-order pass, keeping
+section order and the order of signed-addend entries within each section.
+
 The printer emits typed IR format 4 with semantics version 1. AST JSON remains
 format 2. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry

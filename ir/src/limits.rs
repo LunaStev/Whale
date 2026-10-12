@@ -15,6 +15,8 @@ pub struct IrLimits {
     pub max_nodes: usize,
     pub max_input_bytes: usize,
     pub max_tokens: usize,
+    /// Shared budget for CFG construction, dominance analysis and phi checks.
+    pub max_analysis_work: usize,
 }
 impl Default for IrLimits {
     fn default() -> Self {
@@ -24,6 +26,7 @@ impl Default for IrLimits {
             max_nodes: 1_000_000,
             max_input_bytes: 8 * 1024 * 1024,
             max_tokens: 1_000_000,
+            max_analysis_work: 16 * 1024 * 1024,
         }
     }
 }
@@ -36,6 +39,7 @@ pub enum Resource {
     InputBytes,
     Tokens,
     Configuration,
+    AnalysisWork,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LimitError {

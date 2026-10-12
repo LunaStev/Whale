@@ -337,13 +337,14 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         elf_syms.push(elf_sym);
     }
 
+    // Validation above guarantees valid section references. Preserve input
+    // order within each section while scanning relocation metadata only once.
+    let mut grouped_relocations = vec![Vec::new(); obj.sections.len()];
+    for relocation in &obj.relocations {
+        grouped_relocations[relocation.section_index].push(relocation);
+    }
     let mut rela_shdr_indices = Vec::new();
-    for (sec_idx, _) in obj.sections.iter().enumerate() {
-        let relocs: Vec<_> = obj
-            .relocations
-            .iter()
-            .filter(|r| r.section_index == sec_idx)
-            .collect();
+    for (sec_idx, relocs) in grouped_relocations.into_iter().enumerate() {
         if relocs.is_empty() {
             continue;
         }
