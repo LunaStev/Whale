@@ -11,6 +11,7 @@ pub fn run() {
     };
 
     match cmd.as_str() {
+        "--help" | "-h" => print_help(),
         "asm" => commands::asm::run(args.collect()),
         "object" => commands::object::run(args.collect()),
         "link" => commands::linker::run(args.collect()),
@@ -25,14 +26,14 @@ pub fn run() {
 
 fn print_help() {
     println!("Usage:");
-    println!("  whale asm [--amd64 | --aarch64] <input> -o <output>");
+    println!("  whale asm --amd64 <input> -o <output.o>");
     println!("  whale object <input> -o <output>");
     println!("  whale link <...>");
     println!("  whale ir <subcommand> [options]");
     println!();
     println!("Commands:");
-    println!("  asm     Assemble source file");
-    println!("  object  Generate object file from binary or IR");
-    println!("  link    Link object files into an executable");
-    println!("  ir      IR tools (verify/print; socket-cli enables AST lower)");
+    println!("  asm     Assemble AMD64 source into an ELF64 object");
+    println!("  object  Wrap raw bytes in an AMD64 ELF64 object");
+    println!("  link    Executable linking (not implemented)");
+    println!("  ir      IR tools (verify/print/run; socket-cli enables AST lower)");
 }
