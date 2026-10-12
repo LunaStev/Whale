@@ -8,6 +8,7 @@ pub enum LowerError {
     Call(crate::CallError),
     VoidCallUsedAsValue,
     NumericLiteral(String),
+    ConstantEvaluation(crate::ConstEvalError),
     Target(crate::TargetError),
     Layout(crate::LayoutError),
     UnsupportedType(String),

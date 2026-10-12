@@ -116,7 +116,7 @@ def smoke(binary, socket, artifacts, emulator=None, sysroot=None):
 
             typed_ir = root / "typed input.wir"
             typed_ir.write_text(
-                'module {\n  format_version 4\n  semantics_version 1\n'
+                'module {\n  format_version 5\n  semantics_version 1\n'
                 '  target "x86_64-whale-linux"\n  datalayout { ptr=64, endian=little }\n\n'
                 '  declare @f7 "answer": whale () -> i32, linkage internal\n\n'
                 '  fn @f7 "answer"() -> i32, entry %b11 {\n  %b11 "entry":\n'
@@ -160,7 +160,7 @@ def smoke(binary, socket, artifacts, emulator=None, sysroot=None):
                 raise AssertionError("typed IR file differs from stdout")
             bad_ir = root / "unknown version.wir"
             bad_ir.write_text(typed_ir.read_text(encoding="utf-8").replace(
-                "format_version 4", "format_version 99"), encoding="utf-8")
+                "format_version 5", "format_version 99"), encoding="utf-8")
             rejected(["ir", "print", bad_ir], root / "rejected text.wir", b"unsupported IR format version")
 
             socket_input = root / "socket input.json"

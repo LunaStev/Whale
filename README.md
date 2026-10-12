@@ -152,11 +152,11 @@ preserving the previous archive on an archiver failure.
 
 ### Execute scalar integer IR
 
-Save this format 4 module as `answer.wir`:
+Save this format 5 module as `answer.wir`:
 
 ```text
 module {
-  format_version 4
+  format_version 5
   semantics_version 1
   target "x86_64-whale-linux"
   datalayout { ptr=64, endian=little }
@@ -229,7 +229,7 @@ Save this minimal typed AST as `program.json`:
 
 ```json
 {
-  "format_version": 2,
+  "format_version": 3,
   "semantics_version": 1,
   "features": [],
   "program": {
@@ -273,25 +273,25 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is documented in [AST JSON Schema](ir/schema/ast-v2.schema.json) and
+schema is documented in [AST JSON Schema](ir/schema/ast-v3.schema.json) and
 [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-The envelope requires `format_version: 2`, `semantics_version: 1`, and
+The envelope requires `format_version: 3` (legacy format 2 is also accepted), `semantics_version: 1`, and
 `features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
 JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
 entry point is `ir::lower_ast::interchange::decode`; its default input limit is
 8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
 f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
 For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
-Migrate format 1 inputs by setting `format_version` to 2, adding a `declarations`
+Migrate format 1 inputs by setting `format_version` to 3, adding a `declarations`
 array to `program`, and adding `convention` and `linkage` to every definition.
 Internal functions use `"Whale"` and `"Internal"`; external functions must supply
 a nonempty `link_name`. Missing versions and format 1 inputs are rejected.
 Integers and floats retain their exact string encoding. AST and printed typed IR have independent format versions and a shared
-semantics version; printed IR includes both version fields. Typed text IR formats 3 and 4
+semantics version; printed IR includes both version fields. Typed text IR formats 3, 4 and 5
 can be read and verified with `ir::parse_module`.
 
-The AST supports scalar literals, variables/constants, add/sub/mul, comparisons,
+The AST supports scalar literals, variables/constants, arithmetic, comparisons,
 assignment, return, if/while, break/continue, function declarations, direct calls,
 and typed function pointers with indirect calls. Aggregate expressions, variadic
 signatures, and SysV64 aggregate signatures are not supported. Unsupported forms fail explicitly.
@@ -317,9 +317,20 @@ For a complete invalid input, save the following as `invalid.json`:
 cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
 ```
 
-This exits nonzero with `unsupported AST format_version 99; expected 2`. It does
+This exits nonzero with `unsupported AST format_version 99; expected 3`. It does
 not create `rejected.wir`; an existing output is preserved. Lowering/type errors
 likewise fail before output publication.
+
+AST format 3 adds integer `BitAnd`, `BitOr`, `BitXor`, `Div`, `Rem`,
+`ShiftLeft`, `ShiftRight`, unary `BitNot`, and Bool-only `LogicalAnd`/`LogicalOr`.
+Integer operands have the same width and signedness. Division/remainder by zero
+trap at runtime and report a constant-evaluation error when evaluated at compile
+time; signed MIN/-1 wraps (remainder zero). Shift counts use their unsigned
+N-bit pattern modulo N, including signed negative bit patterns; unsigned negative
+literals are invalid. Right shift is arithmetic for signed values and logical
+for unsigned values. Bool logical expressions branch and merge through phi,
+evaluating left first and the right side only when needed. O0 retains the right
+side's IR and full constant-expression tree even when it is skipped.
 
 ### Typed IR output and validation
 
@@ -342,8 +353,8 @@ cargo test -p object --locked --test relocation_grouping -- --ignored --nocaptur
 ELF serialization groups validated relocations in one input-order pass, keeping
 section order and the order of signed-addend entries within each section.
 
-The printer emits typed IR format 4 with semantics version 1. AST JSON remains
-format 2. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
+The printer emits typed IR format 5 with semantics version 1. AST JSON writes
+format 3. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry
 block. Name/string fields escape quotes, backslashes, control characters and
 Unicode line separators. See the [identity fixture](ir/tests/fixtures/text-identities-v3.wir)
@@ -363,12 +374,14 @@ cargo run --locked -- ir verify ir/tests/fixtures/calls-v3.wir
 cargo run --locked -- ir print ir/tests/fixtures/calls-v3.wir -o canonical.wir
 ```
 
-`ir::parse_module` reads **and verifies** formats 3 and 4. Print-parse-print
+`ir::parse_module` reads **and verifies** formats 3, 4 and 5. Print-parse-print
 preserves explicit scoped IDs, quoted names, entry and block order, types,
 exact integer/float payloads, constant-expression trees, alignment, signatures
 and external link names. Whitespace and `//` comments are canonicalized. It
-accepts current printer instruction forms; format 4 adds `uninit`. Format 3
-without `undef` remains readable and canonicalizes to format 4. Regenerate old
+accepts current printer instruction forms; format 4 adds `uninit`, and format 5 adds preserved constant bitwise,
+division/remainder, shift and lazy logical operators. Formats 3/4 without `undef`
+remain readable and canonicalize to format 5. Extended constant syntax requires
+format 5; extended frontend operators require AST format 3. Regenerate old
 `undef` lowering from its AST rather than replacing unspecified values with zero. Unknown versions, fields,
 opcodes, escapes, trailing input and inconsistent type annotations are errors.
 Diagnostics include a byte offset and one-based Unicode-scalar line/column;
@@ -395,10 +408,10 @@ fallible call/signature checks. Public `layout_of_with_limit` clamps requested
 nesting to the safe `MAX_IR_NESTING` ceiling while accepting shallow types with
 larger overrides.
 
-Direct frontend AST processing uses `AstLimits`: default depth 64, 100,000 nodes,
+Direct frontend AST processing uses `AstLimits`: default depth 32, 100,000 nodes,
 8 MiB total string bytes and 8 MiB encoded output. `lower_o0_with_limits` and
 `interchange::encode_with_limits` accept overrides; recursive work remains capped
-at `MAX_AST_DEPTH` (64). Shared iterative inspection precedes lowering or pretty
+at `MAX_AST_DEPTH` (32). Shared iterative inspection precedes lowering or pretty
 JSON serialization, and owned rejected ASTs are disposed iteratively. Borrowed
 ASTs stay caller-owned. The bounded encoder stops before output storage exceeds
 its byte budget.
@@ -412,7 +425,7 @@ payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
 
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
-Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 4 output).
+Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 5 output).
 Text parsing does not provide IR execution or native code generation. Format 2
 printed text requires explicit migration; it is not silently accepted. New
 syntax or semantics requires an appropriate version change, with unknown

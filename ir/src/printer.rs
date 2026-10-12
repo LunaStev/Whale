@@ -289,6 +289,7 @@ fn print_instr(i: &Instruction) -> String {
 pub fn print_const_expr(expr: &crate::ConstExpr) -> String {
     use crate::{ConstBinaryOp as B, ConstCompareOp as C, ConstExprKind as K, ConstRef};
     match &expr.kind {
+        K::Not(value) => format!("bit_not({})", print_const_expr(value)),
         K::Literal(value) => format!("{} {}", expr.ty, fmt_const(value)),
         K::Reference(reference) => match reference {
             ConstRef::Global(id) => format!("{} @g{}", expr.ty, id.0),
@@ -300,6 +301,15 @@ pub fn print_const_expr(expr: &crate::ConstExpr) -> String {
                 B::Add => "add",
                 B::Sub => "sub",
                 B::Mul => "mul",
+                B::BitAnd => "bit_and",
+                B::BitOr => "bit_or",
+                B::BitXor => "bit_xor",
+                B::Div => "div",
+                B::Rem => "rem",
+                B::ShiftLeft => "shift_left",
+                B::ShiftRight => "shift_right",
+                B::LogicalAnd => "logical_and",
+                B::LogicalOr => "logical_or",
             },
             print_const_expr(left),
             print_const_expr(right)

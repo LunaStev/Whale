@@ -492,6 +492,56 @@ fn lower_expr_o0(
 
         frontend::Expr::Lit(lit) => lower_lit_o0(fb, lit),
 
+        frontend::Expr::BitNot(value) => {
+            let (value, ty) = lower_expr_o0(fb, env, global_consts, value, target)?;
+            if !super::support::is_int_like(&ty) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            Ok((fb.not(ty.clone(), value), ty))
+        }
+        frontend::Expr::Binary {
+            left,
+            op: frontend::BinOpRef::LogicalAnd | frontend::BinOpRef::LogicalOr,
+            right,
+        } => {
+            let frontend::Expr::Binary { op, .. } = expr else {
+                unreachable!()
+            };
+            let (left_value, left_ty) = lower_expr_o0(fb, env, global_consts, left, target)?;
+            if left_ty != Type::Bool {
+                return Err(LowerError::TypeMismatch {
+                    expected: Type::Bool,
+                    got: left_ty,
+                });
+            }
+            let left_exit = fb.current_block_id();
+            let rhs_block = fb.create_block("logical.rhs");
+            let cont_block = fb.create_block("logical.cont");
+            if matches!(op, frontend::BinOpRef::LogicalAnd) {
+                fb.cbr(left_value, rhs_block, cont_block);
+            } else {
+                fb.cbr(left_value, cont_block, rhs_block);
+            }
+            // Lower and preserve the right expression even if it will be skipped.
+            fb.set_insert_point(rhs_block);
+            let (right_value, right_ty) = lower_expr_o0(fb, env, global_consts, right, target)?;
+            if right_ty != Type::Bool {
+                return Err(LowerError::TypeMismatch {
+                    expected: Type::Bool,
+                    got: right_ty,
+                });
+            }
+            let right_exit = fb.current_block_id();
+            fb.br(cont_block);
+            fb.set_insert_point(cont_block);
+            let result = fb
+                .try_phi(
+                    Type::Bool,
+                    vec![(left_value, left_exit), (right_value, right_exit)],
+                )
+                .map_err(|e| LowerError::Call(crate::CallError::Builder(e)))?;
+            Ok((result, Type::Bool))
+        }
         frontend::Expr::Binary { left, op, right } => {
             let (lv, lty) = lower_expr_o0(fb, env, global_consts, left, target)?;
             let (rv, rty) = lower_expr_o0(fb, env, global_consts, right, target)?;
@@ -566,7 +616,7 @@ fn eval_const_expr(
                 })
             }),
         })
-        .map_err(|_| LowerError::UnsupportedExpr)?;
+        .map_err(LowerError::ConstantEvaluation)?;
     Ok((expression, value))
 }
 
@@ -601,6 +651,16 @@ fn preserve_const_expr(
                 kind: ConstExprKind::Reference(ConstRef::Global(*id)),
             })
         }
+        frontend::Expr::BitNot(value) => {
+            let value = Box::new(preserve_const_expr(value, ctx)?);
+            if !super::support::is_int_like(&value.ty) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            Ok(ConstExpr {
+                ty: value.ty.clone(),
+                kind: ConstExprKind::Not(value),
+            })
+        }
         frontend::Expr::Binary { left, op, right } => {
             let left = Box::new(preserve_const_expr(left, ctx)?);
             let right = Box::new(preserve_const_expr(right, ctx)?);
@@ -610,10 +670,32 @@ fn preserve_const_expr(
                     got: right.ty,
                 });
             }
+            if matches!(
+                op,
+                frontend::BinOpRef::LogicalAnd | frontend::BinOpRef::LogicalOr
+            ) {
+                if left.ty != Type::Bool {
+                    return Err(LowerError::TypeMismatch {
+                        expected: Type::Bool,
+                        got: left.ty,
+                    });
+                }
+            } else {
+                map_binop(*op, &left.ty)?;
+            }
             let op = match op {
                 frontend::BinOpRef::Add => ConstBinaryOp::Add,
                 frontend::BinOpRef::Sub => ConstBinaryOp::Sub,
                 frontend::BinOpRef::Mul => ConstBinaryOp::Mul,
+                frontend::BinOpRef::BitAnd => ConstBinaryOp::BitAnd,
+                frontend::BinOpRef::BitOr => ConstBinaryOp::BitOr,
+                frontend::BinOpRef::BitXor => ConstBinaryOp::BitXor,
+                frontend::BinOpRef::Div => ConstBinaryOp::Div,
+                frontend::BinOpRef::Rem => ConstBinaryOp::Rem,
+                frontend::BinOpRef::ShiftLeft => ConstBinaryOp::ShiftLeft,
+                frontend::BinOpRef::ShiftRight => ConstBinaryOp::ShiftRight,
+                frontend::BinOpRef::LogicalAnd => ConstBinaryOp::LogicalAnd,
+                frontend::BinOpRef::LogicalOr => ConstBinaryOp::LogicalOr,
             };
             Ok(ConstExpr {
                 ty: left.ty.clone(),

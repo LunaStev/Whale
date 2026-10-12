@@ -12,6 +12,7 @@ pub enum BuilderError {
     UnknownParameter { index: usize, count: usize },
     UnknownValue(ValueId),
     TerminatedBlock(BlockId),
+    PhiAfterInstruction(BlockId),
 }
 impl std::fmt::Display for BuilderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,6 +23,9 @@ impl std::fmt::Display for BuilderError {
             }
             Self::UnknownValue(id) => write!(f, "unknown builder value {id:?}"),
             Self::TerminatedBlock(id) => write!(f, "builder block {id:?} is already terminated"),
+            Self::PhiAfterInstruction(id) => {
+                write!(f, "phi must precede other instructions in {id:?}")
+            }
         }
     }
 }
@@ -35,6 +39,51 @@ pub struct ModuleBuilder {
 }
 
 impl<'a> FunctionBuilder<'a> {
+    pub fn current_block_id(&self) -> BlockId {
+        self.insert_block
+    }
+
+    pub fn try_not(&mut self, ty: Type, src: ValueId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[src])?;
+        Ok(self.not(ty, src))
+    }
+
+    pub fn not(&mut self, ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::Not { dst, ty, src });
+        dst
+    }
+
+    /// Append a phi at a block's instruction prefix. Inputs are checked for
+    /// existence; the verifier checks predecessor edges, dominance and types.
+    pub fn try_phi(
+        &mut self,
+        ty: Type,
+        incomings: Vec<(ValueId, BlockId)>,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        for (value, block) in &incomings {
+            self.ensure_values(&[*value])?;
+            self.ensure_block(*block)?;
+        }
+        if self
+            ._cur_block()
+            .instructions
+            .iter()
+            .any(|i| !matches!(i, Instruction::Phi { .. }))
+        {
+            return Err(BuilderError::PhiAfterInstruction(self.insert_block));
+        }
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::Phi { dst, ty, incomings });
+        Ok(dst)
+    }
+
     pub fn entry_block(&self) -> BlockId {
         self.func.entry
     }

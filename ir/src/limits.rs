@@ -145,6 +145,7 @@ impl Budget {
             }
             self.ty(&e.ty)?;
             match &e.kind {
+                ConstExprKind::Not(value) => pending.push((value, depth + 1)),
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. } => {
                     pending.push((right, depth + 1));

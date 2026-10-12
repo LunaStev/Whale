@@ -198,6 +198,13 @@ fn deep_ast_encode_child() {
     assert!(interchange::encode(p)
         .unwrap_err()
         .contains("nesting limit"));
+    let mut e = int();
+    for _ in 0..20_000 {
+        e = Expr::BitNot(Box::new(e));
+    }
+    assert!(interchange::encode(program(e))
+        .unwrap_err()
+        .contains("nesting limit"));
     // Also cover rejection disposal for deep statements and type/signature trees.
     let mut p = program(int());
     let mut ty = TypeRef::Bool;
@@ -255,4 +262,49 @@ fn direct_deep_lowering_is_safe_in_a_capped_child_process() {
 #[test]
 fn owned_deep_encoding_and_disposal_are_safe_in_a_capped_child_process() {
     child("deep_ast_encode_child");
+}
+
+#[test]
+fn accepted_depth_boundary_encodes_and_decodes_all_ast_tree_shapes() {
+    let expr = binary(MAX_AST_DEPTH - 2); // Return is level 1; its expression starts at 2.
+    let p = program(expr);
+    inspect_program(&p, AstLimits::default()).unwrap();
+    let encoded = interchange::encode(p).unwrap();
+    interchange::decode(&encoded).unwrap();
+    let mut body = vec![Stmt::Return(Some(int()))];
+    for _ in 0..MAX_AST_DEPTH - 2 {
+        body = vec![Stmt::While {
+            cond: Expr::Lit(Lit::Bool(false)),
+            body,
+        }];
+    }
+    let mut p = program(int());
+    p.functions[0].body = body;
+    inspect_program(&p, AstLimits::default()).unwrap();
+    let encoded = interchange::encode(p).unwrap();
+    let p = interchange::decode(&encoded).unwrap();
+    let target = Target::X86_64WhaleLinux;
+    let m = lower_o0(&p, target.name(), target.data_layout()).unwrap();
+    ir::verify_module(&m).unwrap();
+    let mut p = program(int());
+    let mut t = TypeRef::Bool;
+    for _ in 0..MAX_AST_DEPTH - 1 {
+        t = TypeRef::Ptr(Box::new(t));
+    }
+    p.functions[0].return_type = t;
+    inspect_program(&p, AstLimits::default()).unwrap();
+    interchange::decode(&interchange::encode(p).unwrap()).unwrap();
+    let mut p = program(int());
+    let mut t = TypeRef::Bool;
+    for _ in 0..(MAX_AST_DEPTH - 1) / 2 {
+        t = TypeRef::FnPtr(Box::new(SignatureRef {
+            params: vec![TypeRef::Bool],
+            ret: t,
+            convention: CallingConvention::Whale,
+            variadic: false,
+        }));
+    }
+    p.functions[0].return_type = t;
+    inspect_program(&p, AstLimits::default()).unwrap();
+    interchange::decode(&interchange::encode(p).unwrap()).unwrap();
 }

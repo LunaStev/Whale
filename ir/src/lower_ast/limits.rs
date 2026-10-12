@@ -3,7 +3,9 @@
 use super::frontend::*;
 
 /// Recursive lowering/serde work must stay below this ceiling even with overrides.
-pub const MAX_AST_DEPTH: usize = 64;
+/// Thirty-two AST levels also fit serde_json's JSON depth cap, including statement
+/// vectors and enum-tag objects that add multiple JSON levels per AST node.
+pub const MAX_AST_DEPTH: usize = 32;
 
 /// Bounds are applied before recursive conversion, cloning, or serialization.
 #[derive(Clone, Copy, Debug)]
@@ -55,6 +57,7 @@ struct Inspect<'a> {
     nodes: usize,
     strings: usize,
     pending: Vec<(Node<'a>, usize)>,
+    extended_ops: bool,
 }
 impl<'a> Inspect<'a> {
     fn count(&mut self) -> Result<(), AstLimitError> {
@@ -86,11 +89,19 @@ impl<'a> Inspect<'a> {
 
 /// Inspect an existing AST without recursively visiting it or cloning its data.
 pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLimitError> {
+    inspect_program_features(program, limits).map(|_| ())
+}
+
+pub(crate) fn inspect_program_features(
+    program: &Program,
+    limits: AstLimits,
+) -> Result<bool, AstLimitError> {
     let mut i = Inspect {
         limits,
         nodes: 0,
         strings: 0,
         pending: Vec::new(),
+        extended_ops: false,
     };
     i.count()?; // program
     for d in &program.declarations {
@@ -139,6 +150,10 @@ pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLi
                 _ => {}
             },
             Node::Expr(e) => match e {
+                Expr::BitNot(value) => {
+                    i.extended_ops = true;
+                    i.push(Node::Expr(value), next)?;
+                }
                 Expr::FunctionRef(s) | Expr::Var(s) => i.string(s)?,
                 Expr::NullFunction(s) => i.push(Node::Signature(s), next)?,
                 Expr::Call { callee, args } => {
@@ -152,7 +167,14 @@ pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLi
                 }
                 Expr::Lit(Lit::Int { value, .. } | Lit::Float { value, .. }) => i.string(value)?,
                 Expr::Lit(Lit::Bool(_)) => {}
-                Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
+                Expr::Binary { left, op, right } => {
+                    if !matches!(op, BinOpRef::Add | BinOpRef::Sub | BinOpRef::Mul) {
+                        i.extended_ops = true;
+                    }
+                    i.push(Node::Expr(left), next)?;
+                    i.push(Node::Expr(right), next)?;
+                }
+                Expr::Cmp { left, right, .. } => {
                     i.push(Node::Expr(left), next)?;
                     i.push(Node::Expr(right), next)?;
                 }
@@ -200,7 +222,7 @@ pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLi
             },
         }
     }
-    Ok(())
+    Ok(i.extended_ops)
 }
 
 enum Owned {
@@ -271,6 +293,7 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 pending.push(Disposal::Types(s.params.into_iter()));
             }
             Owned::Expr(e) => match e {
+                Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*right)));

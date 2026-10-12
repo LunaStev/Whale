@@ -14,6 +14,15 @@ pub enum ConstBinaryOp {
     Add,
     Sub,
     Mul,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Div,
+    Rem,
+    ShiftLeft,
+    ShiftRight,
+    LogicalAnd,
+    LogicalOr,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +45,7 @@ pub struct ConstExpr {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConstExprKind {
+    Not(Box<ConstExpr>),
     Literal(ConstValue),
     Reference(ConstRef),
     Binary {
@@ -56,6 +66,8 @@ pub enum ConstEvalError {
     InvalidLiteral,
     TypeMismatch,
     UnsupportedOperation,
+    DivisionByZero,
+    RemainderByZero,
     UnknownReference(ConstRef),
     DuplicateDefinition(ConstRef),
     CyclicReference,
@@ -76,6 +88,7 @@ impl ConstExpr {
         while let Some(expr) = pending.pop() {
             match &expr.kind {
                 ConstExprKind::Literal(_) => {}
+                ConstExprKind::Not(value) => pending.push(value),
                 ConstExprKind::Reference(reference) => references.push(*reference),
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. } => {
@@ -104,13 +117,17 @@ impl ConstExpr {
         budget
             .expression(self)
             .map_err(ConstEvalError::ResourceLimit)?;
-        // Explicit postorder evaluation preserves left-to-right evaluation and
-        // does not recurse on the caller's expression tree.
-        let mut pending = vec![(self, false)];
-        let mut values = Vec::new();
-        while let Some((expr, finish)) = pending.pop() {
-            let value = match &expr.kind {
-                ConstExprKind::Literal(value) => value.clone(),
+        // Validate every preserved branch before evaluating lazily. Invalid IR
+        // is rejected even if its expression would be skipped at execution.
+        let mut inspect = vec![self];
+        let mut resolved = std::collections::HashMap::new();
+        while let Some(expr) = inspect.pop() {
+            match &expr.kind {
+                ConstExprKind::Literal(v) => {
+                    if !crate::constant::valid_constant(&expr.ty, v) {
+                        return Err(ConstEvalError::InvalidLiteral);
+                    }
+                }
                 ConstExprKind::Reference(reference) => {
                     let (ty, value) =
                         resolve(*reference).ok_or(ConstEvalError::UnknownReference(*reference))?;
@@ -121,33 +138,116 @@ impl ConstExpr {
                     if ty != expr.ty {
                         return Err(ConstEvalError::TypeMismatch);
                     }
-                    value
+                    if !crate::constant::valid_constant(&ty, &value) {
+                        return Err(ConstEvalError::InvalidLiteral);
+                    }
+                    resolved.insert(expr as *const ConstExpr, value);
+                }
+                ConstExprKind::Not(value) => {
+                    if expr.ty != value.ty {
+                        return Err(ConstEvalError::TypeMismatch);
+                    }
+                    if ty_int_bits(&expr.ty).is_none() {
+                        return Err(ConstEvalError::UnsupportedOperation);
+                    }
+                    inspect.push(value);
+                }
+                ConstExprKind::Binary { op, left, right } => {
+                    if left.ty != right.ty || expr.ty != left.ty {
+                        return Err(ConstEvalError::TypeMismatch);
+                    }
+                    let supported =
+                        if matches!(op, ConstBinaryOp::LogicalAnd | ConstBinaryOp::LogicalOr) {
+                            expr.ty == Type::Bool
+                        } else if matches!(expr.ty, Type::F16 | Type::F32 | Type::F64) {
+                            matches!(
+                                op,
+                                ConstBinaryOp::Add | ConstBinaryOp::Sub | ConstBinaryOp::Mul
+                            )
+                        } else {
+                            ty_int_bits(&expr.ty).is_some()
+                        };
+                    if !supported {
+                        return Err(ConstEvalError::UnsupportedOperation);
+                    }
+                    inspect.push(right);
+                    inspect.push(left);
+                }
+                ConstExprKind::Compare { op, left, right } => {
+                    if left.ty != right.ty || expr.ty != Type::Bool {
+                        return Err(ConstEvalError::TypeMismatch);
+                    }
+                    if left.ty == Type::Bool {
+                        if !matches!(op, ConstCompareOp::Eq | ConstCompareOp::Ne) {
+                            return Err(ConstEvalError::UnsupportedOperation);
+                        }
+                    } else if ty_int_bits(&left.ty).is_none()
+                        && !matches!(left.ty, Type::F16 | Type::F32 | Type::F64)
+                    {
+                        return Err(ConstEvalError::UnsupportedOperation);
+                    }
+                    inspect.push(right);
+                    inspect.push(left);
+                }
+            }
+        }
+        // An explicit evaluation stack preserves left-to-right order and lazy
+        // boolean semantics without recursing on the caller's tree.
+        let mut pending = vec![(self, 0u8)];
+        let mut values = Vec::new();
+        while let Some((expr, phase)) = pending.pop() {
+            let value = match &expr.kind {
+                ConstExprKind::Literal(value) => value.clone(),
+                ConstExprKind::Reference(_) => resolved[&(expr as *const ConstExpr)].clone(),
+                ConstExprKind::Not(value) if phase == 0 => {
+                    pending.push((expr, 1));
+                    pending.push((value, 0));
+                    continue;
+                }
+                ConstExprKind::Not(_) => const_not(&expr.ty, &values.pop().expect("not operand"))?,
+                ConstExprKind::Binary {
+                    op: ConstBinaryOp::LogicalAnd | ConstBinaryOp::LogicalOr,
+                    left,
+                    right,
+                } => {
+                    if phase == 0 {
+                        pending.push((expr, 1));
+                        pending.push((left, 0));
+                        continue;
+                    }
+                    let ConstValue::Bool(value) = values.pop().expect("logical operand") else {
+                        return Err(ConstEvalError::TypeMismatch);
+                    };
+                    let ConstExprKind::Binary { op, .. } = expr.kind else {
+                        unreachable!()
+                    };
+                    if phase == 1
+                        && ((op == ConstBinaryOp::LogicalAnd && value)
+                            || (op == ConstBinaryOp::LogicalOr && !value))
+                    {
+                        pending.push((expr, 2));
+                        pending.push((right, 0));
+                        continue;
+                    }
+                    ConstValue::Bool(value)
                 }
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. }
-                    if !finish =>
+                    if phase == 0 =>
                 {
-                    if left.ty != right.ty
-                        || match expr.kind {
-                            ConstExprKind::Compare { .. } => expr.ty != Type::Bool,
-                            _ => expr.ty != left.ty,
-                        }
-                    {
-                        return Err(ConstEvalError::TypeMismatch);
-                    }
-                    pending.push((expr, true));
-                    pending.push((right, false));
-                    pending.push((left, false));
+                    pending.push((expr, 1));
+                    pending.push((right, 0));
+                    pending.push((left, 0));
                     continue;
                 }
                 ConstExprKind::Binary { op, left, .. } => {
-                    let right = values.pop().expect("postorder right operand");
-                    let left_value = values.pop().expect("postorder left operand");
+                    let right = values.pop().expect("right operand");
+                    let left_value = values.pop().expect("left operand");
                     const_bin(*op, &left.ty, &left_value, &right)?
                 }
                 ConstExprKind::Compare { op, left, .. } => {
-                    let right = values.pop().expect("postorder right operand");
-                    let left_value = values.pop().expect("postorder left operand");
+                    let right = values.pop().expect("right operand");
+                    let left_value = values.pop().expect("left operand");
                     ConstValue::Bool(const_cmp(*op, &left.ty, &left_value, &right)?)
                 }
             };
@@ -213,6 +313,18 @@ fn wrap_i(v: i128, ty: &Type) -> i128 {
     }
 }
 
+fn shift_count(ty: &Type, raw: u128) -> u32 {
+    let bits = ty_int_bits(ty).expect("integer expression validated");
+    (wrap_u(raw, ty) % u128::from(bits)) as u32
+}
+fn const_not(ty: &Type, value: &ConstValue) -> Result<ConstValue, ConstEvalError> {
+    match value {
+        ConstValue::I(v) if is_signed_int(ty) => Ok(ConstValue::I(wrap_i(!v, ty))),
+        ConstValue::U(v) if ty_int_bits(ty).is_some() => Ok(ConstValue::U(wrap_u(!v, ty))),
+        _ => Err(ConstEvalError::UnsupportedOperation),
+    }
+}
+
 fn const_bin(
     op: ConstBinaryOp,
     ty: &Type,
@@ -230,6 +342,7 @@ fn const_bin(
             ConstBinaryOp::Add => a + b,
             ConstBinaryOp::Sub => a - b,
             ConstBinaryOp::Mul => a * b,
+            _ => return Err(ConstEvalError::UnsupportedOperation),
         };
         let value = if out.is_nan() {
             match width {
@@ -253,6 +366,16 @@ fn const_bin(
                 ConstBinaryOp::Add => a.wrapping_add(*b),
                 ConstBinaryOp::Sub => a.wrapping_sub(*b),
                 ConstBinaryOp::Mul => a.wrapping_mul(*b),
+                ConstBinaryOp::BitAnd => a & b,
+                ConstBinaryOp::BitOr => a | b,
+                ConstBinaryOp::BitXor => a ^ b,
+                ConstBinaryOp::Div if *b == 0 => return Err(ConstEvalError::DivisionByZero),
+                ConstBinaryOp::Rem if *b == 0 => return Err(ConstEvalError::RemainderByZero),
+                ConstBinaryOp::Div => a.wrapping_div(*b),
+                ConstBinaryOp::Rem => a.wrapping_rem(*b),
+                ConstBinaryOp::ShiftLeft => a.wrapping_shl(shift_count(ty, *b as u128)),
+                ConstBinaryOp::ShiftRight => a.wrapping_shr(shift_count(ty, *b as u128)),
+                _ => return Err(ConstEvalError::UnsupportedOperation),
             };
             return Ok(ConstValue::I(wrap_i(raw, ty)));
         } else {
@@ -263,6 +386,16 @@ fn const_bin(
                 ConstBinaryOp::Add => a.wrapping_add(*b),
                 ConstBinaryOp::Sub => a.wrapping_sub(*b),
                 ConstBinaryOp::Mul => a.wrapping_mul(*b),
+                ConstBinaryOp::BitAnd => a & b,
+                ConstBinaryOp::BitOr => a | b,
+                ConstBinaryOp::BitXor => a ^ b,
+                ConstBinaryOp::Div if *b == 0 => return Err(ConstEvalError::DivisionByZero),
+                ConstBinaryOp::Rem if *b == 0 => return Err(ConstEvalError::RemainderByZero),
+                ConstBinaryOp::Div => a / b,
+                ConstBinaryOp::Rem => a % b,
+                ConstBinaryOp::ShiftLeft => a.wrapping_shl(shift_count(ty, *b)),
+                ConstBinaryOp::ShiftRight => a.wrapping_shr(shift_count(ty, *b)),
+                _ => return Err(ConstEvalError::UnsupportedOperation),
             };
             return Ok(ConstValue::U(wrap_u(raw, ty)));
         }

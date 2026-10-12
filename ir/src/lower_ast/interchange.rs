@@ -32,7 +32,7 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
     let value: UniqueValue = serde_json::from_str(source).map_err(|e| e.to_string())?;
     let envelope: Envelope = serde_json::from_value(value.0)
         .map_err(|e| format!("AST envelope/schema error: {e}; expected format_version {AST_FORMAT_VERSION}, semantics_version {}, features [], program", crate::SEMANTICS_VERSION))?;
-    if envelope.format_version != AST_FORMAT_VERSION {
+    if envelope.format_version != 2 && envelope.format_version != AST_FORMAT_VERSION {
         return Err(format!(
             "unsupported AST format_version {}; expected {AST_FORMAT_VERSION}",
             envelope.format_version
@@ -50,6 +50,12 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
             "unsupported AST features: {:?}; supported feature list is empty",
             envelope.features
         ));
+    }
+    let extended =
+        super::limits::inspect_program_features(&envelope.program, super::AstLimits::default())
+            .map_err(|e| e.to_string())?;
+    if envelope.format_version < 3 && extended {
+        return Err("extended frontend operators require AST format 3".into());
     }
     Ok(envelope.program)
 }

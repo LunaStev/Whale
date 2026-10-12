@@ -92,6 +92,7 @@ pub enum Stmt {
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Expr {
+    BitNot(Box<Expr>),
     FunctionRef(String),
     NullFunction(SignatureRef),
     Call {
@@ -147,6 +148,15 @@ pub enum BinOpRef {
     Add,
     Sub,
     Mul,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Div,
+    Rem,
+    ShiftLeft,
+    ShiftRight,
+    LogicalAnd,
+    LogicalOr,
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
