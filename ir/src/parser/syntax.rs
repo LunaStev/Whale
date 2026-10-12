@@ -318,7 +318,49 @@ impl<'a> Parser<'a> {
         let op = self.peek();
         if matches!(
             op,
-            "add" | "sub" | "mul" | "eq" | "ne" | "lt" | "le" | "gt" | "ge"
+            "bit_not"
+                | "bit_and"
+                | "bit_or"
+                | "bit_xor"
+                | "div"
+                | "rem"
+                | "shift_left"
+                | "shift_right"
+                | "logical_and"
+                | "logical_or"
+        ) && self.format_version < 5
+        {
+            return Err(self.error("extended constant operators require typed IR format 5"));
+        }
+        if op == "bit_not" {
+            self.word()?;
+            self.expect("(")?;
+            let value = Box::new(self.expression(depth + 1)?);
+            self.expect(")")?;
+            Ok(ConstExpr {
+                ty: value.ty.clone(),
+                kind: ConstExprKind::Not(value),
+            })
+        } else if matches!(
+            op,
+            "add"
+                | "sub"
+                | "mul"
+                | "bit_and"
+                | "bit_or"
+                | "bit_xor"
+                | "div"
+                | "rem"
+                | "shift_left"
+                | "shift_right"
+                | "logical_and"
+                | "logical_or"
+                | "eq"
+                | "ne"
+                | "lt"
+                | "le"
+                | "gt"
+                | "ge"
         ) {
             let op = self.word()?;
             self.expect("(")?;
@@ -326,21 +368,8 @@ impl<'a> Parser<'a> {
             self.comma()?;
             let right = Box::new(self.expression(depth + 1)?);
             self.expect(")")?;
-            let ty = left.ty.clone();
-            Ok(match op {
-                "add" | "sub" | "mul" => ConstExpr {
-                    ty,
-                    kind: ConstExprKind::Binary {
-                        op: match op {
-                            "add" => ConstBinaryOp::Add,
-                            "sub" => ConstBinaryOp::Sub,
-                            _ => ConstBinaryOp::Mul,
-                        },
-                        left,
-                        right,
-                    },
-                },
-                _ => ConstExpr {
+            if matches!(op, "eq" | "ne" | "lt" | "le" | "gt" | "ge") {
+                Ok(ConstExpr {
                     ty: Type::Bool,
                     kind: ConstExprKind::Compare {
                         op: match op {
@@ -354,8 +383,30 @@ impl<'a> Parser<'a> {
                         left,
                         right,
                     },
-                },
-            })
+                })
+            } else {
+                Ok(ConstExpr {
+                    ty: left.ty.clone(),
+                    kind: ConstExprKind::Binary {
+                        op: match op {
+                            "add" => ConstBinaryOp::Add,
+                            "sub" => ConstBinaryOp::Sub,
+                            "mul" => ConstBinaryOp::Mul,
+                            "bit_and" => ConstBinaryOp::BitAnd,
+                            "bit_or" => ConstBinaryOp::BitOr,
+                            "bit_xor" => ConstBinaryOp::BitXor,
+                            "div" => ConstBinaryOp::Div,
+                            "rem" => ConstBinaryOp::Rem,
+                            "shift_left" => ConstBinaryOp::ShiftLeft,
+                            "shift_right" => ConstBinaryOp::ShiftRight,
+                            "logical_and" => ConstBinaryOp::LogicalAnd,
+                            _ => ConstBinaryOp::LogicalOr,
+                        },
+                        left,
+                        right,
+                    },
+                })
+            }
         } else {
             let ty = self.ty(0)?;
             let kind = if self.peek().starts_with("@g") {
@@ -373,7 +424,7 @@ impl<'a> Parser<'a> {
         self.expect("{")?;
         self.expect("format_version")?;
         let version: u32 = self.number()?;
-        if version != 3 && version != IR_FORMAT_VERSION {
+        if version != 3 && version != 4 && version != IR_FORMAT_VERSION {
             return Err(self.previous_error("unsupported IR format version"));
         }
         self.format_version = version;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-use crate::{CallError, Callee, Function, Instruction, Module, Type, VerifyError};
+use crate::{CallError, Callee, Instruction, Module, Type, VerifyError};
 use std::collections::HashSet;
 
 fn error(name: &str, reason: CallError) -> VerifyError {
@@ -70,7 +70,7 @@ pub(super) fn verify_declarations(m: &Module, limits: crate::IrLimits) -> Result
 
 pub(super) fn verify_instruction(
     m: &Module,
-    f: &Function,
+    f: &super::IndexedFunction<'_>,
     ins: &Instruction,
     limits: crate::IrLimits,
 ) -> Result<(), VerifyError> {
@@ -150,10 +150,15 @@ pub(super) fn verify_instruction(
                 src,
                 src_ty,
                 dst_ty,
+                op,
                 ..
-            } if contains_function_pointer(src_ty)
-                || contains_function_pointer(dst_ty)
-                || f.value_type(*src).is_some_and(contains_function_pointer) =>
+            } if !(matches!(op, crate::CastOp::Bitcast)
+                && matches!(src_ty, Type::Ptr(_))
+                && matches!(dst_ty, Type::Ptr(_))
+                && matches!(f.value_type(*src), Some(Type::Ptr(_))))
+                && (contains_function_pointer(src_ty)
+                    || contains_function_pointer(dst_ty)
+                    || f.value_type(*src).is_some_and(contains_function_pointer)) =>
             {
                 return Err(CallError::ForbiddenFunctionPointerCast)
             }

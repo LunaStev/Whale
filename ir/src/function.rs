@@ -96,6 +96,7 @@ pub struct FunctionDecl {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallError {
+    Builder(crate::BuilderError),
     ResourceLimit(crate::LimitError),
     UnknownFunction(crate::FunctionId),
     UnknownFunctionName(String),

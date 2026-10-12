@@ -1,7 +1,7 @@
 //! Read-only SSA checks. Reachability never removes or simplifies O0 IR.
 use std::collections::{HashMap, HashSet};
 
-use crate::{BlockId, Function, Instruction, Terminator, ValueId};
+use crate::{BlockId, Instruction, Terminator, ValueId};
 
 use super::{instr_result, instr_uses, operands, VerifyError};
 
@@ -10,12 +10,17 @@ struct Cfg {
     predecessors: Vec<Vec<usize>>,
     // None means structurally unreachable from the function entry.
     idom: Vec<Option<usize>>,
+    intervals: Vec<Option<(usize, usize)>>,
+    predecessor_sets: Vec<HashSet<usize>>,
 }
 
 impl Cfg {
     // Block identity, termination and branch destinations have already passed
     // structural validation. Do not inspect constant branch conditions here.
-    fn new(f: &Function) -> Result<Self, VerifyError> {
+    fn new(
+        f: &super::IndexedFunction<'_>,
+        budget: &super::AnalysisBudget,
+    ) -> Result<Self, VerifyError> {
         let indices: HashMap<_, _> = f
             .blocks
             .iter()
@@ -25,6 +30,7 @@ impl Cfg {
         let mut successors = vec![Vec::new(); f.blocks.len()];
         let mut predecessors = vec![Vec::new(); f.blocks.len()];
         for (index, block) in f.blocks.iter().enumerate() {
+            budget.charge()?;
             let targets = match block.terminator.as_ref().unwrap() {
                 Terminator::Br { target } => vec![*target],
                 Terminator::CBr {
@@ -39,6 +45,7 @@ impl Cfg {
             };
             let mut seen = HashSet::new();
             for target in targets {
+                budget.charge()?;
                 let target = indices[&target];
                 if seen.insert(target) {
                     successors[index].push(target);
@@ -63,6 +70,7 @@ impl Cfg {
         let mut stack = vec![(entry, false)];
         let mut order = Vec::new();
         while let Some((block, exiting)) = stack.pop() {
+            budget.charge()?;
             if exiting {
                 order.push(block);
                 continue;
@@ -83,8 +91,10 @@ impl Cfg {
         loop {
             let mut changed = false;
             for &block in order.iter().skip(1) {
+                budget.charge()?;
                 let mut next: Option<usize> = None;
                 for &predecessor in &predecessors[block] {
+                    budget.charge()?;
                     if idom[predecessor].is_none() {
                         continue;
                     }
@@ -93,6 +103,7 @@ impl Cfg {
                         Some(mut a) => {
                             let mut b = predecessor;
                             while a != b {
+                                budget.charge()?;
                                 if rank[a] > rank[b] {
                                     a = idom[a].unwrap();
                                 } else {
@@ -112,28 +123,67 @@ impl Cfg {
                 break;
             }
         }
+        // Euler intervals in the dominator tree turn each later query into
+        // two comparisons. Build iteratively to preserve deep-CFG safety.
+        let mut children = vec![Vec::new(); f.blocks.len()];
+        for (block, parent) in idom.iter().enumerate() {
+            budget.charge()?;
+            if let Some(parent) = *parent {
+                if parent != block {
+                    children[parent].push(block);
+                }
+            }
+        }
+        let mut intervals: Vec<Option<(usize, usize)>> = vec![None; f.blocks.len()];
+        let mut stack = vec![(entry, false)];
+        let mut clock = 0;
+        while let Some((block, exiting)) = stack.pop() {
+            budget.charge()?;
+            if exiting {
+                intervals[block].as_mut().unwrap().1 = clock;
+                clock += 1;
+            } else {
+                intervals[block] = Some((clock, clock));
+                clock += 1;
+                stack.push((block, true));
+                stack.extend(children[block].iter().rev().map(|&child| (child, false)));
+            }
+        }
+        let predecessor_sets = predecessors
+            .iter()
+            .map(|ps| ps.iter().copied().collect())
+            .collect();
         Ok(Self {
             indices,
             predecessors,
             idom,
+            intervals,
+            predecessor_sets,
         })
     }
 
-    fn dominates(&self, definition: usize, mut usage: usize) -> bool {
-        loop {
-            if definition == usage {
-                return true;
+    fn dominates(
+        &self,
+        definition: usize,
+        usage: usize,
+        budget: &super::AnalysisBudget,
+    ) -> Result<bool, VerifyError> {
+        budget.charge()?;
+        budget.queries.set(budget.queries.get() + 1);
+        Ok(match (self.intervals[definition], self.intervals[usage]) {
+            (Some((start, end)), Some((use_start, use_end))) => {
+                start <= use_start && use_end <= end
             }
-            match self.idom[usage] {
-                Some(parent) if parent != usage => usage = parent,
-                _ => return false,
-            }
-        }
+            _ => false,
+        })
     }
 }
 
-pub(super) fn verify(f: &Function) -> Result<(), VerifyError> {
-    let cfg = Cfg::new(f)?;
+pub(super) fn verify(
+    f: &super::IndexedFunction<'_>,
+    budget: &super::AnalysisBudget,
+) -> Result<(), VerifyError> {
+    let cfg = Cfg::new(f, budget)?;
     let mut definitions: HashMap<ValueId, Option<(usize, usize)>> =
         f.params.iter().map(|p| (p.id, None)).collect();
     for (block, b) in f.blocks.iter().enumerate() {
@@ -161,7 +211,7 @@ pub(super) fn verify(f: &Function) -> Result<(), VerifyError> {
             let valid = if def_block == block {
                 def_position < position
             } else {
-                cfg.dominates(def_block, block)
+                cfg.dominates(def_block, block, budget)?
             };
             if !valid {
                 return Err(VerifyError::NonDominatingValue {
@@ -176,6 +226,7 @@ pub(super) fn verify(f: &Function) -> Result<(), VerifyError> {
     for (block, b) in f.blocks.iter().enumerate() {
         let mut past_phi = false;
         for (position, ins) in b.instructions.iter().enumerate() {
+            budget.charge()?;
             if let Instruction::Phi { dst, ty, incomings } = ins {
                 let invalid = |reason| VerifyError::InvalidPhi {
                     func: f.name.clone(),
@@ -195,10 +246,11 @@ pub(super) fn verify(f: &Function) -> Result<(), VerifyError> {
                 operands::verify_type_category(f, "phi", ty, operands::is_storable(ty))?;
                 let mut seen = HashSet::new();
                 for (value, predecessor) in incomings {
+                    budget.charge()?;
                     let Some(&pred) = cfg.indices.get(predecessor) else {
                         return Err(invalid("phi names an unknown predecessor"));
                     };
-                    if !cfg.predecessors[block].contains(&pred) {
+                    if !cfg.predecessor_sets[block].contains(&pred) {
                         return Err(invalid("phi input is not a predecessor"));
                     }
                     if !seen.insert(pred) {

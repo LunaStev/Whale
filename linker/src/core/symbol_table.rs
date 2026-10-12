@@ -33,8 +33,7 @@ impl SymbolTable {
         // A resolution attempt describes only these inputs, including on failure.
         self.symbols.clear();
         for (index, obj) in objects.iter().enumerate() {
-            obj.target
-                .validate()
+            obj.validate()
                 .map_err(|e| format!("link input {index}: {e}"))?;
         }
         let mut symbols: HashMap<SymbolKey, ResolvedSymbol> = HashMap::new();

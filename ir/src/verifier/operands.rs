@@ -1,5 +1,5 @@
 use super::VerifyError;
-use crate::{BinOp, CmpOp, ConstValue, Function, ICmpPred, Instruction, Type, ValueId};
+use crate::{BinOp, CmpOp, ConstValue, ICmpPred, Instruction, Type, ValueId};
 
 fn is_signed(ty: &Type) -> bool {
     matches!(
@@ -89,7 +89,7 @@ pub(super) fn is_storable(ty: &Type) -> bool {
 }
 
 pub(super) fn verify_type_category(
-    f: &Function,
+    f: &super::IndexedFunction<'_>,
     operation: &'static str,
     ty: &Type,
     valid: bool,
@@ -106,7 +106,7 @@ pub(super) fn verify_type_category(
 }
 
 pub(super) fn verify_operand(
-    f: &Function,
+    f: &super::IndexedFunction<'_>,
     value: ValueId,
     expected: &Type,
 ) -> Result<(), VerifyError> {
@@ -127,7 +127,7 @@ pub(super) fn verify_operand(
     Ok(())
 }
 
-fn verify_alignment(f: &Function, align: u32) -> Result<(), VerifyError> {
+fn verify_alignment(f: &super::IndexedFunction<'_>, align: u32) -> Result<(), VerifyError> {
     if !align.is_power_of_two() {
         return Err(VerifyError::InvalidMemoryAlignment {
             func: f.name.clone(),
@@ -138,7 +138,7 @@ fn verify_alignment(f: &Function, align: u32) -> Result<(), VerifyError> {
 }
 
 fn verify_gep(
-    f: &Function,
+    f: &super::IndexedFunction<'_>,
     dst: ValueId,
     dst_ty: &Type,
     base: ValueId,
@@ -241,7 +241,10 @@ fn verify_gep(
     Ok(())
 }
 
-pub(super) fn verify_instruction(f: &Function, ins: &Instruction) -> Result<(), VerifyError> {
+pub(super) fn verify_instruction(
+    f: &super::IndexedFunction<'_>,
+    ins: &Instruction,
+) -> Result<(), VerifyError> {
     match ins {
         Instruction::Cast {
             dst,

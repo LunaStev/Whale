@@ -56,6 +56,10 @@ pub const REGISTERS_16: &[(&str, u8)] = &[
 ];
 
 pub const REGISTERS_8: &[(&str, u8)] = &[
+    ("spl", 4),
+    ("bpl", 5),
+    ("sil", 6),
+    ("dil", 7),
     ("al", 0),
     ("cl", 1),
     ("dl", 2),
@@ -76,5 +80,49 @@ pub const REGISTERS_8: &[(&str, u8)] = &[
 
 pub const MNEMONICS: &[&str] = &[
     "mov", "add", "sub", "and", "or", "xor", "cmp", "imul", "push", "pop", "jmp", "je", "loop",
-    "call", "ret", "nop", "syscall", "int3",
+    "call", "ret", "nop", "syscall", "int3", "lea", "test", "not", "neg", "div", "idiv", "shl",
+    "sal", "shr", "sar", "cwd", "cdq", "cqo", "jo", "jno", "jb", "jc", "jnae", "jae", "jnb", "jnc",
+    "jz", "jne", "jnz", "jbe", "jna", "ja", "jnbe", "js", "jns", "jp", "jpe", "jnp", "jpo", "jl",
+    "jnge", "jge", "jnl", "jle", "jng", "jg", "jnle",
 ];
+
+/// AMD64 integer condition codes and standard aliases.
+pub const CONDITION_CODES: &[(&str, u8)] = &[
+    ("jo", 0),
+    ("jno", 1),
+    ("jb", 2),
+    ("jc", 2),
+    ("jnae", 2),
+    ("jae", 3),
+    ("jnb", 3),
+    ("jnc", 3),
+    ("je", 4),
+    ("jz", 4),
+    ("jne", 5),
+    ("jnz", 5),
+    ("jbe", 6),
+    ("jna", 6),
+    ("ja", 7),
+    ("jnbe", 7),
+    ("js", 8),
+    ("jns", 9),
+    ("jp", 10),
+    ("jpe", 10),
+    ("jnp", 11),
+    ("jpo", 11),
+    ("jl", 12),
+    ("jnge", 12),
+    ("jge", 13),
+    ("jnl", 13),
+    ("jle", 14),
+    ("jng", 14),
+    ("jg", 15),
+    ("jnle", 15),
+];
+
+pub fn condition_code(mnemonic: &str) -> Option<u8> {
+    CONDITION_CODES
+        .iter()
+        .find(|(name, _)| *name == mnemonic)
+        .map(|(_, code)| *code)
+}

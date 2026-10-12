@@ -159,3 +159,67 @@ fn lowering_uses_allocation_layout_and_rejects_overflow() {
         Err(LowerError::Layout(LayoutError::Overflow))
     ));
 }
+
+#[test]
+fn requested_depth_is_capped_but_normal_and_boundary_layouts_work() {
+    let target = Target::X86_64WhaleLinux;
+    assert_eq!(
+        ir::layout_of_with_limit(&Type::U64, target, usize::MAX)
+            .unwrap()
+            .size,
+        8
+    );
+    let mut ty = Type::U8;
+    for _ in 0..ir::MAX_IR_NESTING {
+        ty = Type::Array(Box::new(ty), 1);
+    }
+    assert_eq!(
+        ir::layout_of_with_limit(&ty, target, usize::MAX)
+            .unwrap()
+            .size,
+        1
+    );
+    ty = Type::Array(Box::new(ty), 1);
+    assert_eq!(
+        ir::layout_of_with_limit(&ty, target, usize::MAX),
+        Err(LayoutError::DepthLimit)
+    );
+}
+
+#[test]
+fn deep_layout_child() {
+    if std::env::var_os("WHALE_DEEP_LAYOUT_CHILD").is_none() {
+        return;
+    }
+    let mut ty = Type::U8;
+    for _ in 0..20_000 {
+        ty = Type::Array(Box::new(ty), 1);
+    }
+    // Only layout owns the stack-safety contract; don't invoke recursive Type drop.
+    let ty = Box::leak(Box::new(ty));
+    assert_eq!(
+        ir::layout_of_with_limit(ty, Target::X86_64WhaleLinux, 20_000),
+        Err(LayoutError::DepthLimit)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn deep_layout_override_is_safe_in_a_capped_child_process() {
+    let exe = std::env::current_exe().unwrap();
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg("ulimit -c 0; ulimit -v 51200; exec \"$@\"")
+        .arg("layout-test")
+        .arg(exe)
+        .arg("--exact")
+        .arg("deep_layout_child")
+        .env("MALLOC_ARENA_MAX", "1")
+        .env("WHALE_DEEP_LAYOUT_CHILD", "1");
+    let output = cmd.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

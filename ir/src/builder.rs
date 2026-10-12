@@ -5,6 +5,32 @@ use crate::{
     ICmpPred, Instruction, Module, Param, Terminator, Type, ValueId,
 };
 
+/// Construction-order errors returned by the `try_*` builder operations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuilderError {
+    UnknownBlock(BlockId),
+    UnknownParameter { index: usize, count: usize },
+    UnknownValue(ValueId),
+    TerminatedBlock(BlockId),
+    PhiAfterInstruction(BlockId),
+}
+impl std::fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownBlock(id) => write!(f, "unknown builder block {id:?}"),
+            Self::UnknownParameter { index, count } => {
+                write!(f, "parameter {index} is outside 0..{count}")
+            }
+            Self::UnknownValue(id) => write!(f, "unknown builder value {id:?}"),
+            Self::TerminatedBlock(id) => write!(f, "builder block {id:?} is already terminated"),
+            Self::PhiAfterInstruction(id) => {
+                write!(f, "phi must precede other instructions in {id:?}")
+            }
+        }
+    }
+}
+impl std::error::Error for BuilderError {}
+
 pub struct ModuleBuilder {
     module: Module,
     next_value: u32,
@@ -13,6 +39,51 @@ pub struct ModuleBuilder {
 }
 
 impl<'a> FunctionBuilder<'a> {
+    pub fn current_block_id(&self) -> BlockId {
+        self.insert_block
+    }
+
+    pub fn try_not(&mut self, ty: Type, src: ValueId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[src])?;
+        Ok(self.not(ty, src))
+    }
+
+    pub fn not(&mut self, ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::Not { dst, ty, src });
+        dst
+    }
+
+    /// Append a phi at a block's instruction prefix. Inputs are checked for
+    /// existence; the verifier checks predecessor edges, dominance and types.
+    pub fn try_phi(
+        &mut self,
+        ty: Type,
+        incomings: Vec<(ValueId, BlockId)>,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        for (value, block) in &incomings {
+            self.ensure_values(&[*value])?;
+            self.ensure_block(*block)?;
+        }
+        if self
+            ._cur_block()
+            .instructions
+            .iter()
+            .any(|i| !matches!(i, Instruction::Phi { .. }))
+        {
+            return Err(BuilderError::PhiAfterInstruction(self.insert_block));
+        }
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::Phi { dst, ty, incomings });
+        Ok(dst)
+    }
+
     pub fn entry_block(&self) -> BlockId {
         self.func.entry
     }
@@ -286,6 +357,8 @@ impl ModuleBuilder {
     }
 }
 
+/// Legacy convenience operations panic on invalid construction order. Use the
+/// matching `try_*` operations for externally supplied IDs and recoverable errors.
 pub struct FunctionBuilder<'a> {
     mb: &'a mut ModuleBuilder,
     func: Function,
@@ -293,8 +366,277 @@ pub struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
+    fn ensure_block(&self, bb: BlockId) -> Result<(), BuilderError> {
+        if self.func.blocks.iter().any(|b| b.id == bb) {
+            Ok(())
+        } else {
+            Err(BuilderError::UnknownBlock(bb))
+        }
+    }
+
+    fn ensure_insertable(&self) -> Result<(), BuilderError> {
+        let block = self
+            .func
+            .blocks
+            .iter()
+            .find(|b| b.id == self.insert_block)
+            .ok_or(BuilderError::UnknownBlock(self.insert_block))?;
+        if block.terminator.is_some() {
+            Err(BuilderError::TerminatedBlock(block.id))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn ensure_values(&self, values: &[ValueId]) -> Result<(), BuilderError> {
+        for value in values {
+            if self.func.value_type(*value).is_none() {
+                return Err(BuilderError::UnknownValue(*value));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn try_param_value(&self, index: usize) -> Result<ValueId, BuilderError> {
+        self.func
+            .params
+            .get(index)
+            .map(|p| p.id)
+            .ok_or(BuilderError::UnknownParameter {
+                index,
+                count: self.func.params.len(),
+            })
+    }
+
+    pub fn try_set_insert_point(&mut self, bb: BlockId) -> Result<(), BuilderError> {
+        self.ensure_block(bb)?;
+        self.insert_block = bb;
+        Ok(())
+    }
+
+    pub fn try_undef(&mut self, ty: Type) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.undef(ty))
+    }
+
+    pub fn try_const_decl(
+        &mut self,
+        name: impl Into<String>,
+        expression: crate::ConstExpr,
+        value: ConstValue,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_decl(name, expression, value))
+    }
+
+    pub fn try_const_bool(&mut self, v: bool) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_bool(v))
+    }
+
+    pub fn try_const_i32(&mut self, v: i32) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_i32(v))
+    }
+
+    pub fn try_add(
+        &mut self,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        Ok(self.add(ty, lhs, rhs))
+    }
+
+    pub fn try_bin(
+        &mut self,
+        op: BinOp,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        Ok(self.bin(op, ty, lhs, rhs))
+    }
+
+    pub fn try_icmp(
+        &mut self,
+        pred: ICmpPred,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        Ok(self.icmp(pred, ty, lhs, rhs))
+    }
+
+    pub fn try_cmp(
+        &mut self,
+        op: CmpOp,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        Ok(self.cmp(op, ty, lhs, rhs))
+    }
+
+    pub fn try_checked(
+        &mut self,
+        op: CheckedOp,
+        ty: Type,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        Ok(self.checked(op, ty, lhs, rhs))
+    }
+
+    pub fn try_extract(
+        &mut self,
+        tuple_ty: Type,
+        dst_ty: Type,
+        tuple: ValueId,
+        index: u32,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[tuple])?;
+        Ok(self.extract(tuple_ty, dst_ty, tuple, index))
+    }
+
+    pub fn try_trap_if(
+        &mut self,
+        cond: ValueId,
+        reason: impl Into<String>,
+    ) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[cond])?;
+        self.trap_if(cond, reason);
+        Ok(())
+    }
+
+    pub fn try_br(&mut self, target: BlockId) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_block(target)?;
+        self.br(target);
+        Ok(())
+    }
+
+    pub fn try_cbr(
+        &mut self,
+        cond: ValueId,
+        then_bb: BlockId,
+        else_bb: BlockId,
+    ) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[cond])?;
+        self.ensure_block(then_bb)?;
+        self.ensure_block(else_bb)?;
+        self.cbr(cond, then_bb, else_bb);
+        Ok(())
+    }
+
+    pub fn try_trap(&mut self, reason: impl Into<String>) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.trap(reason);
+        Ok(())
+    }
+
+    pub fn try_const_int(&mut self, ty: Type, v: i128) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_int(ty, v))
+    }
+
+    pub fn try_const_uint(&mut self, ty: Type, v: u128) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_uint(ty, v))
+    }
+
+    pub fn try_const_float(&mut self, ty: Type, v: f64) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_float(ty, v))
+    }
+
+    pub fn try_const_float_bits(
+        &mut self,
+        ty: Type,
+        v: crate::FloatBits,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.const_float_bits(ty, v))
+    }
+
+    pub fn try_alloca(&mut self, ty: Type, align: u32) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        Ok(self.alloca(ty, align))
+    }
+
+    pub fn try_alloca_in_entry(&mut self, ty: Type, align: u32) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_block(self.func.entry)?;
+        if self
+            .func
+            .blocks
+            .iter()
+            .find(|b| b.id == self.func.entry)
+            .unwrap()
+            .terminator
+            .is_some()
+        {
+            return Err(BuilderError::TerminatedBlock(self.func.entry));
+        }
+        Ok(self.alloca_in_entry(ty, align))
+    }
+
+    pub fn try_load(
+        &mut self,
+        ty: Type,
+        ptr: ValueId,
+        align: u32,
+    ) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[ptr])?;
+        Ok(self.load(ty, ptr, align))
+    }
+
+    pub fn try_uninit(&mut self, ty: Type, ptr: ValueId, align: u32) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[ptr])?;
+        self.uninit(ty, ptr, align);
+        Ok(())
+    }
+
+    pub fn try_store(
+        &mut self,
+        ty: Type,
+        value: ValueId,
+        ptr: ValueId,
+        align: u32,
+    ) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[value, ptr])?;
+        self.store(ty, value, ptr, align);
+        Ok(())
+    }
+
+    pub fn try_ret(&mut self, value: Option<ValueId>) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        if let Some(value) = value {
+            self.ensure_values(&[value])?;
+        }
+        self.ret(value);
+        Ok(())
+    }
+
     pub fn param_value(&self, index: usize) -> ValueId {
-        self.func.params[index].id
+        self.try_param_value(index)
+            .expect("invalid builder parameter")
     }
 
     pub fn const_decl(
@@ -322,10 +664,12 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn set_insert_point(&mut self, bb: BlockId) {
-        self.insert_block = bb;
+        self.try_set_insert_point(bb)
+            .expect("invalid builder block");
     }
 
     fn cur_block_mut(&mut self) -> &mut BasicBlock {
+        self.ensure_insertable().expect("invalid builder insertion");
         self.func
             .blocks
             .iter_mut()
@@ -334,6 +678,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     fn define_value(&mut self, ty: Type) -> ValueId {
+        self.ensure_insertable().expect("invalid builder insertion");
         let id = self.mb.fresh_value();
         self.func.value_types.push((id, ty));
         id
@@ -482,6 +827,8 @@ impl<'a> FunctionBuilder<'a> {
             crate::limits::discard_signature(signature);
             return Err(error);
         }
+        self.ensure_insertable()
+            .map_err(crate::CallError::Builder)?;
         let dst = self.define_value(Type::FnPtr(Box::new(signature.clone())));
         self.cur_block_mut()
             .instructions
@@ -495,6 +842,8 @@ impl<'a> FunctionBuilder<'a> {
     ) -> Result<ValueId, crate::CallError> {
         let signature = self.callee_signature(&Callee::Direct(function))?;
         crate::function::validate_signature(&signature)?;
+        self.ensure_insertable()
+            .map_err(crate::CallError::Builder)?;
         let dst = self.define_value(Type::FnPtr(Box::new(signature.clone())));
         self.cur_block_mut()
             .instructions
@@ -536,6 +885,8 @@ impl<'a> FunctionBuilder<'a> {
         callee: Callee,
         args: Vec<ValueId>,
     ) -> Result<Option<ValueId>, crate::CallError> {
+        self.ensure_insertable()
+            .map_err(crate::CallError::Builder)?;
         let signature = self.callee_signature(&callee)?;
         crate::function::validate_signature(&signature)?;
         if args.len() != signature.params.len() {

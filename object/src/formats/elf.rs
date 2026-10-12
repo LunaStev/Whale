@@ -196,8 +196,8 @@ impl Elf64Rela {
 }
 
 #[derive(Clone)]
-struct SymBuild {
-    name: String,
+struct SymBuild<'a> {
+    name: &'a str,
     section_index: Option<usize>,
     value: u64,
     size: u64,
@@ -216,106 +216,9 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     let machine = obj.target.elf_machine().map_err(|e| e.to_string())?;
     let relocation_sections: HashSet<_> = obj.relocations.iter().map(|r| r.section_index).collect();
     checked_section_count(obj.sections.len(), relocation_sections.len())?;
-    let mut input_payload_size = 0u64;
-    for section in &obj.sections {
-        section.memory_size()?;
-        input_payload_size = input_payload_size
-            .checked_add(section.file_size())
-            .ok_or("ELF payload size overflow")?;
-        if input_payload_size > max_output_size {
-            return Err("ELF output exceeds configured size limit".into());
-        }
-        if section.name.contains('\0') {
-            return Err(format!(
-                "section name {:?} contains embedded NUL byte",
-                section.name
-            ));
-        }
-        // Zero means no alignment constraint and is serialized as one.
-        if section.align != 0 && !section.align.is_power_of_two() {
-            return Err(format!(
-                "section {:?} alignment {} must be zero or a power of two",
-                section.name, section.align
-            ));
-        }
-    }
-
-    // Relocations in the current object API name symbols by string. Until typed
-    // symbol references are available, duplicate names are ambiguous even when
-    // their metadata happens to agree.
-    let mut symbol_names = HashSet::new();
-    for sym in &obj.symbols {
-        if sym.name.contains('\0') {
-            return Err(format!(
-                "symbol name {:?} contains embedded NUL byte",
-                sym.name
-            ));
-        }
-        if !symbol_names.insert(&sym.name) {
-            return Err(format!("duplicate symbol name {:?}", sym.name));
-        }
-        if let Some(index) = sym.section_index {
-            let section = obj.sections.get(index).ok_or_else(|| {
-                format!("symbol {:?} references invalid section {index}", sym.name)
-            })?;
-            let end = sym
-                .value
-                .checked_add(sym.size)
-                .ok_or_else(|| format!("symbol range overflow for {:?}", sym.name))?;
-            if end > section.memory_size()? {
-                return Err(format!(
-                    "symbol range for {:?} exceeds section {:?} size {}",
-                    sym.name,
-                    section.name,
-                    section.memory_size()?
-                ));
-            }
-        }
-    }
-
-    for reloc in &obj.relocations {
-        if reloc.symbol.contains('\0') {
-            return Err(format!(
-                "relocation reference {:?} contains embedded NUL byte",
-                reloc.symbol
-            ));
-        }
-        let section = obj.sections.get(reloc.section_index).ok_or_else(|| {
-            format!(
-                "relocation for {:?} references invalid section {}",
-                reloc.symbol, reloc.section_index
-            )
-        })?;
-        if section.kind == SectionKind::Bss {
-            return Err(format!(
-                "relocations targeting BSS section {:?} are not supported",
-                section.name
-            ));
-        }
-        let width = match reloc.kind {
-            RelocKind::Absolute64 => 8,
-            RelocKind::Relative8 => 1,
-            RelocKind::Absolute32
-            | RelocKind::Relative32
-            | RelocKind::GOTPCREL
-            | RelocKind::PLT32 => 4,
-        };
-        let end = reloc.offset.checked_add(width).ok_or_else(|| {
-            format!(
-                "relocation range overflow in section {:?} at offset {}",
-                section.name, reloc.offset
-            )
-        })?;
-        if end > section.data.len() {
-            return Err(format!(
-                "relocation range {}..{} exceeds section {:?} size {}",
-                reloc.offset,
-                end,
-                section.name,
-                section.data.len()
-            ));
-        }
-    }
+    preflight(obj, max_output_size)?;
+    obj.validate()?;
+    let mut symbol_names: HashSet<_> = obj.symbols.iter().map(|s| &s.name).collect();
 
     let mut shstrtab = vec![0u8];
     let mut strtab = vec![0u8];
@@ -354,7 +257,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         .symbols
         .iter()
         .map(|s| SymBuild {
-            name: s.name.clone(),
+            name: &s.name,
             section_index: s.section_index,
             value: s.value,
             size: s.size,
@@ -366,7 +269,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     for reloc in &obj.relocations {
         if symbol_names.insert(&reloc.symbol) {
             symbols.push(SymBuild {
-                name: reloc.symbol.clone(),
+                name: &reloc.symbol,
                 section_index: None,
                 value: 0,
                 size: 0,
@@ -405,12 +308,12 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         .map_err(|_| "ELF symbol allocation failed")?;
     elf_syms.push(Elf64Sym::default()); // STN_UNDEF
 
-    let mut symbol_index_by_name: HashMap<String, usize> = HashMap::new();
+    let mut symbol_index_by_name: HashMap<&str, usize> = HashMap::new();
     for sym in ordered_syms {
         let name_idx = if sym.name.is_empty() {
             0
         } else {
-            push_name(&mut strtab, &sym.name)?
+            push_name(&mut strtab, sym.name)?
         };
 
         let shndx = u16::try_from(
@@ -434,13 +337,14 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         elf_syms.push(elf_sym);
     }
 
+    // Validation above guarantees valid section references. Preserve input
+    // order within each section while scanning relocation metadata only once.
+    let mut grouped_relocations = vec![Vec::new(); obj.sections.len()];
+    for relocation in &obj.relocations {
+        grouped_relocations[relocation.section_index].push(relocation);
+    }
     let mut rela_shdr_indices = Vec::new();
-    for (sec_idx, _) in obj.sections.iter().enumerate() {
-        let relocs: Vec<_> = obj
-            .relocations
-            .iter()
-            .filter(|r| r.section_index == sec_idx)
-            .collect();
+    for (sec_idx, relocs) in grouped_relocations.into_iter().enumerate() {
         if relocs.is_empty() {
             continue;
         }
@@ -456,7 +360,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         for reloc in relocs {
             let sym_idx = u64::from(checked_u32(
                 *symbol_index_by_name
-                    .get(&reloc.symbol)
+                    .get(reloc.symbol.as_str())
                     .ok_or("ELF relocation symbol missing")?,
                 "relocation symbol index",
             )?);
@@ -596,6 +500,106 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     }
 
     Ok(out)
+}
+
+/// Account for the complete output before cloning any name or payload. Borrowed
+/// name sets and counts are the only working metadata built during this pass.
+fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
+    let mut relocation_counts = HashMap::<usize, usize>::new();
+    for reloc in &obj.relocations {
+        if reloc.section_index >= obj.sections.len() {
+            return Err(format!(
+                "relocation references invalid section {}",
+                reloc.section_index
+            ));
+        }
+        let count = relocation_counts.entry(reloc.section_index).or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or("ELF relocation count overflow")?;
+    }
+    let section_count = checked_section_count(obj.sections.len(), relocation_counts.len())?;
+    let mut shstr_size = 1usize;
+    let mut str_size = 1usize;
+    let mut offset = ELF_HDR_SIZE;
+    for (index, section) in obj.sections.iter().enumerate() {
+        shstr_size = checked_name_end(shstr_size, section.name.len())?;
+        checked_output_size(shstr_size as u64, limit)?;
+        if section.align != 0 && !section.align.is_power_of_two() {
+            return Err(format!(
+                "section {:?} alignment {} must be zero or a power of two",
+                section.name, section.align
+            ));
+        }
+        let aligned = align_up(offset, section.align.max(1))?;
+        if section.kind != SectionKind::Bss {
+            offset = aligned
+                .checked_add(section.file_size())
+                .ok_or("ELF file layout overflow")?;
+        }
+        if relocation_counts.contains_key(&index) {
+            let name_len = section
+                .name
+                .len()
+                .checked_add(5)
+                .ok_or("ELF string table overflow")?;
+            shstr_size = checked_name_end(shstr_size, name_len)?;
+            checked_output_size(shstr_size as u64, limit)?;
+        }
+        checked_output_size(offset, limit)?;
+    }
+    let mut names = HashSet::<&str>::new();
+    let mut symbols = 1usize; // STN_UNDEF
+    for name in obj
+        .symbols
+        .iter()
+        .map(|s| s.name.as_str())
+        .chain(obj.relocations.iter().map(|r| r.symbol.as_str()))
+    {
+        // Reject a huge name before hashing it or copying string-table data.
+        checked_output_size(name.len() as u64, limit)?;
+        if names.insert(name) {
+            symbols = symbols.checked_add(1).ok_or("ELF symbol count overflow")?;
+            if !name.is_empty() {
+                str_size = checked_name_end(str_size, name.len())?;
+                checked_output_size(str_size as u64, limit)?;
+            }
+        }
+    }
+    checked_u32(symbols, "symbol count")?;
+    for index in 0..obj.sections.len() {
+        if let Some(count) = relocation_counts.get(&index) {
+            let bytes = checked_table_bytes(*count, ELF_RELA_SIZE as usize, limit)?;
+            offset = align_up(offset, 8)?
+                .checked_add(bytes as u64)
+                .ok_or("ELF file layout overflow")?;
+        }
+    }
+    let sym_bytes = checked_table_bytes(symbols, ELF_SYM_SIZE as usize, limit)?;
+    offset = align_up(offset, 8)?
+        .checked_add(sym_bytes as u64)
+        .ok_or("ELF file layout overflow")?;
+    for name in [".symtab", ".strtab", ".shstrtab"] {
+        shstr_size = checked_name_end(shstr_size, name.len())?;
+    }
+    offset = offset
+        .checked_add(str_size as u64)
+        .and_then(|n| n.checked_add(shstr_size as u64))
+        .ok_or("ELF file layout overflow")?;
+    let headers = checked_table_bytes(usize::from(section_count), ELF_SHDR_SIZE as usize, limit)?;
+    let total = align_up(offset, 8)?
+        .checked_add(headers as u64)
+        .ok_or("ELF header layout overflow")?;
+    checked_output_size(total, limit)?;
+    // Also check host addressability of proportional metadata before allocation.
+    for (count, stride) in [
+        (usize::from(section_count), std::mem::size_of::<Elf64Shdr>()),
+        (symbols, std::mem::size_of::<SymBuild<'_>>()),
+        (symbols, std::mem::size_of::<Elf64Sym>()),
+    ] {
+        checked_table_bytes(count, stride, u64::MAX)?;
+    }
+    Ok(())
 }
 
 fn align_up(value: u64, align: u64) -> Result<u64, String> {
@@ -983,6 +987,16 @@ mod wave_tests {
             let rust = object.write().unwrap();
             USE_WAVE.with(|v| v.set(true));
             assert_eq!(wave, rust);
+            let exact = wave.len() as u64;
+            for enabled in [true, false] {
+                USE_WAVE.with(|v| v.set(enabled));
+                assert_eq!(object.write_with_limit(exact).unwrap(), wave);
+                assert!(object
+                    .write_with_limit(exact - 1)
+                    .unwrap_err()
+                    .contains("size limit"));
+            }
+            USE_WAVE.with(|v| v.set(true));
         }
     }
     #[test]

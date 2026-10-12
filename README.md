@@ -36,7 +36,7 @@ native compilation pipeline are still being developed.
 | Component | Available today | Status |
 | --- | --- | --- |
 | Assembler | AMD64 assembly, sections, symbols, and relocations emitted as ELF64 object files | Available |
-| IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow and tracked stack-memory interpretation, and scalar AST JSON lowering | Experimental |
+| IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
 | Object library | Object model and ELF64 relocatable object serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
@@ -113,6 +113,7 @@ duplicate `-o` options, and missing output paths before reading input or writing
 output. Specify the assembly architecture once. For a path beginning with `-`,
 use a relative `./` prefix or an absolute path.
 
+
 ### Wrap raw bytes in an object
 
 ```sh
@@ -132,13 +133,31 @@ For example:
 cargo run --locked -- object raw.bin -o raw.o --debug-whale --dump-hex
 ```
 
+### CLI input and output limits
+
+`whale --version` (or `-V`) prints the package version. CLI arguments must be
+UTF-8; unsupported non-UTF-8 OS paths and option names produce a diagnostic
+with exit status 2 before any input is read or output is replaced.
+
+`asm` reads at most 8 MiB by default and `object` reads at most 256 MiB.
+Use `--max-input N` to set an explicit decimal byte budget for either command.
+The reader consumes at most N + 1 bytes, including for growing or streamed
+files. This budget is independent of assembly reservation and ELF output limits.
+Oversized or invalid UTF-8 assembly input preserves an existing output file.
+
+IR stdout writes are fallible: a closed pipe exits successfully, and other write
+errors exit with status 1 and a diagnostic. Canonical IR and scalar results
+retain their normal stdout format. `-o` still publishes atomically. The optional
+Wave bootstrap likewise replaces its archive only after successful creation,
+preserving the previous archive on an archiver failure.
+
 ### Execute scalar integer IR
 
-Save this format 4 module as `answer.wir`:
+Save this format 5 module as `answer.wir`:
 
 ```text
 module {
-  format_version 4
+  format_version 5
   semantics_version 1
   target "x86_64-whale-linux"
   datalayout { ptr=64, endian=little }
@@ -168,8 +187,12 @@ executed operations still trap. Loops evaluate phi inputs simultaneously.
 This oracle supports integer constants, arithmetic, comparisons, bit casts,
 checked pairs, select and control flow. It also supports tracked stack allocations, integer/Bool/data-pointer storage,
 typed GEP, byte copies and fills, with initialization and capability checks.
-It rejects floating point, calls, function pointers and general aggregate values
-in every block of the selected function, including unreachable blocks. Native
+It executes direct and signature-checked indirect Whale calls with integer/Bool,
+data-pointer and function-pointer arguments/results, using one shared fuel and
+memory arena. Function pointers retain their full signature and calling convention
+through mov/phi/select, storage and complete or split byte copies. It rejects
+floating point, external/SysV execution and general aggregate values in every
+block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
 
@@ -201,9 +224,11 @@ copies trap. Zero-length copy/fill succeeds without an access.
 `InterpreterOptions::memory_limits` separately limits allocation count (16384),
 pointer metadata fragments (262144), and byte/metadata work (256 Mi units).
 Failures return IR-located `MemoryLimit` errors. Scalar/checked-pair reads exclude
-padding from initialization checks. The current frame stays alive until return;
-lexical lifetime-end instructions, globals, calls/returns carrying pointers,
-foreign-memory adapters and native shadow metadata are future work.
+padding from initialization checks. Each invocation owns its stack allocations and
+retires them on return. Caller-owned pointers remain usable across nested calls;
+returned callee-local pointers retain expired capabilities and trap on access.
+Lexical lifetime-end instructions, globals, foreign-memory adapters and native
+shadow metadata are future work.
 
 ### Lower an AST to IR
 
@@ -211,7 +236,7 @@ Save this minimal typed AST as `program.json`:
 
 ```json
 {
-  "format_version": 2,
+  "format_version": 3,
   "semantics_version": 1,
   "features": [],
   "program": {
@@ -255,25 +280,25 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is documented in [AST JSON Schema](ir/schema/ast-v2.schema.json) and
+schema is documented in [AST JSON Schema](ir/schema/ast-v3.schema.json) and
 [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-The envelope requires `format_version: 2`, `semantics_version: 1`, and
+The envelope requires `format_version: 3` (legacy format 2 is also accepted), `semantics_version: 1`, and
 `features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
 JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
 entry point is `ir::lower_ast::interchange::decode`; its default input limit is
 8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
 f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
 For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
-Migrate format 1 inputs by setting `format_version` to 2, adding a `declarations`
+Migrate format 1 inputs by setting `format_version` to 3, adding a `declarations`
 array to `program`, and adding `convention` and `linkage` to every definition.
 Internal functions use `"Whale"` and `"Internal"`; external functions must supply
 a nonempty `link_name`. Missing versions and format 1 inputs are rejected.
 Integers and floats retain their exact string encoding. AST and printed typed IR have independent format versions and a shared
-semantics version; printed IR includes both version fields. Typed text IR formats 3 and 4
+semantics version; printed IR includes both version fields. Typed text IR formats 3, 4 and 5
 can be read and verified with `ir::parse_module`.
 
-The AST supports scalar literals, variables/constants, add/sub/mul, comparisons,
+The AST supports scalar literals, variables/constants, arithmetic, comparisons,
 assignment, return, if/while, break/continue, function declarations, direct calls,
 and typed function pointers with indirect calls. Aggregate expressions, variadic
 signatures, and SysV64 aggregate signatures are not supported. Unsupported forms fail explicitly.
@@ -299,14 +324,44 @@ For a complete invalid input, save the following as `invalid.json`:
 cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
 ```
 
-This exits nonzero with `unsupported AST format_version 99; expected 2`. It does
+This exits nonzero with `unsupported AST format_version 99; expected 3`. It does
 not create `rejected.wir`; an existing output is preserved. Lowering/type errors
 likewise fail before output publication.
 
+AST format 3 adds integer `BitAnd`, `BitOr`, `BitXor`, `Div`, `Rem`,
+`ShiftLeft`, `ShiftRight`, unary `BitNot`, and Bool-only `LogicalAnd`/`LogicalOr`.
+Integer operands have the same width and signedness. Division/remainder by zero
+trap at runtime and report a constant-evaluation error when evaluated at compile
+time; signed MIN/-1 wraps (remainder zero). Shift counts use their unsigned
+N-bit pattern modulo N, including signed negative bit patterns; unsigned negative
+literals are invalid. Right shift is arithmetic for signed values and logical
+for unsigned values. Bool logical expressions branch and merge through phi,
+evaluating left first and the right side only when needed. O0 retains the right
+side's IR and full constant-expression tree even when it is skipped.
+
 ### Typed IR output and validation
 
-The printer emits typed IR format 4 with semantics version 1. AST JSON remains
-format 2. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
+Verification builds one borrowed SSA type index per function and shares verified
+global constants through a read-only overlay. Dominance queries use intervals
+in an iteratively constructed dominator tree; expensive CFG construction,
+intersection and phi work use the module-wide `IrLimits::max_analysis_work`
+budget (default 16,777,216 units). Exhaustion returns an `AnalysisWork` resource
+error. `verify_module_with_stats` reports type lookups, dominance queries and
+analysis work without changing IR identities or ordering.
+
+Repeatable scaling probes can be run explicitly; they record operation counts
+and timings without timing-based pass/fail assertions:
+
+```sh
+cargo test -p ir --locked --test verification_scaling -- --ignored --nocapture
+cargo test -p object --locked --test relocation_grouping -- --ignored --nocapture
+```
+
+ELF serialization groups validated relocations in one input-order pass, keeping
+section order and the order of signed-addend entries within each section.
+
+The printer emits typed IR format 5 with semantics version 1. AST JSON writes
+format 3. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry
 block. Name/string fields escape quotes, backslashes, control characters and
 Unicode line separators. See the [identity fixture](ir/tests/fixtures/text-identities-v3.wir)
@@ -326,12 +381,14 @@ cargo run --locked -- ir verify ir/tests/fixtures/calls-v3.wir
 cargo run --locked -- ir print ir/tests/fixtures/calls-v3.wir -o canonical.wir
 ```
 
-`ir::parse_module` reads **and verifies** formats 3 and 4. Print-parse-print
+`ir::parse_module` reads **and verifies** formats 3, 4 and 5. Print-parse-print
 preserves explicit scoped IDs, quoted names, entry and block order, types,
 exact integer/float payloads, constant-expression trees, alignment, signatures
 and external link names. Whitespace and `//` comments are canonicalized. It
-accepts current printer instruction forms; format 4 adds `uninit`. Format 3
-without `undef` remains readable and canonicalizes to format 4. Regenerate old
+accepts current printer instruction forms; format 4 adds `uninit`, and format 5 adds preserved constant bitwise,
+division/remainder, shift and lazy logical operators. Formats 3/4 without `undef`
+remain readable and canonicalize to format 5. Extended constant syntax requires
+format 5; extended frontend operators require AST format 3. Regenerate old
 `undef` lowering from its AST rather than replacing unspecified values with zero. Unknown versions, fields,
 opcodes, escapes, trailing input and inconsistent type annotations are errors.
 Diagnostics include a byte offset and one-based Unicode-scalar line/column;
@@ -350,9 +407,32 @@ inputs remain caller-owned; arbitrary unverified trees still have Rust's usual
 recursive clone/drop behavior. Checked declaration rejects and disposes its
 owned oversized signature iteratively.
 
+`FunctionBuilder` provides `try_*` operations for checked parameter/block/value
+IDs and construction order. Failed operations preserve instructions, values and
+terminators. Legacy convenience operations panic on invalid construction order;
+use `call`, `function_addr`, and `null_function` directly for their existing
+fallible call/signature checks. Public `layout_of_with_limit` clamps requested
+nesting to the safe `MAX_IR_NESTING` ceiling while accepting shallow types with
+larger overrides.
+
+Direct frontend AST processing uses `AstLimits`: default depth 32, 100,000 nodes,
+8 MiB total string bytes and 8 MiB encoded output. `lower_o0_with_limits` and
+`interchange::encode_with_limits` accept overrides; recursive work remains capped
+at `MAX_AST_DEPTH` (32). Shared iterative inspection precedes lowering or pretty
+JSON serialization, and owned rejected ASTs are disposed iteratively. Borrowed
+ASTs stay caller-owned. The bounded encoder stops before output storage exceeds
+its byte budget.
+
+`ObjectFile::validate` checks target identity, section alignment/names, symbol
+names/references/extents and relocation patch ranges without serialization.
+Symbol resolution applies this contract before consuming any input object. ELF
+writing additionally preflights all payloads, names, synthesized symbols, string
+tables, metadata tables and alignment against the output budget before copying
+payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
+
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
-Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 4 output).
+Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 5 output).
 Text parsing does not provide IR execution or native code generation. Format 2
 printed text requires explicit migration; it is not silently accepted. New
 syntax or semantics requires an appropriate version change, with unknown
@@ -374,9 +454,40 @@ by a `fnptr<signature>` SSA value. The verifier checks arity, argument/result
 types, conventions, and indirect-callee dominance. Callee expressions evaluate
 before arguments, which evaluate left to right. Void calls have no result;
 unused nonvoid results remain in O0 IR. Null or invalid indirect targets have a
-defined trap contract; runtime checks await the interpreter/native backend.
+defined runtime trap contract in the interpreter; native dispatch remains future work.
 This IR support does not implement machine ABI lowering or carry identities
 through object emission and linking yet.
+
+The [executable call fixture](ir/tests/fixtures/interpreted-calls-v4.wir) covers
+caller-owned pointers, nested calls, recursion and callable returns:
+
+```sh
+cargo run --locked -- ir run ir/tests/fixtures/interpreted-calls-v4.wir --function @f3
+cargo run --locked -- ir run ir/tests/fixtures/interpreted-calls-v4.wir --function @f6 --arg 4
+```
+
+These print `u32 42` and `u32 4`. `InterpreterOptions::max_call_depth` limits
+simultaneously active frames (default 256, including entry), and `max_frames`
+limits total invocations (default 100000), including frames already returned.
+`max_live_values` bounds reserved SSA slots across active frames (default 1000000).
+Calls and callee instructions/terminators all consume the same `max_steps` budget.
+Every frame keeps its own SSA environment; recursion does not use the host stack.
+Before effects, preflight follows direct calls and function-address identities
+that can flow to matching indirect calls from retained reachable bodies or
+checked entry arguments. Unrelated declarations/bodies remain verified without
+requiring executable support.
+
+The scalar `interpret`/CLI boundary remains integer/Bool only. Library users can
+use `interpret_values` with checked `RuntimeValue` constructors and inspect typed
+results via `ty`, `scalar_value`, `pointer_address` and `function_target`. Data
+addresses from `RuntimeValue::raw_pointer` never grant allocation authority, and
+each run owns a distinct arena so a returned expired pointer cannot acquire a
+new invocation's allocation. No CLI raw-address literal is introduced. Callable
+constructors and dispatch check the complete signature, convention and target
+identity. Defined callable values borrow their originating module and cannot
+rebind an equal FunctionId/signature in another module; ordinary bytes cannot manufacture callable authority. Pointer-to-pointer
+bitcasts permit storage byte views, while casts of actual function-pointer values
+remain forbidden. The interpreter's synthetic callable bits are not a native ABI.
 
 ### Wrap raw bytes in an object
 
@@ -446,6 +557,22 @@ cargo test --workspace --all-features --locked
 configurations, the minimum supported Rust version, optimized tests, rustdoc,
 coverage, and scheduled maintenance. The checked-in
 [workflows](.github/workflows/) contain the commands used by CI.
+
+## AMD64 assembler limits and symbols
+
+See [the scalar instruction reference](assembler/README.md) for LEA, Jcc aliases,
+shifts, division, TEST, NOT/NEG, and immediate IMUL forms and their boundaries.
+
+Materialized assembly output is limited to 64 MiB across all sections by default.
+The public `assemble_with_limits(source, &AMD64, &AssemblyLimits { ... })` API
+adjusts `max_output_bytes` and `max_relax_iterations` (default 1024 passes).
+Reservations and data growth are checked before allocation; exceeding a budget
+returns `AsmError`. BSS reservations use logical `u64` storage and do not consume
+this byte budget. No artifact is returned until branch label layouts converge.
+
+A `global` name requires a label definition, including a forward definition.
+`global name` with `extern name` is allowed and exports an undefined external;
+a local definition and `extern` remain conflicting declarations.
 
 ## Contributing
 

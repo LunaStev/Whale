@@ -97,3 +97,59 @@ fn independent_resolution_does_not_reuse_previous_state() {
         .unwrap();
     assert_eq!(table.symbols.len(), 1);
 }
+
+#[test]
+fn consuming_objects_rejects_bad_metadata_and_resets_resolution() {
+    let mut table = SymbolTable::new();
+    for bad in [
+        "section",
+        "range",
+        "overflow",
+        "symbol_name",
+        "section_name",
+        "relocation_name",
+    ] {
+        table
+            .resolve(&[object("previous", SymbolBinding::Global)])
+            .unwrap();
+        let mut input = object("entry", SymbolBinding::Global);
+        match bad {
+            "section" => input.symbols[0].section_index = Some(99),
+            "range" => input.symbols[0].size = 2,
+            "overflow" => {
+                input.symbols[0].value = u64::MAX;
+                input.symbols[0].size = 1;
+            }
+            "symbol_name" => input.symbols[0].name = "bad\0name".into(),
+            "section_name" => input.sections[0].name = "bad\0section".into(),
+            "relocation_name" => {
+                input.relocations.push(object::ObjectRelocation {
+                    section_index: 0,
+                    offset: 0,
+                    kind: object::RelocKind::Relative8,
+                    symbol: "bad\0reloc".into(),
+                    addend: 0,
+                });
+            }
+            _ => unreachable!(),
+        }
+        assert!(input.validate().is_err(), "{bad}");
+        assert!(
+            table
+                .resolve(&[input])
+                .unwrap_err()
+                .contains("link input 0"),
+            "{bad}"
+        );
+        assert!(table.symbols.is_empty(), "{bad}");
+    }
+    let mut end = object("end", SymbolBinding::Global);
+    end.symbols[0].value = 1;
+    end.symbols[0].size = 0;
+    end.validate().unwrap();
+    table
+        .resolve(&[end, object("neighbor", SymbolBinding::Local)])
+        .unwrap();
+    assert_eq!(table.symbols.len(), 2);
+    assert_eq!(table.symbols[&SymbolKey::Global("end".into())].value, 1);
+}

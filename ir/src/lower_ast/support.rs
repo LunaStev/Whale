@@ -59,28 +59,49 @@ pub(crate) fn float_type(bits: u16) -> Result<Type, LowerError> {
 }
 
 pub(crate) fn map_binop(op: frontend::BinOpRef, ty: &Type) -> Result<BinOp, LowerError> {
+    use frontend::BinOpRef as B;
     if is_float(ty) {
         Ok(match op {
-            frontend::BinOpRef::Add => BinOp::FAdd,
-            frontend::BinOpRef::Sub => BinOp::FSub,
-            frontend::BinOpRef::Mul => BinOp::FMul,
+            B::Add => BinOp::FAdd,
+            B::Sub => BinOp::FSub,
+            B::Mul => BinOp::FMul,
+            _ => return Err(LowerError::UnsupportedExpr),
         })
     } else if is_int_like(ty) {
+        let signed = is_signed(ty);
         Ok(match op {
-            frontend::BinOpRef::Add => BinOp::Add,
-            frontend::BinOpRef::Sub => BinOp::Sub,
-            frontend::BinOpRef::Mul => BinOp::Mul,
+            B::Add => BinOp::Add,
+            B::Sub => BinOp::Sub,
+            B::Mul => BinOp::Mul,
+            B::BitAnd => BinOp::And,
+            B::BitOr => BinOp::Or,
+            B::BitXor => BinOp::Xor,
+            B::Div if signed => BinOp::SDiv,
+            B::Div => BinOp::UDiv,
+            B::Rem if signed => BinOp::SRem,
+            B::Rem => BinOp::URem,
+            B::ShiftLeft => BinOp::Shl,
+            B::ShiftRight if signed => BinOp::AShr,
+            B::ShiftRight => BinOp::LShr,
+            B::LogicalAnd | B::LogicalOr => return Err(LowerError::UnsupportedExpr),
         })
     } else {
         Err(LowerError::UnsupportedExpr)
     }
 }
 
+fn is_signed(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+    )
+}
+
 fn is_float(ty: &Type) -> bool {
     matches!(ty, Type::F16 | Type::F32 | Type::F64)
 }
 
-fn is_int_like(ty: &Type) -> bool {
+pub(crate) fn is_int_like(ty: &Type) -> bool {
     matches!(
         ty,
         Type::I1

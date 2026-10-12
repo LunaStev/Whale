@@ -1,13 +1,43 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{BlockId, ConstValue, Instruction, Module, Terminator, Type, ValueId};
 
 mod calls;
 mod cfg;
 mod constants;
+mod index;
 mod operands;
+use index::IndexedFunction;
+use std::cell::Cell;
+
+/// Work counters for reproducible verification scaling checks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct VerificationStats {
+    pub value_type_lookups: usize,
+    pub dominance_queries: usize,
+    pub analysis_work: usize,
+}
+
+struct AnalysisBudget {
+    limit: usize,
+    work: Cell<usize>,
+    queries: Cell<usize>,
+}
+impl AnalysisBudget {
+    fn charge(&self) -> Result<(), VerifyError> {
+        let work = self.work.get();
+        if work >= self.limit {
+            return Err(VerifyError::ResourceLimit(crate::LimitError {
+                resource: crate::Resource::AnalysisWork,
+                limit: self.limit,
+            }));
+        }
+        self.work.set(work + 1);
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum VerifyError {
@@ -170,12 +200,26 @@ pub fn verify_module(m: &Module) -> Result<(), VerifyError> {
 }
 
 pub fn verify_module_with_limits(m: &Module, limits: crate::IrLimits) -> Result<(), VerifyError> {
+    verify_module_with_stats(m, limits).map(|_| ())
+}
+
+/// Verify immutable IR and report lookup/CFG work without changing its order.
+pub fn verify_module_with_stats(
+    m: &Module,
+    limits: crate::IrLimits,
+) -> Result<VerificationStats, VerifyError> {
     crate::limits::check_module(m, limits).map_err(VerifyError::ResourceLimit)?;
     let target = crate::Target::lookup(&m.target).map_err(VerifyError::Target)?;
     target
         .validate_layout(m.datalayout)
         .map_err(VerifyError::Target)?;
-    for f in &m.functions {
+    let indexed: Vec<_> = m.functions.iter().map(IndexedFunction::new).collect();
+    let analysis = AnalysisBudget {
+        limit: limits.max_analysis_work,
+        work: Cell::new(0),
+        queries: Cell::new(0),
+    };
+    for f in &indexed {
         for block in &f.blocks {
             for ins in &block.instructions {
                 if let Instruction::Undef { dst, .. } = ins {
@@ -235,7 +279,7 @@ pub fn verify_module_with_limits(m: &Module, limits: crate::IrLimits) -> Result<
     }
     let constant_globals = constants::verify_globals(m, limits)?;
     let mut functions = HashSet::new();
-    for f in &m.functions {
+    for f in &indexed {
         if !functions.insert(&f.name) {
             return Err(VerifyError::DuplicateFunction {
                 name: f.name.clone(),
@@ -243,7 +287,7 @@ pub fn verify_module_with_limits(m: &Module, limits: crate::IrLimits) -> Result<
         }
     }
     calls::verify_declarations(m, limits)?;
-    for f in &m.functions {
+    for f in &indexed {
         let mut blocks = HashSet::new();
         for block in &f.blocks {
             if !blocks.insert(block.id) {
@@ -441,7 +485,7 @@ pub fn verify_module_with_limits(m: &Module, limits: crate::IrLimits) -> Result<
         }
         verify_value_types(f)?;
         constants::verify_locals(f, &constant_globals, limits)?;
-        cfg::verify(f)?;
+        cfg::verify(f, &analysis)?;
         // Operand checks consume the type table only after its definition/type
         // correspondence has been validated, so metadata corruption is not
         // misreported as a consumer's operand mismatch.
@@ -452,10 +496,14 @@ pub fn verify_module_with_limits(m: &Module, limits: crate::IrLimits) -> Result<
             }
         }
     }
-    Ok(())
+    Ok(VerificationStats {
+        value_type_lookups: indexed.iter().map(|f| f.queries.get()).sum(),
+        dominance_queries: analysis.queries.get(),
+        analysis_work: analysis.work.get(),
+    })
 }
 
-fn verify_condition(f: &crate::Function, value: ValueId) -> Result<(), VerifyError> {
+fn verify_condition(f: &IndexedFunction<'_>, value: ValueId) -> Result<(), VerifyError> {
     let ty = f
         .value_type(value)
         .ok_or_else(|| VerifyError::MissingValueType {
@@ -472,10 +520,10 @@ fn verify_condition(f: &crate::Function, value: ValueId) -> Result<(), VerifyErr
     Ok(())
 }
 
-fn verify_value_types(f: &crate::Function) -> Result<(), VerifyError> {
-    let mut types = HashMap::new();
-    for (value, ty) in &f.value_types {
-        if types.insert(*value, ty).is_some() {
+fn verify_value_types(f: &IndexedFunction<'_>) -> Result<(), VerifyError> {
+    let mut seen = HashSet::new();
+    for (value, _) in &f.value_types {
+        if !seen.insert(*value) {
             return Err(VerifyError::DuplicateValueType {
                 func: f.name.clone(),
                 value: *value,
@@ -489,8 +537,8 @@ fn verify_value_types(f: &crate::Function) -> Result<(), VerifyError> {
             .filter_map(instr_result),
     );
     for (value, expected) in definitions {
-        let got = types
-            .remove(&value)
+        let got = f
+            .value_type(value)
             .ok_or_else(|| VerifyError::MissingValueType {
                 func: f.name.clone(),
                 value,
@@ -503,10 +551,10 @@ fn verify_value_types(f: &crate::Function) -> Result<(), VerifyError> {
                 got: got.clone(),
             });
         }
+        seen.remove(&value);
     }
-    // Iterate the source table rather than the hash map for deterministic diagnostics.
     for (value, _) in &f.value_types {
-        if types.contains_key(value) {
+        if seen.contains(value) {
             return Err(VerifyError::UnexpectedValueType {
                 func: f.name.clone(),
                 value: *value,
