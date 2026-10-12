@@ -27,6 +27,18 @@ pub fn lower_o0(
     target: &str,
     datalayout: DataLayout,
 ) -> Result<Module, LowerError> {
+    lower_o0_with_limits(program, target, datalayout, super::AstLimits::default())
+}
+
+/// Lower a directly constructed AST with explicit resource budgets. Depth is
+/// capped at `MAX_AST_DEPTH` regardless of the requested override.
+pub fn lower_o0_with_limits(
+    program: &frontend::Program,
+    target: &str,
+    datalayout: DataLayout,
+    limits: super::AstLimits,
+) -> Result<Module, LowerError> {
+    super::limits::inspect_program(program, limits).map_err(LowerError::ResourceLimit)?;
     let selected = crate::Target::lookup(target).map_err(LowerError::Target)?;
     selected
         .validate_layout(datalayout)

@@ -9,8 +9,10 @@ pub mod frontend;
 
 mod binding;
 mod error;
+pub mod limits;
 mod o0;
 mod support;
 
 pub use error::LowerError;
-pub use o0::lower_o0;
+pub use limits::{AstLimitError, AstLimits, MAX_AST_DEPTH};
+pub use o0::{lower_o0, lower_o0_with_limits};

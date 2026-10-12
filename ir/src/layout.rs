@@ -41,11 +41,13 @@ pub fn layout_of(ty: &Type, target: Target) -> Result<TypeLayout, LayoutError> {
 }
 
 /// Override the aggregate nesting budget. Pointers do not lay out their pointee.
+/// Requests above `MAX_IR_NESTING` are clamped to that stack-safe ceiling.
 pub fn layout_of_with_limit(
     ty: &Type,
     target: Target,
     max_depth: usize,
 ) -> Result<TypeLayout, LayoutError> {
+    let max_depth = max_depth.min(crate::MAX_IR_NESTING);
     let scalar = |size, align| TypeLayout {
         size,
         align,

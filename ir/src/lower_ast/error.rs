@@ -4,6 +4,7 @@ use crate::{ConstValue, Type};
 
 #[derive(Debug)]
 pub enum LowerError {
+    ResourceLimit(super::AstLimitError),
     Call(crate::CallError),
     VoidCallUsedAsValue,
     NumericLiteral(String),

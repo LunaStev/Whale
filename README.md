@@ -368,6 +368,29 @@ inputs remain caller-owned; arbitrary unverified trees still have Rust's usual
 recursive clone/drop behavior. Checked declaration rejects and disposes its
 owned oversized signature iteratively.
 
+`FunctionBuilder` provides `try_*` operations for checked parameter/block/value
+IDs and construction order. Failed operations preserve instructions, values and
+terminators. Legacy convenience operations panic on invalid construction order;
+use `call`, `function_addr`, and `null_function` directly for their existing
+fallible call/signature checks. Public `layout_of_with_limit` clamps requested
+nesting to the safe `MAX_IR_NESTING` ceiling while accepting shallow types with
+larger overrides.
+
+Direct frontend AST processing uses `AstLimits`: default depth 64, 100,000 nodes,
+8 MiB total string bytes and 8 MiB encoded output. `lower_o0_with_limits` and
+`interchange::encode_with_limits` accept overrides; recursive work remains capped
+at `MAX_AST_DEPTH` (64). Shared iterative inspection precedes lowering or pretty
+JSON serialization, and owned rejected ASTs are disposed iteratively. Borrowed
+ASTs stay caller-owned. The bounded encoder stops before output storage exceeds
+its byte budget.
+
+`ObjectFile::validate` checks target identity, section alignment/names, symbol
+names/references/extents and relocation patch ranges without serialization.
+Symbol resolution applies this contract before consuming any input object. ELF
+writing additionally preflights all payloads, names, synthesized symbols, string
+tables, metadata tables and alignment against the output budget before copying
+payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
+
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
 Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 4 output).
