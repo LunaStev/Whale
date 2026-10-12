@@ -132,6 +132,24 @@ For example:
 cargo run --locked -- object raw.bin -o raw.o --debug-whale --dump-hex
 ```
 
+### CLI input and output limits
+
+`whale --version` (or `-V`) prints the package version. CLI arguments must be
+UTF-8; unsupported non-UTF-8 OS paths and option names produce a diagnostic
+with exit status 2 before any input is read or output is replaced.
+
+`asm` reads at most 8 MiB by default and `object` reads at most 256 MiB.
+Use `--max-input N` to set an explicit decimal byte budget for either command.
+The reader consumes at most N + 1 bytes, including for growing or streamed
+files. This budget is independent of assembly reservation and ELF output limits.
+Oversized or invalid UTF-8 assembly input preserves an existing output file.
+
+IR stdout writes are fallible: a closed pipe exits successfully, and other write
+errors exit with status 1 and a diagnostic. Canonical IR and scalar results
+retain their normal stdout format. `-o` still publishes atomically. The optional
+Wave bootstrap likewise replaces its archive only after successful creation,
+preserving the previous archive on an archiver failure.
+
 ### Execute scalar integer IR
 
 Save this format 4 module as `answer.wir`:

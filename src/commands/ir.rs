@@ -4,6 +4,20 @@ use std::{fs, io::Read, process};
 use ir::lower_ast::{interchange, lower_o0};
 use ir::{parse_module, printer, IrLimits};
 
+fn stdout(text: impl AsRef<str>) {
+    use std::io::Write;
+    let mut stream = std::io::stdout().lock();
+    if let Err(error) = stream
+        .write_all(text.as_ref().as_bytes())
+        .and_then(|_| stream.flush())
+    {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            process::exit(0);
+        }
+        fail(format!("failed to write stdout: {error}"));
+    }
+}
+
 fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("Error: {message}");
     process::exit(1);
@@ -155,7 +169,7 @@ pub fn run(args: Vec<String>) {
         parse_module(&source).unwrap_or_else(|e| fail(format!("{input}:{e}")))
     };
     if command == "verify" {
-        println!("Verified IR {input}");
+        stdout(format!("Verified IR {input}\n"));
         return;
     }
     if command == "run" {
@@ -173,23 +187,25 @@ pub fn run(args: Vec<String>) {
     if let Some(output) = output {
         super::output::publish(input.as_ref(), output.as_ref(), text.as_bytes())
             .unwrap_or_else(|e| fail(format!("failed to write {output}: {e}")));
-        println!("Wrote IR to {output}");
+        stdout(format!("Wrote IR to {output}\n"));
     } else {
-        print!("{text}");
+        stdout(text);
     }
 }
 fn print_help() {
-    println!("Usage: whale ir <command> [options]");
-    println!("  verify <input.wir>             Read and verify format 3/4 typed IR");
-    println!("  print <input.wir> [-o <path>]   Verify and write canonical typed IR");
-    println!("  run <input.wir> --function @fN [--arg <literal> ...] [--max-steps <u64>] [--max-memory <u64>]");
-    println!("    Execute integer/bool, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.");
-    println!("  lower <socket.json> [-o <path>] Lower AST JSON (requires socket-cli)");
-    println!("  lower options: --target x86_64-whale-linux, --no-verify");
-    println!("  AST envelope: format_version: 2, semantics_version: 1, features: [], program: AST");
-    println!("  Typed IR reads format_version 3/4, writes 4; semantics_version 1. Legacy undef is invalid.");
-    println!("  Integer literals are decimal; floats use exact-width 0x storage bits.");
-    println!("  Unknown fields, versions, instructions and trailing input are rejected.");
+    stdout(concat!(
+        "Usage: whale ir <command> [options]", "\n",
+        "  verify <input.wir>             Read and verify format 3/4 typed IR", "\n",
+        "  print <input.wir> [-o <path>]   Verify and write canonical typed IR", "\n",
+        "  run <input.wir> --function @fN [--arg <literal> ...] [--max-steps <u64>] [--max-memory <u64>]", "\n",
+        "    Execute integer/bool, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.", "\n",
+        "  lower <socket.json> [-o <path>] Lower AST JSON (requires socket-cli)", "\n",
+        "  lower options: --target x86_64-whale-linux, --no-verify", "\n",
+        "  AST envelope: format_version: 2, semantics_version: 1, features: [], program: AST", "\n",
+        "  Typed IR reads format_version 3/4, writes 4; semantics_version 1. Legacy undef is invalid.", "\n",
+        "  Integer literals are decimal; floats use exact-width 0x storage bits.", "\n",
+        "  Unknown fields, versions, instructions and trailing input are rejected.", "\n",
+    ));
 }
 
 fn execute(
@@ -227,10 +243,10 @@ fn execute(
     let result = ir::interpret_with_options(module, function, &arguments, options)
         .unwrap_or_else(|e| fail(format!("{input}: {e}")));
     match result.value {
-        Some(ir::ConstValue::I(v)) => println!("{} {v}", fun.ret_ty),
-        Some(ir::ConstValue::U(v)) => println!("{} {v}", fun.ret_ty),
-        Some(ir::ConstValue::Bool(v)) => println!("bool {v}"),
-        None => println!("void"),
+        Some(ir::ConstValue::I(v)) => stdout(format!("{} {v}\n", fun.ret_ty)),
+        Some(ir::ConstValue::U(v)) => stdout(format!("{} {v}\n", fun.ret_ty)),
+        Some(ir::ConstValue::Bool(v)) => stdout(format!("bool {v}\n")),
+        None => stdout("void\n"),
         Some(ir::ConstValue::F(_)) => unreachable!("interpreter scalar subset"),
     }
 }

@@ -3,7 +3,13 @@ use std::env;
 use crate::commands;
 
 pub fn run() {
-    let mut args = env::args().skip(1);
+    // Decode deliberately so unsupported OS paths/options are diagnostics,
+    // rather than env::args panics. Validate all arguments before file I/O.
+    let arguments: Vec<String> = env::args_os().skip(1).map(|arg| arg.into_string().unwrap_or_else(|_| {
+        eprintln!("Error: CLI arguments must be valid UTF-8; non-UTF-8 paths and options are unsupported");
+        std::process::exit(2);
+    })).collect();
+    let mut args = arguments.into_iter();
 
     let Some(cmd) = args.next() else {
         print_help();
@@ -12,6 +18,7 @@ pub fn run() {
 
     match cmd.as_str() {
         "--help" | "-h" => print_help(),
+        "--version" | "-V" => println!("whale {}", env!("CARGO_PKG_VERSION")),
         "asm" => commands::asm::run(args.collect()),
         "object" => commands::object::run(args.collect()),
         "link" => commands::linker::run(args.collect()),
@@ -30,6 +37,7 @@ fn print_help() {
     println!("  whale object <input> -o <output>");
     println!("  whale link <...>");
     println!("  whale ir <subcommand> [options]");
+    println!("  whale --version | -V");
     println!();
     println!("Commands:");
     println!("  asm     Assemble AMD64 source into an ELF64 object");

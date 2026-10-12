@@ -1,5 +1,4 @@
 use object::{ObjectFile, ObjectFormat, ObjectSymbol, SectionKind, SymbolBinding};
-use std::fs;
 use std::process;
 use std::time::Instant;
 
@@ -13,6 +12,7 @@ pub fn run(args: Vec<String>) {
 
     let mut input = None;
     let mut output = None;
+    let mut max_input = None;
 
     let mut debug_mode = false;
     let mut show_bytes = false;
@@ -45,6 +45,21 @@ pub fn run(args: Vec<String>) {
                 i += 1;
             }
             "--debug-whale" => debug_mode = true,
+            "--max-input" => {
+                if max_input.is_some() {
+                    eprintln!("Error: duplicate --max-input option");
+                    process::exit(1);
+                }
+                let limit = args.get(i + 1).unwrap_or_else(|| {
+                    eprintln!("Error: --max-input requires a decimal byte count");
+                    process::exit(1);
+                });
+                max_input = Some(super::input::byte_limit(limit).unwrap_or_else(|e| {
+                    eprintln!("Error: {e}");
+                    process::exit(1);
+                }));
+                i += 1;
+            }
             "--bytes" => show_bytes = true,
             "--dump-hex" => dump_hex = true,
             "--dump-bin" => dump_bin = true,
@@ -79,7 +94,11 @@ pub fn run(args: Vec<String>) {
     }
     let start_time = Instant::now();
 
-    let bytes = fs::read(&input).unwrap_or_else(|e| {
+    let bytes = super::input::read(
+        input.as_ref(),
+        max_input.unwrap_or(super::input::OBJECT_INPUT_BYTES),
+    )
+    .unwrap_or_else(|e| {
         eprintln!("Failed to read input: {}", e);
         process::exit(1);
     });
@@ -132,6 +151,7 @@ pub fn print_help() {
     println!("Wrap raw bytes in an AMD64 ELF64 object with a .text section.");
     println!();
     println!("Options:");
+    println!("  --max-input N   input byte limit (default 268435456 bytes)");
     println!("  --help          show this help");
     println!("  --debug-whale   enable debug features");
     println!("  --bytes         print object bytes (debug, first 256 bytes)");

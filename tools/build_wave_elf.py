@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 WAVE_REVISION = "8a465e30aeea4b817d925cdd0e8d08c1bb029c9a"
 
@@ -30,8 +31,12 @@ def main():
     obj = out / "elf_records.o"
     subprocess.run([str(compiler), "-O0", "--target=x86_64-unknown-linux-gnu", "build", str(root / "object/wave/elf_records.wave"), "--freestanding", "--emit=obj", "-o", str(obj), "--target-dir", str(out / "wave-build")], check=True)
     archive = out / "libwhale_wave_elf.a"
-    archive.unlink(missing_ok=True)
-    subprocess.run([os.environ.get("AR", "ar"), "crsD", str(archive), str(obj)], check=True)
+    # The temporary archive is on the destination filesystem. Neither a failed
+    # archiver nor a failed publication may delete the last good artifact.
+    with tempfile.TemporaryDirectory(prefix=".whale-wave-", dir=out) as temporary:
+        candidate = Path(temporary) / archive.name
+        subprocess.run([os.environ.get("AR", "ar"), "crsD", str(candidate), str(obj)], check=True)
+        os.replace(candidate, archive)
     print(f"WHALE_WAVE_ELF_DIR={out}")
 
 

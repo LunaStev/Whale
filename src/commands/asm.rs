@@ -1,4 +1,3 @@
-use std::fs;
 use std::process;
 use std::time::Instant;
 
@@ -22,6 +21,7 @@ pub fn run(args: Vec<String>) {
     let mut arch = None;
     let mut input = None;
     let mut output = None;
+    let mut max_input = None;
 
     let mut debug_mode = false;
     let mut show_ast = false;
@@ -68,6 +68,21 @@ pub fn run(args: Vec<String>) {
                         process::exit(1);
                     });
                 output = Some(path.clone());
+                i += 1;
+            }
+            "--max-input" => {
+                if max_input.is_some() {
+                    eprintln!("Error: duplicate --max-input option");
+                    process::exit(1);
+                }
+                let limit = args.get(i + 1).unwrap_or_else(|| {
+                    eprintln!("Error: --max-input requires a decimal byte count");
+                    process::exit(1);
+                });
+                max_input = Some(super::input::byte_limit(limit).unwrap_or_else(|e| {
+                    eprintln!("Error: {e}");
+                    process::exit(1);
+                }));
                 i += 1;
             }
 
@@ -125,8 +140,16 @@ pub fn run(args: Vec<String>) {
     if trace_enable {
         println!("[trace] reading input file: {}", input);
     }
-    let src = fs::read_to_string(&input).unwrap_or_else(|e| {
+    let bytes = super::input::read(
+        input.as_ref(),
+        max_input.unwrap_or(super::input::ASM_INPUT_BYTES),
+    )
+    .unwrap_or_else(|e| {
         eprintln!("Failed to read {}: {}", input, e);
+        process::exit(1);
+    });
+    let src = String::from_utf8(bytes).unwrap_or_else(|e| {
+        eprintln!("Failed to read {input}: assembly must be UTF-8: {e}");
         process::exit(1);
     });
 
@@ -306,6 +329,7 @@ fn print_help() {
     println!("  whale asm --amd64 <input> -o <output.o>");
     println!();
     println!("Options:");
+    println!("  --max-input N   input byte limit (default 8388608 bytes)");
     println!("  --debug-whale   enable debug features");
     println!("  --ast           print parser AST (debug)");
     println!("  --token         print tokens (debug)");
