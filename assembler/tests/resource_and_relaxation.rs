@@ -117,7 +117,7 @@ fn relaxation_never_returns_a_changed_layout_at_the_pass_limit() {
         if n > 0 {
             source.push_str(&format!("target{}:\n", n - 1));
         }
-        source.push_str(if n == 29 { "resb 119\n" } else { "resb 122\n" });
+        source.push_str(if n == 29 { "resb 119\n" } else { "resb 125\n" });
     }
     source.push_str("target29: ret");
     assert!(limited(&source, 10000, 8)

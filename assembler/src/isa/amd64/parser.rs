@@ -78,6 +78,16 @@ fn parse_const_definition(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, 
 
 fn parse_instruction(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmError> {
     let mnemonic = parse_mnemonic(tokens, pos)?;
+    if matches!(mnemonic.as_str(), "cwd" | "cdq" | "cqo")
+        && *pos < tokens.len()
+        && !matches!(tokens[*pos].kind, TokenKind::Newline)
+    {
+        return Err(parser_err(
+            tokens,
+            *pos,
+            &format!("{mnemonic} expects 0 operands"),
+        ));
+    }
     let operands = parse_operand_list(tokens, pos)?;
     Ok(ASTNode::Instruction(Instruction { mnemonic, operands }))
 }
@@ -500,6 +510,10 @@ fn is_register(name: &str) -> bool {
             | "r13w"
             | "r14w"
             | "r15w"
+            | "spl"
+            | "bpl"
+            | "sil"
+            | "dil"
             | "al"
             | "bl"
             | "cl"

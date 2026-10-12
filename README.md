@@ -522,6 +522,9 @@ coverage, and scheduled maintenance. The checked-in
 
 ## AMD64 assembler limits and symbols
 
+See [the scalar instruction reference](assembler/README.md) for LEA, Jcc aliases,
+shifts, division, TEST, NOT/NEG, and immediate IMUL forms and their boundaries.
+
 Materialized assembly output is limited to 64 MiB across all sections by default.
 The public `assemble_with_limits(source, &AMD64, &AssemblyLimits { ... })` API
 adjusts `max_output_bytes` and `max_relax_iterations` (default 1024 passes).
