@@ -92,32 +92,34 @@ fn parse_mnemonic(tokens: &[Token], pos: &mut usize) -> Result<String, AsmError>
     }
 }
 
-fn parse_operand_list(tokens: &[Token], pos: &mut usize) -> Result<Vec<Operand>, AsmError> {
-    let mut ops = Vec::new();
-    loop {
-        if *pos >= tokens.len() {
-            break;
-        }
-        match &tokens[*pos].kind {
-            TokenKind::Newline => {
-                *pos += 1;
-                break;
-            }
-            _ => {
-                let operand = parse_operand(tokens, pos)?;
-                ops.push(operand);
-            }
-        }
-        if *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Comma) {
-            *pos += 1;
-            continue;
-        } else {
-            break;
-        }
+// Instructions and fixed-argument directives end at a logical newline or EOF.
+// Labels are parsed separately, so `label: instruction` remains valid.
+fn finish_statement(tokens: &[Token], pos: &mut usize) -> Result<(), AsmError> {
+    if *pos < tokens.len() && !matches!(tokens[*pos].kind, TokenKind::Newline) {
+        return Err(parser_err(tokens, *pos, "Expected end of statement"));
     }
     while *pos < tokens.len() && matches!(tokens[*pos].kind, TokenKind::Newline) {
         *pos += 1;
     }
+    Ok(())
+}
+
+fn parse_operand_list(tokens: &[Token], pos: &mut usize) -> Result<Vec<Operand>, AsmError> {
+    let mut ops = Vec::new();
+    if *pos < tokens.len() && !matches!(tokens[*pos].kind, TokenKind::Newline) {
+        loop {
+            ops.push(parse_operand(tokens, pos)?);
+            if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma)) {
+                break;
+            }
+            let comma = *pos;
+            *pos += 1;
+            if *pos >= tokens.len() || matches!(tokens[*pos].kind, TokenKind::Newline) {
+                return Err(parser_err(tokens, comma, "Expected operand after comma"));
+            }
+        }
+    }
+    finish_statement(tokens, pos)?;
     Ok(ops)
 }
 
@@ -280,64 +282,52 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
     };
     *pos += 1;
 
-    if *pos >= tokens.len() {
-        return Err(parser_err(tokens, *pos, "Unexpected end after directive"));
+    if matches!(name.as_str(), "section" | "global" | "extern") {
+        let argument = match tokens.get(*pos).map(|t| &t.kind) {
+            Some(TokenKind::Identifier(s)) => s.clone(),
+            _ => return Err(parser_err(tokens, *pos, "Expected directive name argument")),
+        };
+        *pos += 1;
+        finish_statement(tokens, pos)?;
+        return Ok(match name.as_str() {
+            "section" => ASTNode::Section(argument),
+            "global" => ASTNode::Global(argument),
+            _ => ASTNode::Extern(argument),
+        });
     }
 
-    match name.as_str() {
-        "section" => {
-            if let TokenKind::Identifier(sec_name) = &tokens[*pos].kind {
+    let mut values = Vec::new();
+    loop {
+        if *pos >= tokens.len() || matches!(tokens[*pos].kind, TokenKind::Newline) {
+            return Err(parser_err(tokens, *pos, "Expected directive value"));
+        }
+        match &tokens[*pos].kind {
+            TokenKind::StringLiteral(s) => {
+                values.push(DirectiveValue::StringLiteral(s.clone()));
                 *pos += 1;
-                Ok(ASTNode::Section(sec_name.clone()))
-            } else {
-                Err(parser_err(tokens, *pos, "Expected section name"))
+            }
+            _ => {
+                let expr = parse_expr(tokens, pos, |k| {
+                    matches!(k, TokenKind::Comma | TokenKind::Newline)
+                })?;
+                values.push(DirectiveValue::Expr(expr));
             }
         }
-        "global" => {
-            if let TokenKind::Identifier(sym_name) = &tokens[*pos].kind {
-                *pos += 1;
-                Ok(ASTNode::Global(sym_name.clone()))
-            } else {
-                Err(parser_err(tokens, *pos, "Expected global symbol name"))
-            }
+        if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma)) {
+            break;
         }
-        "extern" => {
-            if let TokenKind::Identifier(sym_name) = &tokens[*pos].kind {
-                *pos += 1;
-                Ok(ASTNode::Extern(sym_name.clone()))
-            } else {
-                Err(parser_err(tokens, *pos, "Expected extern symbol name"))
-            }
-        }
-        _ => {
-            let mut values = Vec::new();
-            loop {
-                if *pos >= tokens.len() {
-                    break;
-                }
-                match &tokens[*pos].kind {
-                    TokenKind::Newline => {
-                        *pos += 1;
-                        break;
-                    }
-                    TokenKind::Comma => {
-                        *pos += 1;
-                    }
-                    TokenKind::StringLiteral(s) => {
-                        values.push(DirectiveValue::StringLiteral(s.clone()));
-                        *pos += 1;
-                    }
-                    _ => {
-                        let expr = parse_expr(tokens, pos, |k| {
-                            matches!(k, TokenKind::Comma | TokenKind::Newline)
-                        })?;
-                        values.push(DirectiveValue::Expr(expr));
-                    }
-                }
-            }
-            Ok(ASTNode::Directive(Directive { name, values }))
+        let comma = *pos;
+        *pos += 1;
+        if *pos >= tokens.len() || matches!(tokens[*pos].kind, TokenKind::Newline) {
+            return Err(parser_err(
+                tokens,
+                comma,
+                "Expected directive value after comma",
+            ));
         }
     }
+    finish_statement(tokens, pos)?;
+    Ok(ASTNode::Directive(Directive { name, values }))
 }
 
 fn parse_expr<F>(tokens: &[Token], pos: &mut usize, stop: F) -> Result<ExprValue, AsmError>

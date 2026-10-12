@@ -17,6 +17,11 @@ fn rejected_assembly_never_publishes_or_overwrites_an_object() {
     let output = scratch.0.join("output.o");
     for (input, diagnostic) in [
         ("]\nnop", "Unexpected token"),
+        ("push rax,", "operand after comma"),
+        ("mov rax, rbx,\n", "operand after comma"),
+        ("mov rax, rbx nop", "end of statement"),
+        ("db 1,,2", "Expected expression"),
+        ("db\n", "Expected directive value"),
         ("mov rax, [rbx", "closing ']'"),
         ("mov rax, [rbx - rcx]", "Negative register"),
         ("mov rax, [rbx + ]", "Expected term"),

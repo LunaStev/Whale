@@ -19,8 +19,10 @@ pub enum TokenKind {
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
+    /// UTF-8 byte offset into the original source.
     pub position: usize,
     pub line: usize,
+    /// One-based Unicode scalar column; tabs count as one column.
     pub column: usize,
 }
 
@@ -45,22 +47,22 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
         match ch {
             ';' => {
                 while let Some(&c) = chars.peek() {
-                    if c == '\n' {
+                    if c == '\n' || c == '\r' {
                         break;
                     }
                     chars.next();
-                    pos += 1;
+                    pos += c.len_utf8();
                     column += 1;
                 }
             }
 
-            ' ' | '\t' | '\r' => {
+            ' ' | '\t' => {
                 chars.next();
                 pos += 1;
                 column += 1;
             }
 
-            '\n' => {
+            '\n' | '\r' => {
                 tokens.push(Token {
                     kind: TokenKind::Newline,
                     position: pos,
@@ -69,6 +71,10 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                 });
                 chars.next();
                 pos += 1;
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                    pos += 1;
+                }
                 line += 1;
                 column = 1;
             }
@@ -168,20 +174,27 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
 
                 let mut s = String::new();
                 let mut closed = false;
-                for c in chars.by_ref() {
-                    pos += 1;
+                // Multiline quoted strings preserve their source bytes. CRLF is
+                // one display line, as are lone CR and LF.
+                while let Some(c) = chars.next() {
+                    pos += c.len_utf8();
                     if c == '"' {
                         column += 1;
                         closed = true;
                         break;
                     }
-                    if c == '\n' {
+                    s.push(c);
+                    if c == '\r' || c == '\n' {
+                        if c == '\r' && chars.peek() == Some(&'\n') {
+                            chars.next();
+                            pos += 1;
+                            s.push('\n');
+                        }
                         line += 1;
                         column = 1;
                     } else {
                         column += 1;
                     }
-                    s.push(c);
                 }
                 if !closed {
                     return Err(lexer_err(
@@ -306,7 +319,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                     if d.is_alphanumeric() || d == '_' || d == '.' {
                         id.push(d);
                         chars.next();
-                        pos += 1;
+                        pos += d.len_utf8();
                         column += 1;
                     } else {
                         break;
