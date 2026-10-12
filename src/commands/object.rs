@@ -3,6 +3,8 @@ use std::fs;
 use std::process;
 use std::time::Instant;
 
+use super::debug::dump_bytes;
+
 pub fn run(args: Vec<String>) {
     if args.is_empty() {
         print_help();
@@ -13,14 +15,10 @@ pub fn run(args: Vec<String>) {
     let mut output = None;
 
     let mut debug_mode = false;
-    let mut _show_ast = false;
-    let mut _show_token = false;
     let mut show_bytes = false;
     let mut dump_hex = false;
     let mut dump_bin = false;
-    let mut _dump_json = false;
-    let mut _no_color = false;
-    let mut _no_warn_ext = false;
+    let mut dump_json = false;
     let mut show_stats = false;
     let mut trace_enable = false;
 
@@ -32,20 +30,37 @@ pub fn run(args: Vec<String>) {
                 return;
             }
             "-o" => {
-                if i + 1 < args.len() {
-                    output = Some(args[i + 1].clone());
-                    i += 1;
+                if output.is_some() {
+                    eprintln!("Error: duplicate -o option");
+                    process::exit(1);
                 }
+                let path = args
+                    .get(i + 1)
+                    .filter(|s| !s.starts_with('-'))
+                    .unwrap_or_else(|| {
+                        eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
+                        process::exit(1);
+                    });
+                output = Some(path.clone());
+                i += 1;
             }
             "--debug-whale" => debug_mode = true,
             "--bytes" => show_bytes = true,
             "--dump-hex" => dump_hex = true,
             "--dump-bin" => dump_bin = true,
-            "--dump-json" => _dump_json = true,
+            "--dump-json" => dump_json = true,
             "--stats" => show_stats = true,
             "--trace" => trace_enable = true,
             s if input.is_none() && !s.starts_with('-') => input = Some(s.to_string()),
-            _ => {}
+            s => {
+                let kind = if s.starts_with('-') {
+                    "unknown option"
+                } else {
+                    "unexpected argument"
+                };
+                eprintln!("Error: {kind}: {s}");
+                process::exit(1);
+            }
         }
         i += 1;
     }
@@ -88,12 +103,16 @@ pub fn run(args: Vec<String>) {
     });
     let elapsed = start_time.elapsed();
 
-    if debug_mode && (show_bytes || dump_hex || dump_bin) { /* ... same as before ... */ }
-
     super::output::publish(input.as_ref(), output.as_ref(), &out_bytes).unwrap_or_else(|e| {
         eprintln!("Failed to write {output}: {e}");
         process::exit(1);
     });
+
+    if debug_mode && (show_bytes || dump_hex || dump_bin || dump_json) {
+        dump_bytes(
+            "object", &out_bytes, show_bytes, dump_hex, dump_bin, dump_json,
+        );
+    }
 
     if debug_mode && show_stats {
         println!(
@@ -106,5 +125,19 @@ pub fn run(args: Vec<String>) {
     println!("Created object file {} ({} bytes)", output, out_bytes.len());
 }
 
-pub fn print_help() { /* ... same as before ... */
+pub fn print_help() {
+    println!("Usage:");
+    println!("  whale object <input> -o <output>");
+    println!();
+    println!("Wrap raw bytes in an AMD64 ELF64 object with a .text section.");
+    println!();
+    println!("Options:");
+    println!("  --help          show this help");
+    println!("  --debug-whale   enable debug features");
+    println!("  --bytes         print object bytes (debug, first 256 bytes)");
+    println!("  --dump-hex      print object bytes as hex (debug, first 256 bytes)");
+    println!("  --dump-bin      print object bytes as binary (debug, first 256 bytes)");
+    println!("  --dump-json     print object size and byte head as JSON (debug)");
+    println!("  --stats         show stats (debug)");
+    println!("  --trace         trace logs");
 }

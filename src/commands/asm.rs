@@ -2,6 +2,8 @@ use std::fs;
 use std::process;
 use std::time::Instant;
 
+use super::debug::dump_bytes;
+
 use assembler::isa::amd64::parser::parse;
 use assembler::tokens::tokenize;
 use assembler::{assemble, isa::AMD64, AssemblerOutput};
@@ -41,14 +43,32 @@ pub fn run(args: Vec<String>) {
                 return;
             }
 
-            "--amd64" => arch = Some("amd64"),
-            "--aarch64" => arch = Some("aarch64"),
+            flag @ ("--amd64" | "--aarch64") => {
+                if arch.is_some() {
+                    eprintln!("Error: architecture must be specified only once");
+                    process::exit(1);
+                }
+                arch = Some(if flag == "--amd64" {
+                    "amd64"
+                } else {
+                    "aarch64"
+                });
+            }
 
             "-o" => {
-                if i + 1 < args.len() {
-                    output = Some(args[i + 1].clone());
-                    i += 1;
+                if output.is_some() {
+                    eprintln!("Error: duplicate -o option");
+                    process::exit(1);
                 }
+                let path = args
+                    .get(i + 1)
+                    .filter(|s| !s.starts_with('-'))
+                    .unwrap_or_else(|| {
+                        eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
+                        process::exit(1);
+                    });
+                output = Some(path.clone());
+                i += 1;
             }
 
             "--debug-whale" => debug_mode = true,
@@ -64,7 +84,15 @@ pub fn run(args: Vec<String>) {
             "--trace" => trace_enable = true,
 
             s if input.is_none() && !s.starts_with('-') => input = Some(s.to_string()),
-            _ => {}
+            s => {
+                let kind = if s.starts_with('-') {
+                    "unknown option"
+                } else {
+                    "unexpected argument"
+                };
+                eprintln!("Error: {kind}: {s}");
+                process::exit(1);
+            }
         }
         i += 1;
     }
@@ -271,64 +299,6 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
     }
 
     obj.write()
-}
-
-fn dump_bytes(
-    label: &str,
-    bytes: &[u8],
-    show_bytes: bool,
-    dump_hex: bool,
-    dump_bin: bool,
-    dump_json: bool,
-) {
-    const LIMIT: usize = 256;
-    let n = bytes.len().min(LIMIT);
-    let head = &bytes[..n];
-
-    if show_bytes {
-        println!(
-            "== BYTES ({}, {} bytes, head {} bytes) ==",
-            label,
-            bytes.len(),
-            n
-        );
-        for (i, b) in head.iter().enumerate() {
-            println!("{:04X}: {}", i, b);
-        }
-    }
-
-    if dump_hex {
-        println!("== HEX ({}, head {} bytes) ==", label, n);
-        for (i, chunk) in head.chunks(16).enumerate() {
-            print!("{:04X}: ", i * 16);
-            for b in chunk {
-                print!("{:02X} ", b);
-            }
-            println!();
-        }
-    }
-
-    if dump_bin {
-        println!("== BIN ({}, head {} bytes) ==", label, n);
-        for (i, b) in head.iter().enumerate() {
-            println!("{:04X}: {:08b}", i, b);
-        }
-    }
-
-    if dump_json {
-        println!("== JSON ({}) ==", label);
-        println!("{{");
-        println!("  \"len\": {},", bytes.len());
-        print!("  \"head\": [");
-        for (i, b) in head.iter().enumerate() {
-            if i != 0 {
-                print!(", ");
-            }
-            print!("{}", b);
-        }
-        println!("]");
-        println!("}}");
-    }
 }
 
 fn print_help() {

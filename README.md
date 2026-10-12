@@ -108,6 +108,30 @@ cargo run --release --locked -- asm --amd64 example.asm -o example.o
 This produces a relocatable ELF64 object. Assembly is implemented within Whale;
 no external assembler is needed.
 
+The `asm` and `object` commands reject unknown options, extra input paths,
+duplicate `-o` options, and missing output paths before reading input or writing
+output. Specify the assembly architecture once. For a path beginning with `-`,
+use a relative `./` prefix or an absolute path.
+
+### Wrap raw bytes in an object
+
+```sh
+cargo run --locked -- object raw.bin -o raw.o
+cargo run --locked -- object --help
+```
+
+This places the input bytes in an AMD64 ELF64 `.text` section with a global
+`start` symbol. The input must already contain the intended machine code.
+
+Both `asm` and `object` support `--debug-whale` with `--bytes`, `--dump-hex`,
+`--dump-bin`, or `--dump-json` to inspect the first 256 bytes of the emitted
+object. JSON includes the full object length and a bounded byte array.
+For example:
+
+```sh
+cargo run --locked -- object raw.bin -o raw.o --debug-whale --dump-hex
+```
+
 ### Execute scalar integer IR
 
 Save this format 4 module as `answer.wir`:
