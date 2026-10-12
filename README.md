@@ -36,7 +36,7 @@ native compilation pipeline are still being developed.
 | Component | Available today | Status |
 | --- | --- | --- |
 | Assembler | AMD64 assembly, sections, symbols, and relocations emitted as ELF64 object files | Available |
-| IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow and tracked stack-memory interpretation, and scalar AST JSON lowering | Experimental |
+| IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
 | Object library | Object model and ELF64 relocatable object serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
@@ -113,6 +113,7 @@ duplicate `-o` options, and missing output paths before reading input or writing
 output. Specify the assembly architecture once. For a path beginning with `-`,
 use a relative `./` prefix or an absolute path.
 
+
 ### Wrap raw bytes in an object
 
 ```sh
@@ -186,8 +187,12 @@ executed operations still trap. Loops evaluate phi inputs simultaneously.
 This oracle supports integer constants, arithmetic, comparisons, bit casts,
 checked pairs, select and control flow. It also supports tracked stack allocations, integer/Bool/data-pointer storage,
 typed GEP, byte copies and fills, with initialization and capability checks.
-It rejects floating point, calls, function pointers and general aggregate values
-in every block of the selected function, including unreachable blocks. Native
+It executes direct and signature-checked indirect Whale calls with integer/Bool,
+data-pointer and function-pointer arguments/results, using one shared fuel and
+memory arena. Function pointers retain their full signature and calling convention
+through mov/phi/select, storage and complete or split byte copies. It rejects
+floating point, external/SysV execution and general aggregate values in every
+block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
 
@@ -219,9 +224,11 @@ copies trap. Zero-length copy/fill succeeds without an access.
 `InterpreterOptions::memory_limits` separately limits allocation count (16384),
 pointer metadata fragments (262144), and byte/metadata work (256 Mi units).
 Failures return IR-located `MemoryLimit` errors. Scalar/checked-pair reads exclude
-padding from initialization checks. The current frame stays alive until return;
-lexical lifetime-end instructions, globals, calls/returns carrying pointers,
-foreign-memory adapters and native shadow metadata are future work.
+padding from initialization checks. Each invocation owns its stack allocations and
+retires them on return. Caller-owned pointers remain usable across nested calls;
+returned callee-local pointers retain expired capabilities and trap on access.
+Lexical lifetime-end instructions, globals, foreign-memory adapters and native
+shadow metadata are future work.
 
 ### Lower an AST to IR
 
@@ -447,9 +454,40 @@ by a `fnptr<signature>` SSA value. The verifier checks arity, argument/result
 types, conventions, and indirect-callee dominance. Callee expressions evaluate
 before arguments, which evaluate left to right. Void calls have no result;
 unused nonvoid results remain in O0 IR. Null or invalid indirect targets have a
-defined trap contract; runtime checks await the interpreter/native backend.
+defined runtime trap contract in the interpreter; native dispatch remains future work.
 This IR support does not implement machine ABI lowering or carry identities
 through object emission and linking yet.
+
+The [executable call fixture](ir/tests/fixtures/interpreted-calls-v4.wir) covers
+caller-owned pointers, nested calls, recursion and callable returns:
+
+```sh
+cargo run --locked -- ir run ir/tests/fixtures/interpreted-calls-v4.wir --function @f3
+cargo run --locked -- ir run ir/tests/fixtures/interpreted-calls-v4.wir --function @f6 --arg 4
+```
+
+These print `u32 42` and `u32 4`. `InterpreterOptions::max_call_depth` limits
+simultaneously active frames (default 256, including entry), and `max_frames`
+limits total invocations (default 100000), including frames already returned.
+`max_live_values` bounds reserved SSA slots across active frames (default 1000000).
+Calls and callee instructions/terminators all consume the same `max_steps` budget.
+Every frame keeps its own SSA environment; recursion does not use the host stack.
+Before effects, preflight follows direct calls and function-address identities
+that can flow to matching indirect calls from retained reachable bodies or
+checked entry arguments. Unrelated declarations/bodies remain verified without
+requiring executable support.
+
+The scalar `interpret`/CLI boundary remains integer/Bool only. Library users can
+use `interpret_values` with checked `RuntimeValue` constructors and inspect typed
+results via `ty`, `scalar_value`, `pointer_address` and `function_target`. Data
+addresses from `RuntimeValue::raw_pointer` never grant allocation authority, and
+each run owns a distinct arena so a returned expired pointer cannot acquire a
+new invocation's allocation. No CLI raw-address literal is introduced. Callable
+constructors and dispatch check the complete signature, convention and target
+identity. Defined callable values borrow their originating module and cannot
+rebind an equal FunctionId/signature in another module; ordinary bytes cannot manufacture callable authority. Pointer-to-pointer
+bitcasts permit storage byte views, while casts of actual function-pointer values
+remain forbidden. The interpreter's synthetic callable bits are not a native ABI.
 
 ### Wrap raw bytes in an object
 

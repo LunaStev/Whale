@@ -227,7 +227,7 @@ fn memory_budgets_are_separate_from_ir_fuel() {
     ));
 }
 #[test]
-fn old_wave_integer_memory_executes_and_call_body_stays_unsupported() {
+fn old_wave_integer_memory_and_direct_calls_execute() {
     let m = parse_module(include_str!("fixtures/wave-control-v3.wir")).unwrap();
     assert_eq!(
         interpret(&m, FunctionId(0), &[ConstValue::I(41)])
@@ -235,13 +235,7 @@ fn old_wave_integer_memory_executes_and_call_body_stays_unsupported() {
             .value,
         Some(ConstValue::I(42))
     );
-    assert!(matches!(
-        interpret(&m, FunctionId(1), &[]),
-        Err(InterpreterError::UnsupportedInstruction {
-            operation: "call",
-            ..
-        })
-    ));
+    assert_eq!(interpret(&m, FunctionId(1), &[]).unwrap().value, None);
 }
 #[test]
 fn published_memory_fixtures_match_results_trap_sites_and_canonical_output() {

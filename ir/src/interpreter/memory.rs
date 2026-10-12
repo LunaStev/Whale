@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Synthetic 64-bit addresses, byte initialization and separately copied capabilities.
-use super::{integer, Value};
+use super::{integer, FunctionPointer, FunctionTarget, Value};
 use crate::{ConstValue, Target, Type, TypeLayout};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+static NEXT_ARENA: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryLimits {
@@ -81,6 +88,7 @@ type Result<T> = std::result::Result<T, Fault>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Capability {
+    arena: u64,
     allocation: usize,
     generation: u64,
     lower: u64,
@@ -102,9 +110,22 @@ impl Pointer {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StoredPointer {
+    Data(Pointer),
+    Function(FunctionPointer),
+}
+impl StoredPointer {
+    fn bits(&self) -> u64 {
+        match self {
+            Self::Data(p) => p.address,
+            Self::Function(p) => p.bits(),
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Fragment {
-    pointer: Pointer,
+    pointer: StoredPointer,
     byte: u8,
 }
 struct Allocation {
@@ -123,6 +144,7 @@ pub(super) enum GepStep {
     Field(u64),
 }
 pub(super) struct Memory {
+    arena: u64,
     allocations: Vec<Allocation>,
     limits: MemoryLimits,
     bytes: u64,
@@ -137,6 +159,7 @@ fn layout(ty: &Type) -> TypeLayout {
 impl Memory {
     pub fn new(limits: MemoryLimits) -> Self {
         Self {
+            arena: NEXT_ARENA.fetch_add(1, Ordering::Relaxed),
             allocations: Vec::new(),
             limits,
             bytes: 0,
@@ -199,6 +222,7 @@ impl Memory {
         data.resize(length, 0);
         initialized.resize(length, 0);
         let capability = Capability {
+            arena: self.arena,
             allocation: self.allocations.len(),
             generation: 0,
             lower: 0,
@@ -229,6 +253,9 @@ impl Memory {
             return Err(MemoryTrap::NullPointer.into());
         }
         let cap = pointer.capability.ok_or(MemoryTrap::MissingProvenance)?;
+        if cap.arena != self.arena {
+            return Err(MemoryTrap::ExpiredAllocation.into());
+        }
         let allocation = self
             .allocations
             .get(cap.allocation)
@@ -371,7 +398,7 @@ impl Memory {
         self.allocations[id]
             .fragments
             .retain(|i, _| *i < start || *i >= end);
-        self.allocations[id].fragments.extend(new.iter().copied());
+        self.allocations[id].fragments.extend(new.iter().cloned());
         self.fragments = count;
         Ok(())
     }
@@ -418,7 +445,7 @@ impl Memory {
                 .fragments
                 .iter()
                 .filter(|(at, _)| **at >= ss && **at < se)
-                .map(|(at, tag)| (ds + (*at - ss), *tag)),
+                .map(|(at, tag)| (ds + (*at - ss), tag.clone())),
         );
         // Reserve/check metadata before any destination bytes are changed.
         self.replace_fragments(destination, ds, de, &fragments)?;
@@ -437,18 +464,34 @@ impl Memory {
         self.allocations[id].initialized[start..end].fill(1);
         Ok(())
     }
+    #[cfg(test)]
     pub fn load(&mut self, pointer: Pointer, ty: &Type, align: u32) -> Result<Value> {
+        self.load_with_signature(pointer, ty, align, None)
+    }
+    pub fn load_with_signature(
+        &mut self,
+        pointer: Pointer,
+        ty: &Type,
+        align: u32,
+        signature: Option<&Arc<crate::FunctionSignature>>,
+    ) -> Result<Value> {
         let (id, start, end) = self.access(pointer, layout(ty).size, align, false)?;
         self.charge((end - start) as u64)?;
         if let Type::Tuple(fields) = ty {
             let offsets = layout(ty).field_offsets;
-            let a = self.load_scalar(id, start + offsets[0] as usize, &fields[0])?;
-            let b = self.load_scalar(id, start + offsets[1] as usize, &fields[1])?;
+            let a = self.load_scalar(id, start + offsets[0] as usize, &fields[0], None)?;
+            let b = self.load_scalar(id, start + offsets[1] as usize, &fields[1], None)?;
             return Ok(Value::Checked(a.scalar().clone(), b.boolean()));
         }
-        self.load_scalar(id, start, ty)
+        self.load_scalar(id, start, ty, signature)
     }
-    fn load_scalar(&self, id: usize, start: usize, ty: &Type) -> Result<Value> {
+    fn load_scalar(
+        &self,
+        id: usize,
+        start: usize,
+        ty: &Type,
+        callable_signature: Option<&Arc<crate::FunctionSignature>>,
+    ) -> Result<Value> {
         let allocation = &self.allocations[id];
         let n = layout(ty).size as usize;
         for offset in start..start + n {
@@ -467,28 +510,48 @@ impl Memory {
                 byte => Err(MemoryTrap::InvalidBool { byte }.into()),
             };
         }
-        if matches!(ty, Type::Ptr(_)) {
+        if matches!(ty, Type::Ptr(_) | Type::FnPtr(_)) {
             let address = u64::from_le_bytes(bytes.try_into().unwrap());
-            if address == 0 {
-                return Ok(Value::Pointer(Pointer::raw(0)));
-            }
-            let first = allocation.fragments.get(&start).copied();
-            if let Some(fragment) = first {
-                if fragment.byte == 0
-                    && fragment.pointer.address == address
+            let complete = allocation.fragments.get(&start).filter(|fragment| {
+                fragment.byte == 0
+                    && fragment.pointer.bits() == address
                     && (0..8).all(|i| {
                         allocation.fragments.get(&(start + i))
                             == Some(&Fragment {
-                                pointer: fragment.pointer,
+                                pointer: fragment.pointer.clone(),
                                 byte: i as u8,
                             })
                     })
-                {
-                    return Ok(Value::Pointer(fragment.pointer));
+            });
+            return Ok(match ty {
+                Type::Ptr(_) => Value::Pointer(if address == 0 {
+                    Pointer::raw(0)
+                } else {
+                    match complete.map(|f| &f.pointer) {
+                        Some(StoredPointer::Data(pointer)) => *pointer,
+                        _ => Pointer::raw(address),
+                    }
+                }),
+                Type::FnPtr(signature) => {
+                    let signature = callable_signature
+                        .cloned()
+                        .unwrap_or_else(|| Arc::new((**signature).clone()));
+                    let target = if address == 0 {
+                        FunctionTarget::Null
+                    } else {
+                        match complete.map(|f| &f.pointer) {
+                            Some(StoredPointer::Function(pointer))
+                                if pointer.signature == signature =>
+                            {
+                                return Ok(Value::FunctionPointer(pointer.clone()))
+                            }
+                            _ => FunctionTarget::InvalidBits(address),
+                        }
+                    };
+                    Value::FunctionPointer(FunctionPointer { signature, target })
                 }
-            }
-            // Bytes without a complete consistent tag carry no recovered authority.
-            return Ok(Value::Pointer(Pointer::raw(address)));
+                _ => unreachable!(),
+            });
         }
         let mut bits = [0u8; 16];
         bits[..n].copy_from_slice(bytes);
@@ -539,12 +602,24 @@ impl Memory {
                     fragments.push((
                         start + i,
                         Fragment {
-                            pointer: *p,
+                            pointer: StoredPointer::Data(*p),
                             byte: i as u8,
                         },
                     ));
                 }
                 u128::from(p.address).to_le_bytes()
+            }
+            Value::FunctionPointer(p) => {
+                for i in 0..8 {
+                    fragments.push((
+                        start + i,
+                        Fragment {
+                            pointer: StoredPointer::Function(p.clone()),
+                            byte: i as u8,
+                        },
+                    ));
+                }
+                u128::from(p.bits()).to_le_bytes()
             }
             Value::Scalar(v) => {
                 integer::raw(v, integer::shape(ty).map_or(1, |s| s.0)).to_le_bytes()
@@ -553,10 +628,25 @@ impl Memory {
         };
         bytes.extend(data[..n].iter().enumerate().map(|(i, b)| (start + i, *b)));
     }
-    pub fn retire_all(&mut self) {
-        for a in &mut self.allocations {
-            a.alive = false;
+    pub fn allocation_count(&self) -> usize {
+        self.allocations.len()
+    }
+    pub fn retire_from(&mut self, start: usize) -> Result<()> {
+        self.charge((self.allocations.len() - start) as u64)?;
+        for a in &mut self.allocations[start..] {
+            if a.alive {
+                a.alive = false;
+                self.fragments -= a.fragments.len();
+                a.fragments.clear();
+                a.bytes.clear();
+                a.initialized.clear();
+            }
         }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub fn retire_all(&mut self) {
+        self.retire_from(0).unwrap();
     }
 }
 

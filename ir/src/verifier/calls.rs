@@ -150,10 +150,15 @@ pub(super) fn verify_instruction(
                 src,
                 src_ty,
                 dst_ty,
+                op,
                 ..
-            } if contains_function_pointer(src_ty)
-                || contains_function_pointer(dst_ty)
-                || f.value_type(*src).is_some_and(contains_function_pointer) =>
+            } if !(matches!(op, crate::CastOp::Bitcast)
+                && matches!(src_ty, Type::Ptr(_))
+                && matches!(dst_ty, Type::Ptr(_))
+                && matches!(f.value_type(*src), Some(Type::Ptr(_))))
+                && (contains_function_pointer(src_ty)
+                    || contains_function_pointer(dst_ty)
+                    || f.value_type(*src).is_some_and(contains_function_pointer)) =>
             {
                 return Err(CallError::ForbiddenFunctionPointerCast)
             }
