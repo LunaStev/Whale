@@ -18,4 +18,11 @@ impl ISA for AMD64 {
     fn encode(&self, ast: &AST) -> Result<AssemblerOutput, AsmError> {
         encoder::encode(ast)
     }
+    fn encode_with_limits(
+        &self,
+        ast: &AST,
+        limits: &crate::AssemblyLimits,
+    ) -> Result<AssemblerOutput, AsmError> {
+        encoder::encode_with_limits(ast, limits)
+    }
 }

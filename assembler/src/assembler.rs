@@ -42,12 +42,34 @@ pub enum RelocKind {
     Relative8,
 }
 
+/// Limits for AMD64 encoding. Sparse BSS does not consume materialized output.
+#[derive(Debug, Clone, Copy)]
+pub struct AssemblyLimits {
+    /// Total materialized bytes across every section, checked before allocation.
+    pub max_output_bytes: usize,
+    /// A changed label layout at this pass limit is an error, never an artifact.
+    pub max_relax_iterations: usize,
+}
+
+impl Default for AssemblyLimits {
+    fn default() -> Self {
+        Self {
+            max_output_bytes: 64 * 1024 * 1024,
+            max_relax_iterations: 1024,
+        }
+    }
+}
+
 pub fn assemble(source: &str, isa: &impl ISA) -> Result<AssemblerOutput, AsmError> {
+    assemble_with_limits(source, isa, &AssemblyLimits::default())
+}
+
+pub fn assemble_with_limits(
+    source: &str,
+    isa: &impl ISA,
+    limits: &AssemblyLimits,
+) -> Result<AssemblerOutput, AsmError> {
     let tokens = tokenize(source)?;
-
     let ast: AST = isa.parse(&tokens)?;
-
-    let encoded = isa.encode(&ast)?;
-
-    Ok(encoded)
+    isa.encode_with_limits(&ast, limits)
 }

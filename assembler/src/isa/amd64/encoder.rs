@@ -84,31 +84,35 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
 }
 
 pub fn encode(ast: &AST) -> Result<AssemblerOutput, AsmError> {
-    const MAX_RELAX_ITERATIONS: usize = 8;
+    encode_with_limits(ast, &crate::AssemblyLimits::default())
+}
 
+pub fn encode_with_limits(
+    ast: &AST,
+    limits: &crate::AssemblyLimits,
+) -> Result<AssemblerOutput, AsmError> {
     let consts = resolve_constants(ast)?;
-    let mut prev_label_locs: Option<HashMap<String, (usize, u64)>> = None;
-    let mut last_output: Option<AssemblerOutput> = None;
-
-    for _ in 0..MAX_RELAX_ITERATIONS {
-        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref(), &consts)?;
-        if let Some(prev) = &prev_label_locs {
-            if *prev == label_locs {
-                return Ok(out);
-            }
+    let mut prev_label_locs = None;
+    for _ in 0..limits.max_relax_iterations {
+        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref(), &consts, limits)?;
+        if prev_label_locs.as_ref() == Some(&label_locs) {
+            return Ok(out);
         }
         prev_label_locs = Some(label_locs);
-        last_output = Some(out);
     }
-
-    last_output.ok_or_else(|| AsmError::EncodeError("internal encoder error".into()))
+    Err(AsmError::EncodeError(format!(
+        "Branch relaxation did not converge within {} passes",
+        limits.max_relax_iterations
+    )))
 }
 
 fn encode_once(
     ast: &AST,
     jump_hint_locs: Option<&HashMap<String, (usize, u64)>>,
     consts: &HashMap<String, i64>,
+    limits: &crate::AssemblyLimits,
 ) -> Result<(AssemblerOutput, LabelLocations), AsmError> {
+    let mut materialized = 0usize;
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
 
@@ -212,14 +216,27 @@ fn encode_once(
                     ));
                 }
                 let cur_off = sec.data.len();
+                let mut instruction_bytes = Vec::new();
+                let mut instruction_relocs = Vec::new();
                 encode_instruction(
                     &inst,
-                    &mut sec.data,
-                    &mut sec.relocs,
+                    &mut instruction_bytes,
+                    &mut instruction_relocs,
                     current_section_idx,
                     cur_off,
                     &jump_known_locs,
                 )?;
+                reserve_output(
+                    &mut sec.data,
+                    instruction_bytes.len(),
+                    &mut materialized,
+                    limits,
+                )?;
+                sec.data.extend_from_slice(&instruction_bytes);
+                for reloc in &mut instruction_relocs {
+                    reloc.offset += cur_off;
+                }
+                sec.relocs.extend(instruction_relocs);
             }
             ASTNode::Directive(dir) => {
                 let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
@@ -227,10 +244,24 @@ fn encode_once(
                 if sec.name == ".bss" {
                     encode_bss_directive(&scoped, sec, consts)?;
                 } else {
+                    let extra = directive_size(&scoped, consts)?;
+                    reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
                     encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
                 }
             }
         }
+    }
+
+    // `global` plus `extern` intentionally exports an undefined external;
+    // an ordinary global must have a label definition in this file.
+    if let Some(name) = global_symbols
+        .iter()
+        .filter(|name| !defined_labels.contains(*name) && !extern_symbols.contains(*name))
+        .min()
+    {
+        return Err(AsmError::SymbolError(format!(
+            "Global symbol '{name}' has no definition or extern declaration"
+        )));
     }
 
     for sym in &mut symbols {
@@ -1339,6 +1370,71 @@ fn reserve_bytes(
     Ok(())
 }
 
+fn reserve_output(
+    bytes: &mut Vec<u8>,
+    extra: usize,
+    materialized: &mut usize,
+    limits: &crate::AssemblyLimits,
+) -> Result<(), AsmError> {
+    let total = materialized
+        .checked_add(extra)
+        .ok_or_else(|| AsmError::EncodeError("Assembly output size overflow".into()))?;
+    let section_size = bytes
+        .len()
+        .checked_add(extra)
+        .ok_or_else(|| AsmError::EncodeError("Section output size overflow".into()))?;
+    if total > limits.max_output_bytes || section_size > isize::MAX as usize {
+        return Err(AsmError::EncodeError(format!(
+            "Assembly output limit exceeded (limit {} bytes)",
+            limits.max_output_bytes
+        )));
+    }
+    bytes
+        .try_reserve(extra)
+        .map_err(|_| AsmError::EncodeError("Assembly output allocation failed".into()))?;
+    *materialized = total;
+    Ok(())
+}
+
+fn directive_size(dir: &Directive, consts: &HashMap<String, i64>) -> Result<usize, AsmError> {
+    if let Some(unit) = match dir.name.as_str() {
+        "resb" => Some(1),
+        "resw" => Some(2),
+        "resd" => Some(4),
+        "resq" => Some(8),
+        _ => None,
+    } {
+        return usize::try_from(reservation_size(unit, &dir.values, consts)?)
+            .map_err(|_| AsmError::EncodeError("Reservation size exceeds host capacity".into()));
+    }
+    let width = match dir.name.as_str() {
+        "db" => 1,
+        "dw" => 2,
+        "dd" => 4,
+        "dq" => 8,
+        _ => {
+            return Err(AsmError::EncodeError(format!(
+                "Unknown directive {}",
+                dir.name
+            )))
+        }
+    };
+    dir.values.iter().try_fold(0usize, |size, value| {
+        let extra = match value {
+            DirectiveValue::StringLiteral(s) if width == 1 => s.len(),
+            DirectiveValue::StringLiteral(_) => {
+                return Err(AsmError::EncodeError(format!(
+                    "{} only supports numeric expressions",
+                    dir.name
+                )))
+            }
+            _ => width,
+        };
+        size.checked_add(extra)
+            .ok_or_else(|| AsmError::EncodeError("Directive output size overflow".into()))
+    })
+}
+
 fn encode_bss_directive(
     dir: &Directive,
     section: &mut AsmSection,
@@ -1350,15 +1446,21 @@ fn encode_bss_directive(
         "resd" => reservation_size(4, &dir.values, consts)?,
         "resq" => reservation_size(8, &dir.values, consts)?,
         _ => {
-            let mut data = Vec::new();
-            let mut relocs = Vec::new();
-            encode_directive(dir, &mut data, &mut relocs, consts)?;
-            if !relocs.is_empty() || data.iter().any(|b| *b != 0) {
-                return Err(AsmError::EncodeError(
-                    "BSS has a nonzero initializer or relocation".into(),
-                ));
+            let size = directive_size(dir, consts)?;
+            for value in &dir.values {
+                let zero = match value {
+                    DirectiveValue::StringLiteral(s) => s.as_bytes().iter().all(|b| *b == 0),
+                    DirectiveValue::Expr(expr) => {
+                        matches!(eval_directive_expr(expr, consts)?, EvaluatedExpr::Number(0))
+                    }
+                };
+                if !zero {
+                    return Err(AsmError::EncodeError(
+                        "BSS has a nonzero initializer or relocation".into(),
+                    ));
+                }
             }
-            data.len() as u64
+            size as u64
         }
     };
     section.zero_fill = section

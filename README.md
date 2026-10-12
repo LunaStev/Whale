@@ -465,6 +465,19 @@ configurations, the minimum supported Rust version, optimized tests, rustdoc,
 coverage, and scheduled maintenance. The checked-in
 [workflows](.github/workflows/) contain the commands used by CI.
 
+## AMD64 assembler limits and symbols
+
+Materialized assembly output is limited to 64 MiB across all sections by default.
+The public `assemble_with_limits(source, &AMD64, &AssemblyLimits { ... })` API
+adjusts `max_output_bytes` and `max_relax_iterations` (default 1024 passes).
+Reservations and data growth are checked before allocation; exceeding a budget
+returns `AsmError`. BSS reservations use logical `u64` storage and do not consume
+this byte budget. No artifact is returned until branch label layouts converge.
+
+A `global` name requires a label definition, including a forward definition.
+`global name` with `extern name` is allowed and exports an undefined external;
+a local definition and `extern` remain conflicting declarations.
+
 ## Contributing
 
 Contributions to correctness, diagnostics, tests, and toolchain capabilities are
