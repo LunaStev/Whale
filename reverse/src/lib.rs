@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 //! AMD64 reverse analysis with a Wave implementation and a checked Rust boundary.
 //! Ordinary builds report an unavailable core; no Rust decoder substitutes for it.
+mod cfg;
 mod model;
+pub use cfg::*;
 pub use model::*;
 use std::fmt;
 

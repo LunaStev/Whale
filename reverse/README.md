@@ -84,3 +84,61 @@ Text rendering is canonical presentation, not a promise of identical reassembly
 for every valid x86 encoding. Original bytes and exact encoding fields remain
 available. Relocations suppress the placeholder numeric branch target and carry
 symbol, addend, kind and field location independently.
+## Conservative control flow and references
+
+`analyze(input, base, seeds, overlays, limits)` invokes the Wave on-demand CFG
+kernel. Seeds and overlay field offsets are region-relative; `CfgTarget::Address`
+is an absolute virtual address and `Symbol(id)` names the host's symbol registry.
+Input is one explicitly scoped byte region, so external addresses remain edges
+without being decoded. Calls are followed inside the region by default; set
+`follow_calls=false` for caller-only traversal. A helper before the initial entry
+or a branch target after an unknown byte gap is decoded when reached.
+
+Wave owns the FIFO worklist, byte-ownership map, instruction decoding, target
+selection, late/backward block splitting, overlap detection and xrefs. Rust
+validates and normalizes caller buffers and converts checked records. Instruction
+records use discovery order; blocks use increasing byte offset and refer to
+instruction indices. Seeds and overlays are normalized for deterministic output.
+The first discovered instruction owns its bytes; conflicting starts/spans emit
+explicit overlap stops rather than alternate invented instructions.
+
+Relocation fields are sorted/disjoint and binary searched under the shared work
+budget. An exact overlay replaces the numeric target before enqueue; partial
+field intersections become `Unresolved`. Unknown symbolic/indirect targets remain
+explicit. RIP-relative/absolute memory and relocated immediate fields produce
+xrefs. An indexed relocation denotes a referenced address component, not a known
+full effective address. Memory/address xrefs never enqueue code; arbitrary raw
+integer constants are not treated as references. RIP calculations include the
+entire instruction, including trailing immediates. Indirect memory branches keep
+both the memory reference and an unresolved control edge; pointer contents are
+never guessed.
+
+Unknown/truncated/invalid/overlong decoding stops that path. Indirect jumps and
+syscalls also stop with unresolved edges; no syscall return behavior is assumed.
+Ordinary fallthrough at the region end is explicit. Other queued paths remain
+analyzable. This conservative graph is not complete program reachability, source
+recovery, a decompiler, or IR lifting.
+
+`CfgLimits` separately caps input bytes, instruction records, queued leaders and
+blocks, edges, stops, shared work and caller-buffer memory. Queued leaders count
+against the block limit even if they later conflict or fail decoding. Defaults
+are 8 MiB input, 16,384 instructions, 8,192 blocks, 65,536 edges, 8,192 stops,
+67,108,864 work units and 128 MiB combined work/output/normalization buffers.
+Hard ceilings are 16 MiB input and 512 MiB owned buffers. Allocation reservation
+failures return `CfgError::Allocation`. Work includes host normalization, kernel
+input/ownership scans, binary searches, traversal, block formation and committed
+record words; it is a deterministic accounting unit, not CPU instruction count.
+Resource failure returns no partial graph. The raw ABI also leaves output intact;
+its caller-owned workspace may be modified on either success or failure.
+
+The CLI exposes this kernel as `whale reverse cfg|xrefs file [--entry NAME|ADDRESS]`
+with optional `--json`. Each invocation analyzes the full selected region from
+one seed: the executable entry, raw base, or ET_REL `_start`; an ET_REL without
+`_start` needs an explicit entry. Symbols in other regions remain symbolic edges.
+Relocations use stable symbol identities rather than placeholder numeric targets.
+Both text and JSON stream into the output byte ceiling before atomic publication.
+`xrefs` omits fallthrough edges and retains symbolic, indirect and memory/address
+references and explicit stops. CFG instruction capacity defaults to 16,384 and
+is reduced for small regions. `--max-instructions`, `--max-work` (default
+67,108,864) and `--max-workspace` (default 134,217,728 bytes) bound analysis;
+`--max-output` independently bounds the rendered report.
