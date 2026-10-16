@@ -17,6 +17,7 @@ pub struct LinkError {
     pub message: String,
     pub contexts: Vec<Context>,
     pub input_cause: Option<Box<object::ObjectError>>,
+    pub relocation_cause: Option<Box<crate::core::relocation::RelocationError>>,
 }
 impl LinkError {
     pub fn new(kind: LinkErrorKind, message: impl Into<String>) -> Self {
@@ -25,6 +26,7 @@ impl LinkError {
             message: message.into(),
             contexts: Vec::new(),
             input_cause: None,
+            relocation_cause: None,
         }
     }
 }
@@ -54,5 +56,10 @@ impl std::error::Error for LinkError {
         self.input_cause
             .as_deref()
             .map(|e| e as &(dyn std::error::Error + 'static))
+            .or_else(|| {
+                self.relocation_cause
+                    .as_deref()
+                    .map(|e| e as &(dyn std::error::Error + 'static))
+            })
     }
 }

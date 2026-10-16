@@ -20,6 +20,6 @@ fn checked_linker_preserves_input_identity_and_original_typed_validation_cause()
     }));
     let mut empty = Linker::new(OutputFormat::ELF64Executable);
     let e = empty.link_checked().unwrap_err();
-    assert_eq!(e.kind, LinkErrorKind::Emission);
-    assert_eq!(e.diagnostic().code, "link.emit");
+    assert_eq!(e.kind, LinkErrorKind::Entry);
+    assert_eq!(e.diagnostic().code, "link.entry");
 }

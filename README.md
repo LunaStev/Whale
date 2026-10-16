@@ -39,7 +39,7 @@ native compilation pipeline are still being developed.
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
 | Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
-| Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
+| Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
 
 The IR target selector accepts only `x86_64-whale-linux`; unknown targets fail
 with the supported choice, including with `--no-verify`. Its output data layout
@@ -54,7 +54,8 @@ sections require zero `zero_fill`. ELF output uses checked field conversions and
 layout arithmetic and rejects extended section numbering. Its default output
 budget is 256 MiB; library clients can override it with `write_with_limit`.
 The linker layout API returns `Result` and records separate file/memory positions
-and sizes for every input section. It does not yet emit executable segments.
+and sizes for every input section. The executable layout additionally accounts for
+ELF headers and page-congruent RX/R/RW load segments with sparse BSS.
 
 The [object input API](object/README.md) reads the supported bounded AMD64 ELF64
 relocatable subset and preserves section, symbol and relocation semantics.
@@ -644,7 +645,7 @@ references resolve before layout. Unreferenced undefined declarations impose no
 requirement; a referenced undefined weak symbol has the defined value zero.
 Unresolved strong references report their input object, section and offset.
 `SymbolTable::references` records each selected target and whether it is weak
-undefined. This API does not implement executable linking.
+undefined. The static executable path uses this selection before patching relocations.
 
 Normal ELF regression tests independently decode symbols and RELA records without
 external programs. An additional GNU binutils oracle is opt-in:
@@ -669,7 +670,7 @@ draft creation is opt-in and runs only after all checks pass.
 | [assembler/](assembler/) | Assembly parsing and instruction encoding |
 | [ir/](ir/) | IR types, builders, lowering, verification, and printing |
 | [object/](object/) | Sections, symbols, relocations, and ELF serialization |
-| [linker/](linker/) | Symbol resolution and layout infrastructure |
+| [linker/](linker/) | Static symbol/archive selection, relocation application and ELF executable output |
 | [src/](src/) | Command-line interface |
 | [tests/](tests/) | CLI integration tests |
 | [tools/](tools/) | CI helpers and standalone CLI smoke checks |
@@ -728,3 +729,30 @@ or [GitHub Sponsors](https://github.com/sponsors/LunaStev).
 
 Whale is licensed under the [Mozilla Public License 2.0](LICENSE).
 See [COPYRIGHT](COPYRIGHT) and [NOTICE](NOTICE) for attribution and notices.
+
+## Static Linux AMD64 linking
+
+```sh
+whale asm --amd64 start.asm -o start.o
+whale asm --amd64 helper.asm -o helper.o
+whale link start.o helper.o -o app --entry _start
+./app
+```
+
+Inputs are the supported ELF64 little-endian AMD64 relocatable subset or ordinary
+Unix archives. The entry defaults to `_start` and must be a defined global symbol
+inside file-backed executable code. No libc, startup object, main wrapper, dynamic
+loader, GOT or dynamic PLT is added. A statically resolved PLT32 is a direct PC32
+reference. Thin archives, shared libraries and unsupported relocation kinds fail.
+
+Archives are searched left to right and rescanned to a fixed point internally.
+Only unresolved strong references and the entry demand extract members; undefined
+weak references do not. Later inputs do not rescan earlier archives. GNU and BSD
+long names are supported. Unused members do not introduce duplicate definitions.
+
+`--max-input` caps the sum of input bytes and `--max-output` caps the complete
+executable, both defaulting to 256 MiB. Archive parsing is limited to 4096 members
+and 1 MiB of names; selection has 10 million work units and a 4096-object cap.
+Outputs publish atomically after validation and protect every input alias. Unix
+executables receive mode 0755 without copying setuid/setgid bits. The produced
+artifact targets Linux AMD64 regardless of the machine running Whale.

@@ -52,9 +52,9 @@ dependencies = [
 name = "ir"
 version = "0.1.0"
 dependencies = [
- "whale-diagnostic",
  "serde",
  "serde_json",
+ "whale-diagnostic",
  "whale-target",
 ]
 
@@ -74,8 +74,8 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "linker"
 version = "0.1.0"
 dependencies = [
- "whale-diagnostic",
  "object",
+ "whale-diagnostic",
 ]
 
 [[package]]
@@ -229,6 +229,7 @@ version = "0.1.0"
 dependencies = [
  "assembler",
  "ir",
+ "linker",
  "object",
  "same-file",
  "serde_json",

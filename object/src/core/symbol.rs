@@ -20,6 +20,7 @@ pub enum SymbolKind {
     Object,
 }
 
+#[derive(Clone)]
 pub struct ObjectSymbol {
     pub kind: SymbolKind,
     pub name: String,

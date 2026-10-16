@@ -35,13 +35,13 @@ fn print_help() {
     println!("Usage:");
     println!("  whale asm --amd64 <input> -o <output.o>");
     println!("  whale object <input> -o <output>");
-    println!("  whale link <...>");
+    println!("  whale link <input.o|input.a>... -o <executable> [--entry NAME]");
     println!("  whale ir <subcommand> [options]");
     println!("  whale --version | -V");
     println!();
     println!("Commands:");
     println!("  asm     Assemble AMD64 source into an ELF64 object");
     println!("  object  Wrap raw bytes in an AMD64 ELF64 object");
-    println!("  link    Executable linking (not implemented)");
+    println!("  link    Static Linux AMD64 executable linking");
     println!("  ir      IR tools (verify/print/run; socket-cli enables AST lower)");
 }

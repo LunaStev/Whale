@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 pub use whale_target::{Endian, Machine, ObjectFormat, ObjectTarget, Target};
 
+#[derive(Clone)]
 pub struct ObjectFile {
     pub target: ObjectTarget,
     pub sections: Vec<Section>,
