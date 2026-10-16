@@ -122,7 +122,7 @@ fn identities_are_explicit_scoped_and_independent_of_names_or_storage_order() {
     assert_eq!(
         text,
         include_str!("fixtures/text-identities-v3.wir")
-            .replace("format_version 3", "format_version 5")
+            .replace("format_version 3", "format_version 7")
     );
     assert_eq!(text, print_module(&m));
     // IDs are preserved, rather than renumbered by physical block order.

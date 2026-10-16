@@ -15,6 +15,8 @@ pub struct AstLimits {
     pub max_string_bytes: usize,
     /// Maximum pretty JSON size; enforced by a bounded serialization writer.
     pub max_output_bytes: usize,
+    /// Work units for optional source mapping during O0 construction.
+    pub max_source_work: usize,
 }
 impl Default for AstLimits {
     fn default() -> Self {
@@ -23,12 +25,15 @@ impl Default for AstLimits {
             max_nodes: 100_000,
             max_string_bytes: 8 * 1024 * 1024,
             max_output_bytes: 8 * 1024 * 1024,
+            max_source_work: 16 * 1024 * 1024,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AstLimitError {
+    Source,
+    SourceWork,
     Depth,
     Nodes,
     Strings,
@@ -37,6 +42,8 @@ pub enum AstLimitError {
 impl std::fmt::Display for AstLimitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Source => "invalid source annotation or duplicate original node identity",
+            Self::SourceWork => "AST source mapping work limit exceeded",
             Self::Depth => "AST nesting limit exceeded",
             Self::Nodes => "AST node limit exceeded",
             Self::Strings => "AST string byte limit exceeded",
@@ -57,9 +64,31 @@ struct Inspect<'a> {
     nodes: usize,
     strings: usize,
     pending: Vec<(Node<'a>, usize)>,
-    extended_ops: bool,
+    extended_ops: u8,
+    source_ids: std::collections::HashSet<u64>,
+    wire_numbers: bool,
 }
 impl<'a> Inspect<'a> {
+    fn source(&mut self, annotation: &crate::SourceAnnotation) -> Result<(), AstLimitError> {
+        if !self.source_ids.insert(annotation.id) {
+            return Err(AstLimitError::Source);
+        }
+        self.extended_ops |= 2;
+        if let Some(s) = &annotation.source {
+            self.string(&s.file)?;
+            if s.file.is_empty()
+                || s.file.contains('\0')
+                || s.line == 0
+                || s.column == 0
+                || s.end_line == 0
+                || s.end_column == 0
+                || (s.line, s.column) > (s.end_line, s.end_column)
+            {
+                return Err(AstLimitError::Source);
+            }
+        }
+        Ok(())
+    }
     fn count(&mut self) -> Result<(), AstLimitError> {
         self.nodes = self.nodes.checked_add(1).ok_or(AstLimitError::Nodes)?;
         if self.nodes > self.limits.max_nodes {
@@ -95,13 +124,33 @@ pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLi
 pub(crate) fn inspect_program_features(
     program: &Program,
     limits: AstLimits,
-) -> Result<bool, AstLimitError> {
+) -> Result<u8, AstLimitError> {
+    inspect_program_details(program, limits).map(|details| details.0)
+}
+
+/// JSON Schema widths and numeric spelling are syntax; value ranges and typed
+/// expression compatibility remain lowering/verification responsibilities.
+pub(crate) fn inspect_program_wire(program: &Program, limits: AstLimits) -> Result<u8, String> {
+    let (extended, numbers) =
+        inspect_program_details(program, limits).map_err(|e| e.to_string())?;
+    if !numbers {
+        return Err("AST numeric width or spelling does not match its versioned schema".into());
+    }
+    Ok(extended)
+}
+
+fn inspect_program_details(
+    program: &Program,
+    limits: AstLimits,
+) -> Result<(u8, bool), AstLimitError> {
     let mut i = Inspect {
         limits,
         nodes: 0,
         strings: 0,
         pending: Vec::new(),
-        extended_ops: false,
+        extended_ops: 0,
+        source_ids: std::collections::HashSet::new(),
+        wire_numbers: true,
     };
     i.count()?; // program
     for d in &program.declarations {
@@ -144,14 +193,23 @@ pub(crate) fn inspect_program_features(
                 }
             }
             Node::Type(t) => match t {
+                TypeRef::Int { bits, .. } => i.wire_numbers &= valid_int_width(*bits),
+                TypeRef::Float { bits } => i.wire_numbers &= matches!(bits, 16 | 32 | 64),
                 TypeRef::Ptr(t) | TypeRef::Array { elem: t, .. } => i.push(Node::Type(t), next)?,
                 TypeRef::FnPtr(s) => i.push(Node::Signature(s), next)?,
                 TypeRef::Opaque(s) => i.string(s)?,
                 _ => {}
             },
             Node::Expr(e) => match e {
+                Expr::Located {
+                    annotation,
+                    expression,
+                } => {
+                    i.source(annotation)?;
+                    i.push(Node::Expr(expression), next)?;
+                }
                 Expr::BitNot(value) => {
-                    i.extended_ops = true;
+                    i.extended_ops |= 1;
                     i.push(Node::Expr(value), next)?;
                 }
                 Expr::FunctionRef(s) | Expr::Var(s) => i.string(s)?,
@@ -165,11 +223,24 @@ pub(crate) fn inspect_program_features(
                         i.push(Node::Expr(e), next)?;
                     }
                 }
-                Expr::Lit(Lit::Int { value, .. } | Lit::Float { value, .. }) => i.string(value)?,
+                Expr::Lit(Lit::Int { bits, value, .. }) => {
+                    i.string(value)?;
+                    let digits = value.strip_prefix('-').unwrap_or(value);
+                    i.wire_numbers &= valid_int_width(*bits)
+                        && !digits.is_empty()
+                        && digits.bytes().all(|b| b.is_ascii_digit());
+                }
+                Expr::Lit(Lit::Float { bits, value }) => {
+                    i.string(value)?;
+                    i.wire_numbers &= matches!(bits, 16 | 32 | 64)
+                        && value.len() == 2 + usize::from(*bits) / 4
+                        && value.starts_with("0x")
+                        && value[2..].bytes().all(|b| b.is_ascii_hexdigit());
+                }
                 Expr::Lit(Lit::Bool(_)) => {}
                 Expr::Binary { left, op, right } => {
                     if !matches!(op, BinOpRef::Add | BinOpRef::Sub | BinOpRef::Mul) {
-                        i.extended_ops = true;
+                        i.extended_ops |= 1;
                     }
                     i.push(Node::Expr(left), next)?;
                     i.push(Node::Expr(right), next)?;
@@ -180,6 +251,13 @@ pub(crate) fn inspect_program_features(
                 }
             },
             Node::Stmt(s) => match s {
+                Stmt::Located {
+                    annotation,
+                    statement,
+                } => {
+                    i.source(annotation)?;
+                    i.push(Node::Stmt(statement), next)?;
+                }
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         i.push(Node::Expr(e), next)?;
@@ -222,7 +300,7 @@ pub(crate) fn inspect_program_features(
             },
         }
     }
-    Ok(i.extended_ops)
+    Ok((i.extended_ops, i.wire_numbers))
 }
 
 enum Owned {
@@ -293,6 +371,9 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 pending.push(Disposal::Types(s.params.into_iter()));
             }
             Owned::Expr(e) => match e {
+                Expr::Located { expression, .. } => {
+                    pending.push(Disposal::One(Owned::Expr(*expression)))
+                }
                 Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
@@ -308,6 +389,9 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 _ => {}
             },
             Owned::Stmt(s) => match s {
+                Stmt::Located { statement, .. } => {
+                    pending.push(Disposal::One(Owned::Stmt(*statement)))
+                }
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         pending.push(Disposal::One(Owned::Expr(e)));
@@ -343,4 +427,8 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
             },
         }
     }
+}
+
+fn valid_int_width(bits: u16) -> bool {
+    matches!(bits, 1 | 8 | 16 | 32 | 64 | 128)
 }

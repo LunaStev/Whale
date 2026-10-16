@@ -1,0 +1,191 @@
+name: Manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Full source commit SHA (40 lowercase hex digits)
+        type: string
+        required: true
+      version:
+        description: Cargo package version, without v prefix
+        type: string
+        required: true
+      publish_draft:
+        description: Create a new draft only after every native package is validated
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whale-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  RUSTUP_TOOLCHAIN: stable
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  source:
+    name: Validate release source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      source: ${{ steps.identity.outputs.source }}
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - name: Check input syntax before checkout
+        env:
+          SOURCE: ${{ inputs.source }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.source }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Validate exact commit, Cargo version and existing tag
+        id: identity
+        env:
+          SOURCE: ${{ inputs.source }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          test "$(git rev-parse "refs/tags/v$VERSION^{commit}")" = "$SOURCE"
+          python -c 'import os,tomllib; from pathlib import Path; assert tomllib.loads(Path("Cargo.toml").read_text())["package"]["version"] == os.environ["VERSION"]'
+          echo "source=$SOURCE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - run: python tools/ci.py run --name format -- cargo fmt --all -- --check
+      - run: python tools/ci.py run --name clippy -- cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: python tools/ci.py run --name default-tests -- cargo test --workspace --locked
+      - run: python tools/ci.py run --name all-tests -- cargo test --workspace --all-features --locked
+      - run: python tools/ci.py run --name release-tools -- python -m unittest discover -s tools -p test_*.py -v
+
+  package:
+    name: Package ${{ matrix.host }}
+    needs: source
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            host: x86_64-unknown-linux-gnu
+            binary: target/release/whale
+          - os: ubuntu-24.04-arm
+            host: aarch64-unknown-linux-gnu
+            binary: target/release/whale
+          - os: macos-15-intel
+            host: x86_64-apple-darwin
+            binary: target/release/whale
+          - os: macos-15
+            host: aarch64-apple-darwin
+            binary: target/release/whale
+          - os: windows-2025
+            host: x86_64-pc-windows-msvc
+            binary: target/release/whale.exe
+          - os: windows-11-arm
+            host: aarch64-pc-windows-msvc
+            binary: target/release/whale.exe
+    env:
+      SOURCE: ${{ needs.source.outputs.source }}
+      VERSION: ${{ needs.source.outputs.version }}
+      RUSTUP_TOOLCHAIN: stable-${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install stable-${{ matrix.host }} --profile minimal
+      - run: python tools/ci.py host --expected ${{ matrix.host }}
+      - run: python tools/ci.py run --name build -- cargo build --release --workspace --all-features --locked
+      - name: Test each native package producer
+        run: python -m unittest discover -s tools -p test_release.py -v
+      - name: Create deterministic native archive
+        run: python tools/release.py package --binary ${{ matrix.binary }} --directory dist --target ${{ matrix.host }} --version ${{ env.VERSION }} --source ${{ env.SOURCE }} --socket-cli
+      - name: Execute the extracted binary outside the checkout
+        run: python tools/release.py validate --directory dist --target ${{ matrix.host }} --version ${{ env.VERSION }} --source ${{ env.SOURCE }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ github.run_id }}-${{ matrix.host }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    name: Verify exact package set and checksums
+    needs: [source, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-${{ github.run_id }}-*
+          merge-multiple: true
+          path: dist
+      - name: Generate and independently recheck manifest
+        env:
+          SOURCE: ${{ needs.source.outputs.source }}
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          python tools/release.py checksums --directory dist --version "$VERSION" --source "$SOURCE"
+          python tools/release.py verify --directory dist --version "$VERSION" --source "$SOURCE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-release-${{ github.run_id }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Create new draft release
+    if: ${{ inputs.publish_draft }}
+    needs: [source, package, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-release-${{ github.run_id }}
+          path: dist
+      - name: Revalidate and publish without overwriting an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE: ${{ needs.source.outputs.source }}
+          VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          python tools/release.py verify --directory dist --version "$VERSION" --source "$SOURCE"
+          if gh release view "v$VERSION"; then
+            echo 'Release already exists; refusing to overwrite or mix artifacts.' >&2
+            exit 1
+          fi
+          gh release create "v$VERSION" dist/* --draft --verify-tag --target "$SOURCE" --title "Whale $VERSION" --notes "Validated native Whale artifacts from $SOURCE. See manifest.json in each archive for CLI features."

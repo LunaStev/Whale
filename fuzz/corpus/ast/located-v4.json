@@ -1,0 +1,167 @@
+{
+  "format_version": 4,
+  "semantics_version": 1,
+  "features": [],
+  "program": {
+    "declarations": [],
+    "globals": [],
+    "functions": [
+      {
+        "name": "answer",
+        "convention": "Whale",
+        "linkage": "Internal",
+        "link_name": null,
+        "parameters": [],
+        "return_type": {
+          "Int": {
+            "bits": 8,
+            "signed": false
+          }
+        },
+        "body": [
+          {
+            "Located": {
+              "annotation": {
+                "id": 1,
+                "source": {
+                  "file": "경로/located.wave",
+                  "line": 2,
+                  "column": 3,
+                  "end_line": 2,
+                  "end_column": 12
+                }
+              },
+              "statement": {
+                "VarDecl": {
+                  "name": "answer",
+                  "ty": {
+                    "Int": {
+                      "bits": 8,
+                      "signed": false
+                    }
+                  },
+                  "init": {
+                    "Located": {
+                      "annotation": {
+                        "id": 2,
+                        "source": {
+                          "file": "경로/located.wave",
+                          "line": 2,
+                          "column": 3,
+                          "end_line": 2,
+                          "end_column": 12
+                        }
+                      },
+                      "expression": {
+                        "Lit": {
+                          "Int": {
+                            "bits": 8,
+                            "signed": false,
+                            "value": "42"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "Located": {
+              "annotation": {
+                "id": 3,
+                "source": {
+                  "file": "경로/located.wave",
+                  "line": 2,
+                  "column": 3,
+                  "end_line": 2,
+                  "end_column": 12
+                }
+              },
+              "statement": {
+                "ExprStmt": {
+                  "Located": {
+                    "annotation": {
+                      "id": 4,
+                      "source": {
+                        "file": "경로/located.wave",
+                        "line": 2,
+                        "column": 3,
+                        "end_line": 2,
+                        "end_column": 12
+                      }
+                    },
+                    "expression": {
+                      "Located": {
+                        "annotation": {
+                          "id": 5,
+                          "source": null
+                        },
+                        "expression": {
+                          "Call": {
+                            "callee": {
+                              "Direct": "side"
+                            },
+                            "args": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "Located": {
+              "annotation": {
+                "id": 6,
+                "source": null
+              },
+              "statement": {
+                "Return": {
+                  "Located": {
+                    "annotation": {
+                      "id": 7,
+                      "source": {
+                        "file": "경로/located.wave",
+                        "line": 2,
+                        "column": 3,
+                        "end_line": 2,
+                        "end_column": 12
+                      }
+                    },
+                    "expression": {
+                      "Var": "answer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "side",
+        "convention": "Whale",
+        "linkage": "Internal",
+        "parameters": [],
+        "return_type": "Void",
+        "body": [
+          {
+            "Located": {
+              "annotation": {
+                "id": 8,
+                "source": null
+              },
+              "statement": {
+                "Return": null
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

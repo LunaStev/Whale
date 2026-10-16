@@ -3,17 +3,28 @@
 import contextlib
 import io
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 
-from ci import run
+from ci import run, _WINDOWS_GATE
 from ci_coverage import summarize
 from ci_smoke import text_section
 
 
 class RunnerTests(unittest.TestCase):
+    def test_windows_gate_waits_for_child_status_and_requires_handshake(self):
+        for token, expected in [(b"1", 7), (b"", 125)]:
+            process = subprocess.Popen([sys.executable, "-c", _WINDOWS_GATE,
+                sys.executable, "-c", "import sys,time; time.sleep(0.05); print('child finished'); sys.exit(7)"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate(token, timeout=5)
+            self.assertEqual(process.returncode, expected, stderr)
+            self.assertEqual(b"child finished" in stdout, token == b"1")
+
     def execute(self, source, timeout=10, max_bytes=1024, console=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -82,6 +93,45 @@ class RunnerTests(unittest.TestCase):
                 code = run([str(root / "missing-program")], "missing", 2, root)
             self.assertNotEqual(code, 0)
             self.assertTrue(json.loads((root / "missing.json").read_text())["errors"])
+
+    def test_parent_exit_cleans_descendant_before_post_return_side_effect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pid_file, side_effect = root / "pid", root / "escaped"
+            child = (
+                "import os,time,pathlib; "
+                f"pathlib.Path({str(pid_file)!r}).write_text(str(os.getpid())); "
+                "time.sleep(1.5); "
+                f"pathlib.Path({str(side_effect)!r}).write_text('survived')"
+            )
+            parent = (
+                "import subprocess,sys,time,pathlib; "
+                f"subprocess.Popen([sys.executable,'-c',{child!r}]); "
+                f"p=pathlib.Path({str(pid_file)!r}); "
+                "\nwhile not p.exists(): time.sleep(0.01)"
+            )
+            # The unrelated control process must survive cleanup of the owned
+            # tree; its side effect also gives a positive observation window.
+            control_file = root / "control"
+            control = subprocess.Popen([sys.executable, "-c",
+                "import time,pathlib; time.sleep(1.8); "
+                f"pathlib.Path({str(control_file)!r}).write_text('alive')"])
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    started = time.monotonic()
+                    code = run([sys.executable, "-c", parent], "descendant", 2, root)
+                self.assertNotEqual(code, 0)
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertTrue(pid_file.exists())
+                control.wait(timeout=5)
+                self.assertTrue(control_file.exists())
+                self.assertFalse(side_effect.exists())
+                data = json.loads((root / "descendant.json").read_text())
+                self.assertIn("output pipe remained open", " ".join(data["errors"]))
+            finally:
+                if control.poll() is None:
+                    control.kill()
+                    control.wait()
 
 
 class EvidenceTests(unittest.TestCase):

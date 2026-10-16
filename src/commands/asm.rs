@@ -5,7 +5,7 @@ use super::debug::dump_bytes;
 
 use assembler::isa::amd64::parser::parse;
 use assembler::tokens::tokenize;
-use assembler::{assemble, isa::AMD64, AssemblerOutput};
+use assembler::{isa::AMD64, AssemblerOutput};
 
 use object::{
     ObjectFile, ObjectFormat, ObjectRelocation, ObjectSymbol, RelocKind as ObjectRelocKind,
@@ -162,7 +162,7 @@ pub fn run(args: Vec<String>) {
             println!("[trace] tokenize start");
         }
         let tokens = tokenize(&src).unwrap_or_else(|e| {
-            eprintln!("Tokenize error: {}", e);
+            eprintln!("Tokenize error: {}", e.with_source_name(&input));
             process::exit(1);
         });
         token_len = Some(tokens.len());
@@ -176,7 +176,7 @@ pub fn run(args: Vec<String>) {
                 println!("[trace] parse start");
             }
             let ast = parse(&tokens).unwrap_or_else(|e| {
-                eprintln!("Parse error: {}", e);
+                eprintln!("Parse error: {}", e.with_source_name(&input));
                 process::exit(1);
             });
             ast_items_len = Some(ast.items.len());
@@ -191,7 +191,7 @@ pub fn run(args: Vec<String>) {
         println!("[trace] assemble start");
     }
     let start_time = Instant::now();
-    let out = assemble(&src, &AMD64).unwrap_or_else(|e| {
+    let out = assembler::assemble_named(&input, &src, &AMD64).unwrap_or_else(|e| {
         eprintln!("Assemble error: {}", e);
         process::exit(1);
     });
@@ -239,15 +239,13 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
     let mut section_map = Vec::with_capacity(out.sections.len());
 
     for sec in &out.sections {
-        let kind = match sec.name.as_str() {
-            ".text" => SectionKind::Text,
-            ".data" => SectionKind::Data,
-            ".rodata" => SectionKind::ReadOnlyData,
-            ".bss" => SectionKind::Bss,
-            _ => SectionKind::Data,
+        let kind = match sec.kind {
+            assembler::AsmSectionKind::Text => SectionKind::Text,
+            assembler::AsmSectionKind::Data => SectionKind::Data,
+            assembler::AsmSectionKind::ReadOnlyData => SectionKind::ReadOnlyData,
+            assembler::AsmSectionKind::Bss => SectionKind::Bss,
         };
-
-        let align = if sec.name == ".text" { 16 } else { 1 };
+        let align = sec.align;
         let idx = obj.add_section(&sec.name, kind, align);
         obj.sections[idx].data = sec.data.clone();
         obj.sections[idx].zero_fill = sec.zero_fill;
@@ -260,16 +258,24 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
             .and_then(|idx| section_map.get(idx).copied());
 
         obj.symbols.push(ObjectSymbol {
+            kind: match sym.kind {
+                assembler::SymbolKind::NoType => object::SymbolKind::NoType,
+                assembler::SymbolKind::Function => object::SymbolKind::Function,
+                assembler::SymbolKind::Object => object::SymbolKind::Object,
+            },
             name: sym.name.clone(),
             section_index,
             value: sym.offset,
-            size: 0,
+            size: sym.size,
             binding: if sym.is_global {
                 SymbolBinding::Global
             } else {
                 SymbolBinding::Local
             },
-            visibility: SymbolVisibility::Default,
+            visibility: match sym.visibility {
+                assembler::SymbolVisibility::Default => SymbolVisibility::Default,
+                assembler::SymbolVisibility::Hidden => SymbolVisibility::Hidden,
+            },
         });
     }
 
@@ -310,6 +316,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
 
             if obj.symbols.iter().all(|s| s.name != reloc.symbol) {
                 obj.symbols.push(ObjectSymbol {
+                    kind: object::SymbolKind::NoType,
                     name: reloc.symbol.clone(),
                     section_index: None,
                     value: 0,

@@ -24,6 +24,39 @@ pub fn print_module(m: &Module) -> String {
         }
     ));
     out.push_str(" }\n\n");
+    for file in &m.sources.files {
+        out.push_str(&format!(
+            "  source_file @s{} \"{}\"\n",
+            file.id,
+            escape(&file.name)
+        ));
+    }
+    for original in &m.sources.originals {
+        out.push_str(&format!("  original {} ", original.id));
+        if let Some(s) = &original.span {
+            out.push_str(&format!(
+                "@s{} {} {} {} {}\n",
+                s.file, s.line, s.column, s.end_line, s.end_column
+            ));
+        } else {
+            out.push_str("none\n");
+        }
+    }
+    for mapping in &m.sources.mappings {
+        out.push_str("  source_map ");
+        match mapping.target {
+            crate::SourceTarget::Instruction {
+                function,
+                block,
+                index,
+            } => out.push_str(&format!("instruction @f{} {} {}", function.0, block, index)),
+            crate::SourceTarget::Terminator { function, block } => {
+                out.push_str(&format!("terminator @f{} {}", function.0, block))
+            }
+            crate::SourceTarget::Global(id) => out.push_str(&format!("global @g{}", id.0)),
+        }
+        out.push_str(&format!(" {}\n", mapping.original));
+    }
 
     for g in &m.globals {
         out.push_str(&format!(
@@ -41,6 +74,37 @@ pub fn print_module(m: &Module) -> String {
         out.push('\n');
     }
 
+    for g in &m.global_storage {
+        out.push_str(&format!(
+            "  storage @g{} \"{}\": {} = ",
+            g.id.0,
+            escape(&g.name),
+            g.ty
+        ));
+        match &g.init {
+            crate::GlobalStorageInit::Value(value) => {
+                out.push_str(&format!("value {} {}", g.ty, fmt_const(value)))
+            }
+            crate::GlobalStorageInit::Uninitialized => out.push_str("uninitialized"),
+        }
+        out.push_str(&format!(
+            ", align {}, access {}, linkage {}",
+            g.align,
+            if g.readonly { "readonly" } else { "readwrite" },
+            if g.linkage == crate::Linkage::Internal {
+                "internal"
+            } else {
+                "external"
+            }
+        ));
+        if let Some(name) = &g.link_name {
+            out.push_str(&format!(", link_name \"{}\"", escape(name)));
+        }
+        out.push('\n');
+    }
+    if !m.global_storage.is_empty() {
+        out.push('\n');
+    }
     for d in &m.declarations {
         out.push_str(&format!(
             "  declare @f{} \"{}\": {}, linkage {}",
@@ -110,6 +174,9 @@ fn print_block(b: &BasicBlock) -> String {
 fn print_instr(i: &Instruction) -> String {
     use Instruction::*;
     match i {
+        GlobalAddr { dst, global, ty } => format!("{dst}: ptr<{ty}> = global_addr @g{}", global.0),
+        LifetimeEnd { ptr } => format!("lifetime_end {ptr}"),
+        PtrDiff { dst, lhs, rhs } => format!("{dst}: i128 = ptrdiff {lhs}, {rhs}"),
         ConstDecl {
             dst,
             name,

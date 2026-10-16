@@ -56,7 +56,8 @@ impl<'a> Parser<'a> {
             DuplicateFunction { name }
             | DuplicateGlobal { name }
             | InvalidGlobalInitializer { name, .. }
-            | InvalidGlobalAlignment { name, .. } => Some(name),
+            | InvalidGlobalAlignment { name, .. }
+            | GlobalStorage { name, .. } => Some(name),
             InvalidConstExpression { scope, .. } => Some(scope),
             _ => None,
         };
@@ -424,7 +425,7 @@ impl<'a> Parser<'a> {
         self.expect("{")?;
         self.expect("format_version")?;
         let version: u32 = self.number()?;
-        if version != 3 && version != 4 && version != IR_FORMAT_VERSION {
+        if !(3..=IR_FORMAT_VERSION).contains(&version) {
             return Err(self.previous_error("unsupported IR format version"));
         }
         self.format_version = version;
@@ -453,6 +454,55 @@ impl<'a> Parser<'a> {
         while !self.eat("}") {
             self.node()?;
             match self.word()? {
+                "source_file" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let id = self.id("@s")?;
+                    let name = self.string()?;
+                    module.sources.files.push(SourceFile { id, name });
+                }
+                "original" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let id = self.number::<u64>()?;
+                    let span = if self.eat("none") {
+                        None
+                    } else {
+                        Some(SourceSpan {
+                            file: self.id("@s")?,
+                            line: self.number()?,
+                            column: self.number()?,
+                            end_line: self.number()?,
+                            end_column: self.number()?,
+                        })
+                    };
+                    module.sources.originals.push(OriginalNode { id, span });
+                }
+                "source_map" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let target = match self.word()? {
+                        "instruction" => SourceTarget::Instruction {
+                            function: FunctionId(self.id("@f")?),
+                            block: self.block_id()?,
+                            index: self.number()?,
+                        },
+                        "terminator" => SourceTarget::Terminator {
+                            function: FunctionId(self.id("@f")?),
+                            block: self.block_id()?,
+                        },
+                        "global" => SourceTarget::Global(GlobalId(self.id("@g")?)),
+                        _ => return Err(self.previous_error("unknown source mapping target")),
+                    };
+                    let original = self.number()?;
+                    module
+                        .sources
+                        .mappings
+                        .push(SourceMapping { target, original });
+                }
                 "global" => {
                     let id = GlobalId(self.id("@g")?);
                     let location = self.tokens[self.at].location;
@@ -476,6 +526,63 @@ impl<'a> Parser<'a> {
                         init,
                         init_expr,
                         align,
+                    });
+                }
+                "storage" => {
+                    if self.format_version < 6 {
+                        return Err(
+                            self.previous_error("global storage requires typed IR format 6")
+                        );
+                    }
+                    let id = GlobalId(self.id("@g")?);
+                    let location = self.location();
+                    let name = self.string()?;
+                    self.locations.entry(name.clone()).or_insert(location);
+                    self.expect(":")?;
+                    let ty = self.ty(0)?;
+                    self.expect("=")?;
+                    let init = match self.word()? {
+                        "uninitialized" => GlobalStorageInit::Uninitialized,
+                        "value" => {
+                            let annotation = self.ty(0)?;
+                            self.equal_type(&ty, &annotation)?;
+                            GlobalStorageInit::Value(self.literal(&ty)?)
+                        }
+                        _ => {
+                            return Err(self
+                                .previous_error("expected value or uninitialized global storage"))
+                        }
+                    };
+                    let align = self.align()?;
+                    self.comma()?;
+                    self.expect("access")?;
+                    let readonly = match self.word()? {
+                        "readonly" => true,
+                        "readwrite" => false,
+                        _ => return Err(self.previous_error("expected readonly or readwrite")),
+                    };
+                    self.comma()?;
+                    self.expect("linkage")?;
+                    let linkage = match self.word()? {
+                        "internal" => Linkage::Internal,
+                        "external" => Linkage::External,
+                        _ => return Err(self.previous_error("unknown linkage")),
+                    };
+                    let link_name = if self.eat(",") {
+                        self.expect("link_name")?;
+                        Some(self.string()?)
+                    } else {
+                        None
+                    };
+                    module.global_storage.push(GlobalStorage {
+                        id,
+                        name,
+                        ty,
+                        init,
+                        readonly,
+                        align,
+                        linkage,
+                        link_name,
                     });
                 }
                 "declare" => {

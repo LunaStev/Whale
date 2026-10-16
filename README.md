@@ -153,11 +153,11 @@ preserving the previous archive on an archiver failure.
 
 ### Execute scalar integer IR
 
-Save this format 5 module as `answer.wir`:
+Save this format 7 module as `answer.wir`:
 
 ```text
 module {
-  format_version 5
+  format_version 7
   semantics_version 1
   target "x86_64-whale-linux"
   datalayout { ptr=64, endian=little }
@@ -227,8 +227,79 @@ Failures return IR-located `MemoryLimit` errors. Scalar/checked-pair reads exclu
 padding from initialization checks. Each invocation owns its stack allocations and
 retires them on return. Caller-owned pointers remain usable across nested calls;
 returned callee-local pointers retain expired capabilities and trap on access.
-Lexical lifetime-end instructions, globals, foreign-memory adapters and native
-shadow metadata are future work.
+Explicit `lifetime_end` and addressable scalar globals are supported as described
+below. Foreign-memory adapters and native shadow metadata are future work.
+
+### Addressable globals, explicit retirement and pointer offsets
+
+[The executable storage fixture](ir/tests/fixtures/runtime-storage-v6.wir) covers
+mutable/read-only/uninitialized globals, calls, expired aliases and byte differences:
+
+```sh
+cargo run --locked -- ir run ir/tests/fixtures/runtime-storage-v6.wir --function @f1
+cargo run --locked -- ir run ir/tests/fixtures/runtime-storage-v6.wir --function @f3
+cargo run --locked -- ir run ir/tests/fixtures/runtime-storage-v6.wir --function @f7
+```
+
+These print `u32 12`, `u32 42` and `i128 16`. `@f4` traps on an uninitialized
+global read, `@f5` on a read-only write, and `@f6` on an expired stored pointer.
+
+Typed IR format 6 adds explicit addressable declarations:
+
+```text
+storage @g0 "counter": u32 = value u32 10, align 4, access readwrite, linkage internal
+storage @g1 "answer": u32 = value u32 42, align 4, access readonly, linkage external, link_name "public_answer"
+storage @g2 "pending": u32 = uninitialized, align 4, access readwrite, linkage internal
+%v0: ptr<u32> = global_addr @g0
+```
+
+`GlobalStorage`/`Module.global_storage` share GlobalId and global-name uniqueness
+with existing compile-time `Global` declarations, while functions have their own
+source-name namespace. `ConstRef` still refers only to compile-time declarations;
+it never becomes a runtime address. Initialized storage accepts exact scalar
+literal values; pointer/function-pointer cells can start explicitly uninitialized.
+Read-only uninitialized declarations and aggregate storage are rejected. Floating
+storage literals round-trip, but the current integer interpreter rejects their
+instantiation. Integer/Bool initializers initialize their value bytes; physical
+zero-fill of uninitialized storage does not initialize a value.
+
+External storage definitions require an explicit nonempty `link_name`; internal
+storage has none. Names are preserved unchanged. Function/global external-name
+collisions are errors. These identities are an IR boundary; object/linker migration
+remains separate. `ModuleBuilder::try_add_global_storage` and
+`FunctionBuilder::try_global_addr` provide checked construction.
+
+Each `interpret`/`interpret_values` call creates a **fresh runtime instance** and
+initializes its globals once before any invocation frame. Direct/indirect/nested
+calls share these allocations and permissions; frame returns never retire globals.
+A second public invocation starts again from the declarations. Persistent runtime
+sessions are not exposed. Returned data addresses cannot regain authority in a
+fresh arena. Global initialization and stack allocations share cumulative byte,
+allocation, metadata and work budgets; initialization failures identify GlobalId.
+
+`lifetime_end %v0` is an explicit observable effect. It retires the **entire current
+frame-owned stack allocation**, using a live full-bounds pointer at offset zero.
+Mov/stored/bitcast aliases of that exact base are valid, including GEP back to
+base; a nonzero GEP offset, restricted bounds, global or caller-owned allocation
+is an invalid request. Null/raw pointers trap, and repeated end/use traps as
+expired allocation. All stored/copied/GEP aliases expire together. Zero-length
+copy/fill retains its no-access behavior. Return retirement tolerates an already
+ended allocation. Bytes/allocation budgets are cumulative, pointer-fragment
+metadata is released, and synthetic addresses and allocation slots are never
+reused. Frontends choose lifetime ends explicitly; Whale does not infer lexical
+scope ends or shorten an O0 lifetime.
+
+`%v2: i128 = ptrdiff %v0, %v1` returns **lhs offset minus rhs offset in bytes**.
+Both operands must have the identical data-pointer type and the same live tracked
+allocation/generation. The signed i128 result represents every possible difference
+of u64 offsets. It is independent of pointee stride: three u32 elements differ by
+12 bytes; an array<u32,4> base and one-past differ by 16 bytes. Equal offsets yield
+zero and reversed operands negate the result. `cmp`/`icmp` ordered predicates on
+matching data pointers compare allocation offsets; signed/unsigned predicate
+spellings agree. Null, raw, expired and cross-allocation ordering/difference trap.
+Equality retains its existing allocation-identity rules, including inequality of
+different live allocations. `try_lifetime_end` and `try_ptrdiff` are checked builder
+APIs; all new forms, including pointer ordering, require format 6 or later.
 
 ### Lower an AST to IR
 
@@ -280,22 +351,22 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is documented in [AST JSON Schema](ir/schema/ast-v3.schema.json) and
+schema is documented in [AST JSON Schema](ir/schema/ast-v4.schema.json) and
 [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-The envelope requires `format_version: 3` (legacy format 2 is also accepted), `semantics_version: 1`, and
+The envelope requires `format_version: 4` (legacy formats 2 and 3 are also accepted), `semantics_version: 1`, and
 `features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
 JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
 entry point is `ir::lower_ast::interchange::decode`; its default input limit is
 8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
 f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
 For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
-Migrate format 1 inputs by setting `format_version` to 3, adding a `declarations`
+Migrate format 1 inputs by setting `format_version` to 4, adding a `declarations`
 array to `program`, and adding `convention` and `linkage` to every definition.
 Internal functions use `"Whale"` and `"Internal"`; external functions must supply
 a nonempty `link_name`. Missing versions and format 1 inputs are rejected.
 Integers and floats retain their exact string encoding. AST and printed typed IR have independent format versions and a shared
-semantics version; printed IR includes both version fields. Typed text IR formats 3, 4 and 5
+semantics version; printed IR includes both version fields. Typed text IR formats 3, 4, 5, 6 and 7
 can be read and verified with `ir::parse_module`.
 
 The AST supports scalar literals, variables/constants, arithmetic, comparisons,
@@ -324,7 +395,7 @@ For a complete invalid input, save the following as `invalid.json`:
 cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
 ```
 
-This exits nonzero with `unsupported AST format_version 99; expected 3`. It does
+This exits nonzero with `unsupported AST format_version 99; expected 4`. It does
 not create `rejected.wir`; an existing output is preserved. Lowering/type errors
 likewise fail before output publication.
 
@@ -360,8 +431,14 @@ cargo test -p object --locked --test relocation_grouping -- --ignored --nocaptur
 ELF serialization groups validated relocations in one input-order pass, keeping
 section order and the order of signed-addend entries within each section.
 
-The printer emits typed IR format 5 with semantics version 1. AST JSON writes
-format 3. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
+Optional [original source metadata and bounded call traces](ir/SOURCE_METADATA.md)
+preserve locations for stores, traps, terminators and unused constants. AST 4
+`Located` wrappers retain innermost lowering errors; unannotated inputs retain
+IR identities. Runtime errors expose the underlying cause through `root_cause()`
+and structured source/trace details through `diagnostic()`.
+
+The printer emits typed IR format 7 with semantics version 1. AST JSON writes
+format 4. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry
 block. Name/string fields escape quotes, backslashes, control characters and
 Unicode line separators. See the [identity fixture](ir/tests/fixtures/text-identities-v3.wir)
@@ -381,14 +458,15 @@ cargo run --locked -- ir verify ir/tests/fixtures/calls-v3.wir
 cargo run --locked -- ir print ir/tests/fixtures/calls-v3.wir -o canonical.wir
 ```
 
-`ir::parse_module` reads **and verifies** formats 3, 4 and 5. Print-parse-print
+`ir::parse_module` reads **and verifies** formats 3, 4, 5, 6 and 7. Print-parse-print
 preserves explicit scoped IDs, quoted names, entry and block order, types,
 exact integer/float payloads, constant-expression trees, alignment, signatures
 and external link names. Whitespace and `//` comments are canonicalized. It
 accepts current printer instruction forms; format 4 adds `uninit`, and format 5 adds preserved constant bitwise,
 division/remainder, shift and lazy logical operators. Formats 3/4 without `undef`
-remain readable and canonicalize to format 5. Extended constant syntax requires
-format 5; extended frontend operators require AST format 3. Regenerate old
+remain readable and canonicalize to format 7. Extended constant syntax requires
+format 5. Format 6 adds explicit storage, global addresses, lifetime_end and same-allocation
+pointer ordering/differences; extended frontend operators require AST format 3. Regenerate old
 `undef` lowering from its AST rather than replacing unspecified values with zero. Unknown versions, fields,
 opcodes, escapes, trailing input and inconsistent type annotations are errors.
 Diagnostics include a byte offset and one-based Unicode-scalar line/column;
@@ -416,7 +494,7 @@ nesting to the safe `MAX_IR_NESTING` ceiling while accepting shallow types with
 larger overrides.
 
 Direct frontend AST processing uses `AstLimits`: default depth 32, 100,000 nodes,
-8 MiB total string bytes and 8 MiB encoded output. `lower_o0_with_limits` and
+8 MiB total string bytes, 8 MiB encoded output and 16,777,216 source-mapping work units. `lower_o0_with_limits` and
 `interchange::encode_with_limits` accept overrides; recursive work remains capped
 at `MAX_AST_DEPTH` (32). Shared iterative inspection precedes lowering or pretty
 JSON serialization, and owned rejected ASTs are disposed iteratively. Borrowed
@@ -432,7 +510,7 @@ payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
 
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
-Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 5 output).
+Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 7 output).
 Text parsing does not provide IR execution or native code generation. Format 2
 printed text requires explicit migration; it is not silently accepted. New
 syntax or semantics requires an appropriate version change, with unknown
@@ -530,6 +608,54 @@ counts/capacity. No allocator ownership crosses the boundary. The Wave routine
 rejects unsupported records, short buffers and field overflow before writing.
 Dedicated tests compare complete ELF output with the Rust path. This is the
 first partial Wave implementation, not a self-hosted Whale build.
+
+### Assembly symbol metadata and library resolution
+
+Unannotated labels remain ELF `STT_NOTYPE`, size zero and default visibility.
+Optional declarations attach explicit metadata without changing the label's
+binding or inventing an external name:
+
+```asm
+section .text
+global entry
+symbol entry, function, 1, hidden
+entry: ret
+section .data
+symbol payload, object, 4, default
+payload: dd 42
+```
+
+`symbol NAME, KIND, SIZE, VISIBILITY` accepts `function`, `object`, or `notype`;
+`SIZE` is a nonnegative integer or `equ` expression; visibility is `default` or
+`hidden`. Metadata may precede or follow the label/`extern` declaration. Local
+names retain the surrounding nonlocal label's scope. Unknown symbols, duplicate
+metadata, invalid fields and extents outside the defining section are errors.
+The Rust `AsmSymbol` and `ObjectSymbol` APIs expose kind, size and visibility.
+
+The linker library's `SymbolTable::resolve` preserves object-local scope. Strong
+definitions override weak ones in either input order; weak/weak selects the first
+input, and strong/strong diagnoses both input indices. Actual relocation
+references resolve before layout. Unreferenced undefined declarations impose no
+requirement; a referenced undefined weak symbol has the defined value zero.
+Unresolved strong references report their input object, section and offset.
+`SymbolTable::references` records each selected target and whether it is weak
+undefined. This API does not implement executable linking.
+
+Normal ELF regression tests independently decode symbols and RELA records without
+external programs. An additional GNU binutils oracle is opt-in:
+
+```sh
+cargo test -p whale --locked --test symbol_metadata readelf_fixture_confirms_symbol_metadata -- --ignored --nocapture
+```
+
+The checked-in fixture is [symbol-metadata.asm](tests/fixtures/symbol-metadata.asm).
+
+## Release packages
+
+Native Linux, macOS and Windows x64/ARM64 packaging, extracted-binary checks and
+exact checksum manifests are documented in [the release guide](tools/RELEASING.md).
+The manual workflow validates one tagged source commit across every package;
+draft creation is opt-in and runs only after all checks pass.
 
 ## Development
 

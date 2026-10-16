@@ -19,7 +19,27 @@ impl Parser<'_> {
         // memory copies and void calls cannot silently acquire a destination.
         let dst = result.as_ref().map(|r| r.0);
         let required = || dst.ok_or_else(|| self.error("instruction requires a result"));
+        if matches!(op, "global_addr" | "lifetime_end" | "ptrdiff") && self.format_version < 6 {
+            return Err(self.error("global/lifetime/pointer operations require typed IR format 6"));
+        }
         let ins = match op {
+            "global_addr" => {
+                let dst = required()?;
+                let Some((_, Type::Ptr(pointee))) = &result else {
+                    return Err(self.error("global_addr requires a data-pointer result"));
+                };
+                let ty = (**pointee).clone();
+                let global = GlobalId(self.id("@g")?);
+                Instruction::GlobalAddr { dst, global, ty }
+            }
+            "lifetime_end" => Instruction::LifetimeEnd { ptr: self.value()? },
+            "ptrdiff" => {
+                let dst = required()?;
+                let lhs = self.value()?;
+                self.comma()?;
+                let rhs = self.value()?;
+                Instruction::PtrDiff { dst, lhs, rhs }
+            }
             "const_decl" => {
                 let dst = required()?;
                 let name = self.string()?;
@@ -96,6 +116,12 @@ impl Parser<'_> {
                 let dst = required()?;
                 let pred = self.word()?;
                 let ty = self.ty(0)?;
+                if self.format_version < 6
+                    && matches!(ty, Type::Ptr(_))
+                    && !matches!(pred, "eq" | "ne")
+                {
+                    return Err(self.error("pointer ordering requires typed IR format 6"));
+                }
                 let lhs = self.value()?;
                 self.comma()?;
                 let rhs = self.value()?;
@@ -443,7 +469,10 @@ impl Parser<'_> {
             | Instruction::Extract { dst_ty, .. }
             | Instruction::Gep { dst_ty, .. } => Some(dst_ty.clone()),
             Instruction::Checked { ty, .. } => Some(Type::Tuple(vec![ty.clone(), Type::Bool])),
-            Instruction::Alloca { ty, .. } => Some(Type::ptr_to(ty.clone())),
+            Instruction::Alloca { ty, .. } | Instruction::GlobalAddr { ty, .. } => {
+                Some(Type::ptr_to(ty.clone()))
+            }
+            Instruction::PtrDiff { .. } => Some(Type::I128),
             Instruction::FunctionAddr { signature, .. }
             | Instruction::NullFunction { signature, .. } => {
                 Some(Type::FnPtr(Box::new(signature.clone())))

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::core::object::ObjectFile;
 use crate::core::reloc::RelocKind;
 use crate::core::section::SectionKind;
-use crate::core::symbol::{SymbolBinding, SymbolVisibility};
+use crate::core::symbol::{SymbolBinding, SymbolKind, SymbolVisibility};
 
 const ELF_HDR_SIZE: u64 = 64;
 const ELF_SHDR_SIZE: u16 = 64;
@@ -197,6 +197,7 @@ impl Elf64Rela {
 
 #[derive(Clone)]
 struct SymBuild<'a> {
+    kind: SymbolKind,
     name: &'a str,
     section_index: Option<usize>,
     value: u64,
@@ -257,6 +258,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         .symbols
         .iter()
         .map(|s| SymBuild {
+            kind: s.kind,
             name: &s.name,
             section_index: s.section_index,
             value: s.value,
@@ -269,6 +271,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     for reloc in &obj.relocations {
         if symbol_names.insert(&reloc.symbol) {
             symbols.push(SymBuild {
+                kind: SymbolKind::NoType,
                 name: &reloc.symbol,
                 section_index: None,
                 value: 0,
@@ -325,7 +328,12 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
 
         let elf_sym = Elf64Sym {
             name: name_idx,
-            info: (binding_to_stb(sym.binding) << 4),
+            info: (binding_to_stb(sym.binding) << 4)
+                | match sym.kind {
+                    SymbolKind::NoType => 0,
+                    SymbolKind::Object => 1,
+                    SymbolKind::Function => 2,
+                },
             other: visibility_to_stv(sym.visibility),
             shndx,
             value: sym.value,
@@ -759,6 +767,7 @@ mod tests {
                 align: 16,
             });
             obj.symbols.push(ObjectSymbol {
+                kind: crate::SymbolKind::NoType,
                 name: bad_name.to_string(),
                 section_index: Some(0),
                 value: 0,
@@ -839,6 +848,7 @@ mod tests {
         });
         // Empty symbol name (mandatory STN_UNDEF entry)
         obj.symbols.push(ObjectSymbol {
+            kind: crate::SymbolKind::NoType,
             name: "".to_string(),
             section_index: None,
             value: 0,
@@ -848,6 +858,7 @@ mod tests {
         });
         // Non-ASCII UTF-8 symbol
         obj.symbols.push(ObjectSymbol {
+            kind: crate::SymbolKind::NoType,
             name: "функция_café".to_string(),
             section_index: Some(sec_idx),
             value: 0,
@@ -967,6 +978,7 @@ mod wave_tests {
             let bss = object.add_section(".bss", SectionKind::Bss, 32);
             object.sections[bss].zero_fill = (1 << 40) + seed;
             object.symbols.push(crate::ObjectSymbol {
+                kind: crate::SymbolKind::NoType,
                 name: "end".into(),
                 section_index: Some(bss),
                 value: (1 << 40) + seed,

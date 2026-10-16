@@ -17,31 +17,46 @@ struct EncodingLayout {
 
 // Resolve the one-symbol constant dependency graph before encoding any use.
 // Worklist traversal avoids recursion and repeated whole-source rescans.
-fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
+fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
     let mut definitions = Vec::new();
     let mut positions = HashMap::new();
     let mut reserved = HashSet::new();
     let mut scope = None;
-    for node in &ast.items {
+    let mut constant_sites = HashMap::<String, usize>::new();
+    let mut reserved_sites = HashMap::<String, usize>::new();
+    for (node_index, node) in ast.items.iter().enumerate() {
         match node {
             ASTNode::Label(name) => {
-                let resolved = resolve_symbol_name(name, &scope)?;
+                let resolved = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
+                reserved_sites.entry(resolved.clone()).or_insert(node_index);
                 reserved.insert(resolved.clone());
                 if !name.starts_with('.') {
                     scope = Some(resolved);
                 }
             }
             ASTNode::Extern(name) => {
-                reserved.insert(resolve_symbol_name(name, &scope)?);
+                let resolved = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
+                reserved_sites.entry(resolved.clone()).or_insert(node_index);
+                reserved.insert(resolved);
             }
             ASTNode::Const { name, expr } => {
-                let name = resolve_symbol_name(name, &scope)?;
+                let name = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
                 if positions.insert(name.clone(), definitions.len()).is_some() {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate constant definition '{name}'"
-                    )));
+                    return Err(ast.error_at(
+                        AsmError::SymbolError(format!("Duplicate constant definition '{name}'")),
+                        node_index,
+                        constant_sites.get(&name).copied(),
+                    ));
                 }
-                definitions.push((name, resolve_expr_symbols(expr, &scope)?));
+                constant_sites.insert(name.clone(), node_index);
+                definitions.push((
+                    name,
+                    resolve_expr_symbols(expr, &scope)
+                        .map_err(|error| ast.error_at(error, node_index, None))?,
+                ));
             }
             _ => {}
         }
@@ -50,9 +65,15 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
     let mut ready = VecDeque::new();
     for (position, (name, expr)) in definitions.iter().enumerate() {
         if reserved.contains(name) {
-            return Err(AsmError::SymbolError(format!(
-                "Constant '{name}' conflicts with a label or extern symbol"
-            )));
+            let declaration = constant_sites[name];
+            let previous = reserved_sites[name];
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!(
+                    "Constant '{name}' conflicts with a label or extern symbol"
+                )),
+                declaration.max(previous),
+                Some(declaration.min(previous)),
+            ));
         }
         match expr {
             ExprValue::Number(_) => ready.push_back(position),
@@ -60,9 +81,13 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
                 name: dependency, ..
             } => {
                 let dependency = positions.get(dependency).ok_or_else(|| {
-                    AsmError::SymbolError(format!(
-                        "equ requires a constant expression; unresolved symbol '{dependency}'"
-                    ))
+                    ast.error_at(
+                        AsmError::SymbolError(format!(
+                            "equ requires a constant expression; unresolved symbol '{dependency}'"
+                        )),
+                        constant_sites[name],
+                        None,
+                    )
                 })?;
                 dependents[*dependency].push(position);
             }
@@ -71,10 +96,14 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
     let mut values = HashMap::new();
     while let Some(position) = ready.pop_front() {
         let (name, expr) = &definitions[position];
-        let EvaluatedExpr::Number(value) = eval_expr(expr, &values)? else {
-            return Err(AsmError::SymbolError(format!(
-                "Unresolved constant dependency for '{name}'"
-            )));
+        let EvaluatedExpr::Number(value) = eval_expr(expr, &values)
+            .map_err(|error| ast.error_at(error, constant_sites[name], None))?
+        else {
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!("Unresolved constant dependency for '{name}'")),
+                constant_sites[name],
+                None,
+            ));
         };
         values.insert(name.clone(), value);
         ready.extend(dependents[position].iter().copied());
@@ -83,9 +112,13 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
         .iter()
         .find(|(name, _)| !values.contains_key(name))
     {
-        return Err(AsmError::SymbolError(format!(
-            "Constant dependency cycle prevents resolving '{name}'"
-        )));
+        return Err(ast.error_at(
+            AsmError::SymbolError(format!(
+                "Constant dependency cycle prevents resolving '{name}'"
+            )),
+            constant_sites[name],
+            None,
+        ));
     }
     Ok(values)
 }
@@ -100,8 +133,15 @@ pub fn encode_with_limits(
 ) -> Result<AssemblerOutput, AsmError> {
     let consts = resolve_constants(ast)?;
     let mut prev_label_locs = None;
+    let mut forced_near = HashSet::new();
     for _ in 0..limits.max_relax_iterations {
-        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref(), &consts, limits)?;
+        let (out, label_locs) = encode_once(
+            ast,
+            prev_label_locs.as_ref(),
+            &consts,
+            limits,
+            &mut forced_near,
+        )?;
         if prev_label_locs.as_ref() == Some(&label_locs) {
             return Ok(out);
         }
@@ -116,8 +156,9 @@ pub fn encode_with_limits(
 fn encode_once(
     ast: &AST,
     jump_hint_layout: Option<&EncodingLayout>,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
     limits: &crate::AssemblyLimits,
+    forced_near: &mut HashSet<usize>,
 ) -> Result<(AssemblerOutput, EncodingLayout), AsmError> {
     let mut materialized = 0usize;
     let mut sections = Vec::new();
@@ -132,8 +173,16 @@ fn encode_once(
     let mut instruction_offsets = vec![0; ast.items.len()];
     let mut extern_symbols = HashSet::<String>::new();
     let mut global_symbols = HashSet::<String>::new();
+    let mut label_sites = HashMap::<String, usize>::new();
+    let mut extern_sites = HashMap::<String, usize>::new();
+    let mut global_sites = HashMap::<String, usize>::new();
+    let mut relocation_sites = HashMap::new();
+    let mut symbol_metadata = HashMap::new();
+    let mut metadata_sites = HashMap::<String, usize>::new();
 
     sections.push(AsmSection {
+        kind: AsmSectionKind::Text,
+        align: 16,
         name: ".text".to_string(),
         data: Vec::new(),
         zero_fill: 0,
@@ -144,131 +193,252 @@ fn encode_once(
     let mut current_nonlocal_label: Option<String> = None;
 
     for (node_index, node) in ast.items.iter().enumerate() {
-        match node {
-            ASTNode::Section(name) => {
-                if let Some(idx) = sections.iter().position(|s| s.name == *name) {
-                    current_section_idx = idx;
-                } else {
-                    sections.push(AsmSection {
-                        name: name.clone(),
-                        data: Vec::new(),
-                        zero_fill: 0,
-                        relocs: Vec::new(),
+        let original_section = current_section_idx;
+        let relocation_start = sections[original_section].relocs.len();
+        (|| -> Result<(), AsmError> {
+            match node {
+                ASTNode::Section(name) | ASTNode::SectionAttributes { name, .. } => {
+                    let explicit = match node {
+                        ASTNode::SectionAttributes { kind, .. } => Some(*kind),
+                        _ => None,
+                    };
+                    if let Some(idx) = sections.iter().position(|s| s.name == *name) {
+                        if explicit.is_some_and(|kind| kind != sections[idx].kind) {
+                            return Err(AsmError::EncodeError(format!(
+                                "Incompatible section redeclaration '{name}'"
+                            )));
+                        }
+                        current_section_idx = idx;
+                    } else {
+                        let default = AsmSectionKind::default_for_name(name);
+                        let kind = explicit.unwrap_or(default);
+                        if matches!(name.as_str(), ".text" | ".data" | ".rodata" | ".bss")
+                            && kind != default
+                        {
+                            return Err(AsmError::EncodeError(format!(
+                                "Standard section '{name}' has incompatible kind"
+                            )));
+                        }
+                        sections.push(AsmSection {
+                            name: name.clone(),
+                            kind,
+                            align: kind.default_alignment(),
+                            data: Vec::new(),
+                            zero_fill: 0,
+                            relocs: Vec::new(),
+                        });
+                        current_section_idx = sections.len() - 1;
+                    }
+                }
+                ASTNode::Global(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    global_sites.entry(resolved.clone()).or_insert(node_index);
+                    global_symbols.insert(resolved);
+                }
+                ASTNode::Extern(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    if defined_labels.contains(&resolved) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Extern symbol '{}' was already defined in this file",
+                                resolved
+                            )),
+                            node_index,
+                            label_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    extern_sites.entry(resolved.clone()).or_insert(node_index);
+                    if extern_symbols.insert(resolved.clone()) {
+                        symbols.push(AsmSymbol {
+                            kind: crate::SymbolKind::NoType,
+                            size: 0,
+                            visibility: crate::SymbolVisibility::Default,
+                            name: resolved,
+                            section_index: None,
+                            offset: 0,
+                            is_global: true,
+                        });
+                    }
+                }
+                ASTNode::SymbolMetadata {
+                    name,
+                    kind,
+                    size,
+                    visibility,
+                } => {
+                    let name = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    let size = resolve_expr_symbols(size, &current_nonlocal_label)?;
+                    let EvaluatedExpr::Number(size) = eval_expr(&size, consts)? else {
+                        return Err(AsmError::SymbolError(format!(
+                            "symbol '{name}' size must be a constant"
+                        )));
+                    };
+                    let size = u64::try_from(size).map_err(|_| {
+                        AsmError::SymbolError(format!(
+                            "symbol '{name}' size must be a nonnegative u64"
+                        ))
+                    })?;
+                    if symbol_metadata
+                        .insert(name.clone(), (*kind, size, *visibility))
+                        .is_some()
+                    {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Duplicate symbol metadata for '{name}'"
+                            )),
+                            node_index,
+                            metadata_sites.get(&name).copied(),
+                        ));
+                    }
+                    metadata_sites.insert(name, node_index);
+                }
+                ASTNode::Const { .. } => {}
+                ASTNode::Label(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    if !name.starts_with('.') {
+                        current_nonlocal_label = Some(resolved.clone());
+                    }
+                    if extern_symbols.contains(&resolved) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Label '{}' conflicts with extern declaration",
+                                resolved
+                            )),
+                            node_index,
+                            extern_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    if consts.contains_key(&resolved) {
+                        return Err(AsmError::SymbolError(format!(
+                            "Label '{}' conflicts with constant definition",
+                            resolved
+                        )));
+                    }
+                    if !defined_labels.insert(resolved.clone()) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Duplicate label definition '{}'",
+                                resolved
+                            )),
+                            node_index,
+                            label_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    label_sites.insert(resolved.clone(), node_index);
+                    let section = &sections[current_section_idx];
+                    let offset = (section.data.len() as u64)
+                        .checked_add(section.zero_fill)
+                        .ok_or_else(|| AsmError::EncodeError("section size overflow".into()))?;
+                    label_locs.insert(resolved.clone(), (current_section_idx, offset));
+                    jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
+                    symbols.push(AsmSymbol {
+                        kind: crate::SymbolKind::NoType,
+                        size: 0,
+                        visibility: crate::SymbolVisibility::Default,
+                        name: resolved.clone(),
+                        section_index: Some(current_section_idx),
+                        offset,
+                        is_global: global_symbols.contains(&resolved),
                     });
-                    current_section_idx = sections.len() - 1;
+                }
+                ASTNode::Instruction(ins) => {
+                    let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
+                    let inst = resolve_instruction_consts(&scoped, consts)?;
+                    let sec = &mut sections[current_section_idx];
+                    if sec.kind == AsmSectionKind::Bss {
+                        return Err(AsmError::EncodeError(
+                            "instructions are not valid in BSS".into(),
+                        ));
+                    }
+                    let cur_off = sec.data.len();
+                    let mut instruction_bytes = Vec::new();
+                    let mut instruction_relocs = Vec::new();
+                    encode_instruction(
+                        &inst,
+                        &mut instruction_bytes,
+                        &mut instruction_relocs,
+                        current_section_idx,
+                        jump_hint_layout
+                            .map(|layout| layout.instruction_offsets[node_index])
+                            .unwrap_or(cur_off),
+                        jump_hint_layout
+                            .map(|layout| &layout.labels)
+                            .unwrap_or(&jump_known_locs),
+                        BranchRelaxation {
+                            previous_len: jump_hint_layout
+                                .map(|layout| layout.instruction_lengths[node_index])
+                                .unwrap_or(0),
+                            force_near: forced_near.contains(&node_index),
+                        },
+                    )?;
+                    // Alignment padding can offset an earlier shrink. Once a short
+                    // branch must grow, keep it near: each branch changes size at most
+                    // twice, so relaxation cannot oscillate around alignment edges.
+                    if jump_hint_layout
+                        .is_some_and(|layout| layout.instruction_lengths[node_index] == 2)
+                        && instruction_bytes.len() > 2
+                        && (inst.mnemonic == "jmp" || condition_code(&inst.mnemonic).is_some())
+                    {
+                        forced_near.insert(node_index);
+                    }
+                    instruction_lengths[node_index] = instruction_bytes.len();
+                    instruction_offsets[node_index] = cur_off;
+                    reserve_output(
+                        &mut sec.data,
+                        instruction_bytes.len(),
+                        &mut materialized,
+                        limits,
+                    )?;
+                    sec.data.extend_from_slice(&instruction_bytes);
+                    for reloc in &mut instruction_relocs {
+                        reloc.offset += cur_off;
+                    }
+                    sec.relocs.extend(instruction_relocs);
+                }
+                ASTNode::Directive(dir) => {
+                    let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
+                    let sec = &mut sections[current_section_idx];
+                    if scoped.name == "align" {
+                        let alignment = alignment_value(&scoped, consts)?;
+                        sec.align = sec.align.max(alignment);
+                        let offset = (sec.data.len() as u64)
+                            .checked_add(sec.zero_fill)
+                            .ok_or_else(|| AsmError::EncodeError("Section size overflow".into()))?;
+                        let padding = offset.wrapping_neg() & (alignment - 1);
+                        offset.checked_add(padding).ok_or_else(|| {
+                            AsmError::EncodeError("Alignment size overflow".into())
+                        })?;
+                        if sec.kind == AsmSectionKind::Bss {
+                            sec.zero_fill =
+                                sec.zero_fill.checked_add(padding).ok_or_else(|| {
+                                    AsmError::EncodeError("BSS alignment overflow".into())
+                                })?;
+                        } else {
+                            let extra = usize::try_from(padding).map_err(|_| {
+                                AsmError::EncodeError("Alignment exceeds host capacity".into())
+                            })?;
+                            reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
+                            let fill = if sec.kind == AsmSectionKind::Text {
+                                0x90
+                            } else {
+                                0
+                            };
+                            sec.data.resize(sec.data.len() + extra, fill);
+                        }
+                    } else if sec.kind == AsmSectionKind::Bss {
+                        encode_bss_directive(&scoped, sec, consts)?;
+                    } else {
+                        let extra = directive_size(&scoped, consts)?;
+                        reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
+                        encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
+                    }
                 }
             }
-            ASTNode::Global(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                global_symbols.insert(resolved);
-            }
-            ASTNode::Extern(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if defined_labels.contains(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Extern symbol '{}' was already defined in this file",
-                        resolved
-                    )));
-                }
-                if !extern_symbols.insert(resolved.clone()) {
-                    continue;
-                }
-                symbols.push(AsmSymbol {
-                    name: resolved,
-                    section_index: None,
-                    offset: 0,
-                    is_global: true,
-                });
-            }
-            ASTNode::Const { .. } => {}
-            ASTNode::Label(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if !name.starts_with('.') {
-                    current_nonlocal_label = Some(resolved.clone());
-                }
-                if extern_symbols.contains(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Label '{}' conflicts with extern declaration",
-                        resolved
-                    )));
-                }
-                if consts.contains_key(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Label '{}' conflicts with constant definition",
-                        resolved
-                    )));
-                }
-                if !defined_labels.insert(resolved.clone()) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate label definition '{}'",
-                        resolved
-                    )));
-                }
-                let section = &sections[current_section_idx];
-                let offset = (section.data.len() as u64)
-                    .checked_add(section.zero_fill)
-                    .ok_or_else(|| AsmError::EncodeError("section size overflow".into()))?;
-                label_locs.insert(resolved.clone(), (current_section_idx, offset));
-                jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
-                symbols.push(AsmSymbol {
-                    name: resolved.clone(),
-                    section_index: Some(current_section_idx),
-                    offset,
-                    is_global: global_symbols.contains(&resolved),
-                });
-            }
-            ASTNode::Instruction(ins) => {
-                let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
-                let inst = resolve_instruction_consts(&scoped, consts)?;
-                let sec = &mut sections[current_section_idx];
-                if sec.name == ".bss" {
-                    return Err(AsmError::EncodeError(
-                        "instructions are not valid in BSS".into(),
-                    ));
-                }
-                let cur_off = sec.data.len();
-                let mut instruction_bytes = Vec::new();
-                let mut instruction_relocs = Vec::new();
-                encode_instruction(
-                    &inst,
-                    &mut instruction_bytes,
-                    &mut instruction_relocs,
-                    current_section_idx,
-                    jump_hint_layout
-                        .map(|layout| layout.instruction_offsets[node_index])
-                        .unwrap_or(cur_off),
-                    jump_hint_layout
-                        .map(|layout| &layout.labels)
-                        .unwrap_or(&jump_known_locs),
-                    jump_hint_layout
-                        .map(|layout| layout.instruction_lengths[node_index])
-                        .unwrap_or(0),
-                )?;
-                instruction_lengths[node_index] = instruction_bytes.len();
-                instruction_offsets[node_index] = cur_off;
-                reserve_output(
-                    &mut sec.data,
-                    instruction_bytes.len(),
-                    &mut materialized,
-                    limits,
-                )?;
-                sec.data.extend_from_slice(&instruction_bytes);
-                for reloc in &mut instruction_relocs {
-                    reloc.offset += cur_off;
-                }
-                sec.relocs.extend(instruction_relocs);
-            }
-            ASTNode::Directive(dir) => {
-                let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
-                let sec = &mut sections[current_section_idx];
-                if sec.name == ".bss" {
-                    encode_bss_directive(&scoped, sec, consts)?;
-                } else {
-                    let extra = directive_size(&scoped, consts)?;
-                    reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
-                    encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
-                }
-            }
+            Ok(())
+        })()
+        .map_err(|error| ast.error_at(error, node_index, None))?;
+        for relocation in relocation_start..sections[original_section].relocs.len() {
+            relocation_sites.insert((original_section, relocation), node_index);
         }
     }
 
@@ -279,24 +449,58 @@ fn encode_once(
         .filter(|name| !defined_labels.contains(*name) && !extern_symbols.contains(*name))
         .min()
     {
-        return Err(AsmError::SymbolError(format!(
-            "Global symbol '{name}' has no definition or extern declaration"
-        )));
+        return Err(ast.error_at(
+            AsmError::SymbolError(format!(
+                "Global symbol '{name}' has no definition or extern declaration"
+            )),
+            global_sites[name],
+            None,
+        ));
     }
 
+    let symbol_names: HashSet<_> = symbols.iter().map(|s| &s.name).collect();
+    for name in symbol_metadata.keys() {
+        if !symbol_names.contains(name) {
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!(
+                    "Metadata symbol '{name}' has no label or extern declaration"
+                )),
+                metadata_sites[name],
+                None,
+            ));
+        }
+    }
     for sym in &mut symbols {
+        if let Some((kind, size, visibility)) = symbol_metadata.get(&sym.name) {
+            sym.kind = *kind;
+            sym.size = *size;
+            sym.visibility = *visibility;
+            if let Some(index) = sym.section_index {
+                let section = &sections[index];
+                let extent = (section.data.len() as u64)
+                    .checked_add(section.zero_fill)
+                    .ok_or_else(|| AsmError::SymbolError("symbol section size overflow".into()))?;
+                if sym.offset.checked_add(*size).is_none_or(|end| end > extent) {
+                    return Err(ast.error_at(
+                        AsmError::SymbolError(format!(
+                            "Symbol '{}' size exceeds its section",
+                            sym.name
+                        )),
+                        metadata_sites[&sym.name],
+                        None,
+                    ));
+                }
+            }
+        }
         if global_symbols.contains(&sym.name) {
             sym.is_global = true;
         }
     }
 
-    for sec in &sections {
-        for reloc in &sec.relocs {
+    for (section_index, sec) in sections.iter().enumerate() {
+        for (relocation_index, reloc) in sec.relocs.iter().enumerate() {
             if !defined_labels.contains(&reloc.symbol) && !extern_symbols.contains(&reloc.symbol) {
-                return Err(AsmError::SymbolError(format!(
-                    "Undefined symbol '{}' (define it, declare with extern, or define with equ)",
-                    reloc.symbol
-                )));
+                return Err(ast.error_at(AsmError::SymbolError(format!("Undefined symbol '{}' (define it, declare with extern, or define with equ)",reloc.symbol)),relocation_sites[&(section_index,relocation_index)],None));
             }
         }
     }
@@ -321,7 +525,7 @@ struct RegInfo {
 
 #[derive(Clone)]
 enum EvaluatedExpr {
-    Number(i64),
+    Number(i128),
     Symbol { name: String, addend: i64 },
 }
 
@@ -354,7 +558,7 @@ fn resolve_expr_symbols(
     }
 }
 
-fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> Result<EvaluatedExpr, AsmError> {
+fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i128>) -> Result<EvaluatedExpr, AsmError> {
     Ok(match expr {
         ExprValue::Number(n) => EvaluatedExpr::Number(*n),
         ExprValue::Symbol { name, addend } => {
@@ -363,19 +567,22 @@ fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> Result<Evaluate
             } else {
                 EvaluatedExpr::Symbol {
                     name: name.clone(),
-                    addend: *addend,
+                    addend: i64::try_from(*addend)
+                        .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                 }
             }
         }
     })
 }
 
-fn checked_expression_add(a: i64, b: i64, symbol: &str) -> Result<i64, AsmError> {
-    a.checked_add(b).ok_or_else(|| {
-        AsmError::EncodeError(format!(
-            "Signed expression overflow while resolving {symbol:?}"
-        ))
-    })
+fn checked_expression_add(a: i128, b: i128, symbol: &str) -> Result<i128, AsmError> {
+    a.checked_add(b)
+        .filter(|n| (i64::MIN as i128..=u64::MAX as i128).contains(n))
+        .ok_or_else(|| {
+            AsmError::EncodeError(format!(
+                "Signed expression overflow while resolving {symbol:?}"
+            ))
+        })
 }
 
 fn relative_addend(displacement: i64) -> Result<i64, AsmError> {
@@ -419,7 +626,7 @@ fn resolve_instruction_symbols(
 
 fn resolve_instruction_consts(
     ins: &Instruction,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<Instruction, AsmError> {
     let mut resolved_ops = Vec::with_capacity(ins.operands.len());
     for op in &ins.operands {
@@ -444,7 +651,11 @@ fn resolve_instruction_consts(
                 let mut mem = mem.clone();
                 if let Some(sym) = &mem.symbol {
                     if let Some(v) = consts.get(sym) {
-                        mem.disp = checked_expression_add(mem.disp, *v, sym)?;
+                        mem.disp =
+                            i64::try_from(checked_expression_add(*v, mem.disp as i128, sym)?)
+                                .map_err(|_| {
+                                    AsmError::EncodeError("Memory displacement overflow".into())
+                                })?;
                         mem.symbol = None;
                     }
                 }
@@ -586,6 +797,15 @@ fn emit_reg_reg(
     Ok(())
 }
 
+fn validate_memory_width(mem: &MemoryOperand, width: u8) -> Result<(), AsmError> {
+    if mem.width.is_some_and(|explicit| explicit != width) {
+        return Err(AsmError::EncodeError(
+            "Memory width conflicts with register-derived width".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn emit_reg_mem(
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
@@ -593,6 +813,7 @@ fn emit_reg_mem(
     reg: &RegInfo,
     mem: &MemoryOperand,
 ) -> Result<(), AsmError> {
+    validate_memory_width(mem, reg.width)?;
     emit_operand_size_prefix(bytes, reg.width);
 
     if let Some(sym) = &mem.symbol {
@@ -647,6 +868,7 @@ fn emit_mem_reg(
     mem: &MemoryOperand,
     reg: &RegInfo,
 ) -> Result<(), AsmError> {
+    validate_memory_width(mem, reg.width)?;
     emit_operand_size_prefix(bytes, reg.width);
 
     if let Some(sym) = &mem.symbol {
@@ -694,6 +916,12 @@ fn emit_mem_reg(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct BranchRelaxation {
+    previous_len: usize,
+    force_near: bool,
+}
+
 fn encode_instruction(
     ins: &Instruction,
     bytes: &mut Vec<u8>,
@@ -701,7 +929,7 @@ fn encode_instruction(
     current_section: usize,
     current_offset: usize,
     label_locs: &HashMap<String, (usize, u64)>,
-    previous_len: usize,
+    relaxation: BranchRelaxation,
 ) -> Result<(), AsmError> {
     match ins.mnemonic.as_str() {
         "ret" | "nop" | "syscall" | "int3" | "cwd" | "cdq" | "cqo" if !ins.operands.is_empty() => {
@@ -711,6 +939,18 @@ fn encode_instruction(
             )))
         }
         "mov" => encode_mov(ins, bytes, relocs),
+        "movzx" | "movsx" | "movsxd" => encode_extension(ins, bytes, relocs),
+        "adc" => encode_carry(ins, 0x10, 0x11, bytes),
+        "sbb" => encode_carry(ins, 0x18, 0x19, bytes),
+        mnemonic if prefixed_condition(mnemonic, "set").is_some() => encode_setcc(
+            ins,
+            prefixed_condition(mnemonic, "set").unwrap(),
+            bytes,
+            relocs,
+        ),
+        mnemonic if prefixed_condition(mnemonic, "cmov").is_some() => {
+            encode_cmovcc(ins, prefixed_condition(mnemonic, "cmov").unwrap(), bytes)
+        }
         "add" => encode_binop(ins, 0x00, 0x01, 0x02, 0x03, 0, bytes, relocs),
         "sub" => encode_binop(ins, 0x28, 0x29, 0x2A, 0x2B, 5, bytes, relocs),
         "and" => encode_binop(ins, 0x20, 0x21, 0x22, 0x23, 4, bytes, relocs),
@@ -739,12 +979,24 @@ fn encode_instruction(
             bytes.extend_from_slice(&[0x48, 0x99]);
             Ok(())
         }
+        "push" if matches!(ins.operands.first(), Some(Operand::Immediate(_))) => {
+            encode_push_immediate(ins, bytes)
+        }
         "push" => encode_push_pop(ins, 0x50, bytes),
         "pop" => encode_push_pop(ins, 0x58, bytes),
+        "jmp" | "call"
+            if matches!(
+                ins.operands.first(),
+                Some(Operand::Register(_) | Operand::Memory(_))
+            ) =>
+        {
+            encode_indirect_branch(ins, bytes, relocs)
+        }
         "jmp" => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::One(0xE9),
                 short_opcode: Some(0xEB),
                 reloc_kind: RelocKind::Branch32,
@@ -760,7 +1012,8 @@ fn encode_instruction(
         "call" => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::One(0xE8),
                 short_opcode: None,
                 reloc_kind: RelocKind::Branch32,
@@ -776,7 +1029,8 @@ fn encode_instruction(
         condition if condition_code(condition).is_some() => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::Two(0x0F, 0x80 + condition_code(condition).unwrap()),
                 short_opcode: Some(0x70 + condition_code(condition).unwrap()),
                 reloc_kind: RelocKind::Branch32,
@@ -821,7 +1075,7 @@ fn encode_instruction(
     }
 }
 
-fn symbol_operand(op: &Operand) -> Option<(String, i64)> {
+fn symbol_operand(op: &Operand) -> Option<(String, i128)> {
     match op {
         Operand::Label(name) => Some((name.clone(), 0)),
         Operand::SymbolExpr { name, addend } => Some((name.clone(), *addend)),
@@ -871,7 +1125,7 @@ fn encode_mov(
                     bytes.extend_from_slice(&(*imm as i16).to_le_bytes());
                 }
                 32 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= u32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= u32::MAX as i128) {
                         return Err(AsmError::EncodeError("imm32 out of range".into()));
                     }
                     emit_rex(bytes, reg.width, false, false, reg.code >= 8, false, false)?;
@@ -881,7 +1135,10 @@ fn encode_mov(
                 64 => {
                     emit_rex(bytes, reg.width, false, false, reg.code >= 8, false, false)?;
                     bytes.push(0xB8 + (reg.code & 7));
-                    bytes.extend_from_slice(&imm.to_le_bytes());
+                    if !(i64::MIN as i128..=u64::MAX as i128).contains(imm) {
+                        return Err(AsmError::EncodeError("imm64 out of range".into()));
+                    }
+                    bytes.extend_from_slice(&(*imm as u64).to_le_bytes());
                 }
                 _ => return Err(AsmError::EncodeError("Unsupported register width".into())),
             }
@@ -899,7 +1156,8 @@ fn encode_mov(
                         offset: bytes.len(),
                         symbol: label,
                         kind: RelocKind::Absolute64,
-                        addend,
+                        addend: i64::try_from(addend)
+                            .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                     });
                     bytes.extend_from_slice(&0i64.to_le_bytes());
                 }
@@ -910,7 +1168,8 @@ fn encode_mov(
                         offset: bytes.len(),
                         symbol: label,
                         kind: RelocKind::Absolute32,
-                        addend,
+                        addend: i64::try_from(addend)
+                            .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                     });
                     bytes.extend_from_slice(&0u32.to_le_bytes());
                 }
@@ -944,6 +1203,9 @@ fn encode_mov(
                 lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 { 0x88 } else { 0x89 };
             emit_mem_reg(bytes, relocs, opcode, mem, &reg)
+        }
+        (Operand::Memory(mem), Operand::Immediate(imm)) => {
+            encode_memory_immediate(mem, *imm, None, bytes, relocs)
         }
         _ => Err(AsmError::EncodeError("Unsupported mov form".into())),
     }
@@ -1027,13 +1289,13 @@ fn encode_binop(
                     bytes.extend_from_slice(&(*imm as i16).to_le_bytes());
                 }
                 32 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= u32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= u32::MAX as i128) {
                         return Err(AsmError::EncodeError("imm32 out of range".into()));
                     }
                     bytes.extend_from_slice(&(*imm as u32).to_le_bytes());
                 }
                 64 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= i32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= i32::MAX as i128) {
                         return Err(AsmError::EncodeError(
                             "imm32-sign-extended out of range for r64".into(),
                         ));
@@ -1070,11 +1332,89 @@ fn encode_binop(
             };
             emit_mem_reg(bytes, relocs, opcode, mem, &reg)
         }
+        (Operand::Memory(mem), Operand::Immediate(imm)) => {
+            encode_memory_immediate(mem, *imm, Some(imm_op_ext), bytes, relocs)
+        }
         _ => Err(AsmError::EncodeError(format!(
             "Unsupported {} form",
             ins.mnemonic
         ))),
     }
+}
+
+fn encode_memory_immediate(
+    mem: &MemoryOperand,
+    imm: i128,
+    operation: Option<u8>,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    let width = mem.width.ok_or_else(|| {
+        AsmError::EncodeError("Ambiguous memory immediate; specify byte/word/dword/qword".into())
+    })?;
+    let encoded_width = if width == 64 { 32 } else { width };
+    let valid = match width {
+        8 => (-128..=255).contains(&imm),
+        16 => (-32768..=65535).contains(&imm),
+        32 => (i32::MIN as i128..=u32::MAX as i128).contains(&imm),
+        64 => (i32::MIN as i128..=i32::MAX as i128).contains(&imm),
+        _ => false,
+    };
+    if !valid {
+        return Err(AsmError::EncodeError(
+            "Memory immediate out of range for selected width (qword requires signed imm32)".into(),
+        ));
+    }
+    let short = operation.is_some() && width != 8 && (-128..=127).contains(&imm);
+    let tail = if short { 1 } else { encoded_width / 8 };
+    let opcode = match operation {
+        None => {
+            if width == 8 {
+                0xc6
+            } else {
+                0xc7
+            }
+        }
+        Some(_) => {
+            if width == 8 {
+                0x80
+            } else if short {
+                0x83
+            } else {
+                0x81
+            }
+        }
+    };
+    emit_operand_size_prefix(bytes, width);
+    if let Some(symbol) = &mem.symbol {
+        if mem.base.is_some() || mem.index.is_some() {
+            return Err(AsmError::EncodeError(
+                "symbol + register memory form is not implemented yet".into(),
+            ));
+        }
+        emit_rex(bytes, width, false, false, false, false, false)?;
+        bytes.push(opcode);
+        bytes.push(ModRM::new(0, operation.unwrap_or(0), 5).encode());
+        relocs.push(Relocation {
+            offset: bytes.len(),
+            symbol: symbol.clone(),
+            kind: RelocKind::Relative32,
+            addend: relative_addend(mem.disp)?
+                .checked_sub(i64::from(tail))
+                .ok_or_else(|| {
+                    AsmError::EncodeError("Relative relocation addend overflow".into())
+                })?,
+        });
+        bytes.extend_from_slice(&[0; 4]);
+    } else {
+        let addr = encode_address(mem, 64)?;
+        emit_rex(bytes, width, false, addr.rex_x, addr.rex_b, false, false)?;
+        bytes.push(opcode);
+        bytes.push(ModRM::new(addr.mod_bits, operation.unwrap_or(0), addr.rm_bits).encode());
+        emit_addr_tail(bytes, &addr);
+    }
+    bytes.extend_from_slice(&(imm as u64).to_le_bytes()[..tail as usize]);
+    Ok(())
 }
 
 fn encode_imul(
@@ -1128,6 +1468,7 @@ fn encode_imul(
             Ok(())
         }
         Operand::Memory(mem) => {
+            validate_memory_width(mem, dst_reg.width)?;
             emit_operand_size_prefix(bytes, dst_reg.width);
             if let Some(sym) = &mem.symbol {
                 if mem.base.is_some() || mem.index.is_some() {
@@ -1310,8 +1651,8 @@ fn encode_imul_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), A
     let short = (-128..=127).contains(&imm);
     let valid = match dst.width {
         16 => (-32768..=65535).contains(&imm),
-        32 => (i32::MIN as i64..=u32::MAX as i64).contains(&imm),
-        64 => (i32::MIN as i64..=i32::MAX as i64).contains(&imm),
+        32 => (i32::MIN as i128..=u32::MAX as i128).contains(&imm),
+        64 => (i32::MIN as i128..=i32::MAX as i128).contains(&imm),
         _ => false,
     };
     if !valid {
@@ -1337,6 +1678,302 @@ fn encode_imul_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), A
         bytes.extend_from_slice(&(imm as u16).to_le_bytes());
     } else {
         bytes.extend_from_slice(&(imm as u32).to_le_bytes());
+    }
+    Ok(())
+}
+
+fn prefixed_condition(mnemonic: &str, prefix: &str) -> Option<u8> {
+    let suffix = mnemonic.strip_prefix(prefix)?;
+    CONDITION_CODES
+        .iter()
+        .find(|(name, _)| name.strip_prefix('j') == Some(suffix))
+        .map(|(_, code)| *code)
+}
+
+fn encode_carry(
+    ins: &Instruction,
+    byte_opcode: u8,
+    wide_opcode: u8,
+    bytes: &mut Vec<u8>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 register operands",
+            ins.mnemonic
+        )));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src = register_operand(&ins.operands[1])?;
+    if dst.width != src.width {
+        return Err(AsmError::EncodeError("Register width mismatch".into()));
+    }
+    emit_reg_reg(
+        bytes,
+        if dst.width == 8 {
+            byte_opcode
+        } else {
+            wide_opcode
+        },
+        &dst,
+        &src,
+    )
+}
+
+fn encode_setcc(
+    ins: &Instruction,
+    condition: u8,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError("setcc expects 1 byte operand".into()));
+    }
+    emit_group_operand(
+        &ins.operands[0],
+        8,
+        8,
+        &[0x0f, 0x90 + condition],
+        0,
+        bytes,
+        relocs,
+    )
+}
+
+fn encode_cmovcc(ins: &Instruction, condition: u8, bytes: &mut Vec<u8>) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(
+            "cmovcc expects 2 register operands".into(),
+        ));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src = register_operand(&ins.operands[1])?;
+    if dst.width != src.width || !matches!(dst.width, 16 | 32 | 64) {
+        return Err(AsmError::EncodeError(
+            "cmovcc requires matching r16/r32/r64 registers".into(),
+        ));
+    }
+    emit_operand_size_prefix(bytes, dst.width);
+    emit_rex(
+        bytes,
+        dst.width,
+        dst.code >= 8,
+        false,
+        src.code >= 8,
+        false,
+        false,
+    )?;
+    bytes.extend_from_slice(&[0x0f, 0x40 + condition]);
+    bytes.push(ModRM::new(3, dst.code, src.code).encode());
+    Ok(())
+}
+
+fn encode_indirect_branch(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 1 operand",
+            ins.mnemonic
+        )));
+    }
+    // Near indirect branches default to 64-bit in long mode; REX.W is unnecessary.
+    emit_group_operand(
+        &ins.operands[0],
+        64,
+        0,
+        &[0xff],
+        if ins.mnemonic == "call" { 2 } else { 4 },
+        bytes,
+        relocs,
+    )
+}
+
+fn emit_group_operand(
+    operand: &Operand,
+    width: u8,
+    rex_width: u8,
+    opcodes: &[u8],
+    extension: u8,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    emit_operand_size_prefix(bytes, width);
+    match operand {
+        Operand::Register(_) => {
+            let reg = register_operand(operand)?;
+            if reg.width != width {
+                return Err(AsmError::EncodeError(
+                    "Register width does not match instruction".into(),
+                ));
+            }
+            emit_rex(
+                bytes,
+                rex_width,
+                false,
+                false,
+                reg.code >= 8,
+                reg.high8,
+                reg.rex8,
+            )?;
+            bytes.extend_from_slice(opcodes);
+            bytes.push(ModRM::new(3, extension, reg.code).encode());
+        }
+        Operand::Memory(mem) => {
+            validate_memory_width(mem, width)?;
+            if let Some(symbol) = &mem.symbol {
+                if mem.base.is_some() || mem.index.is_some() {
+                    return Err(AsmError::EncodeError(
+                        "symbol + register memory form is not implemented yet".into(),
+                    ));
+                }
+                emit_rex(bytes, rex_width, false, false, false, false, false)?;
+                bytes.extend_from_slice(opcodes);
+                bytes.push(ModRM::new(0, extension, 5).encode());
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: symbol.clone(),
+                    kind: RelocKind::Relative32,
+                    addend: relative_addend(mem.disp)?,
+                });
+                bytes.extend_from_slice(&[0; 4]);
+            } else {
+                let addr = encode_address(mem, 64)?;
+                emit_rex(
+                    bytes, rex_width, false, addr.rex_x, addr.rex_b, false, false,
+                )?;
+                bytes.extend_from_slice(opcodes);
+                bytes.push(ModRM::new(addr.mod_bits, extension, addr.rm_bits).encode());
+                emit_addr_tail(bytes, &addr);
+            }
+        }
+        _ => {
+            return Err(AsmError::EncodeError(
+                "Expected register or memory operand".into(),
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn encode_extension(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 operands",
+            ins.mnemonic
+        )));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src_width = match &ins.operands[1] {
+        Operand::Register(_) => register_operand(&ins.operands[1])?.width,
+        Operand::Memory(mem) => mem.width.ok_or_else(|| {
+            AsmError::EncodeError("Extension memory source requires byte/word/dword width".into())
+        })?,
+        _ => {
+            return Err(AsmError::EncodeError(
+                "Extension source must be register or memory".into(),
+            ))
+        }
+    };
+    let valid = if ins.mnemonic == "movsxd" {
+        dst.width == 64 && src_width == 32
+    } else {
+        (src_width == 8 && matches!(dst.width, 16 | 32 | 64))
+            || (src_width == 16 && matches!(dst.width, 32 | 64))
+    };
+    if !valid {
+        return Err(AsmError::EncodeError(
+            "Invalid extension source/destination width pair".into(),
+        ));
+    }
+    let opcode = if ins.mnemonic == "movsxd" {
+        vec![0x63]
+    } else {
+        vec![
+            0x0f,
+            match (ins.mnemonic.as_str(), src_width) {
+                ("movzx", 8) => 0xb6,
+                ("movzx", 16) => 0xb7,
+                ("movsx", 8) => 0xbe,
+                _ => 0xbf,
+            },
+        ]
+    };
+    emit_operand_size_prefix(bytes, dst.width);
+    match &ins.operands[1] {
+        Operand::Register(_) => {
+            let src = register_operand(&ins.operands[1])?;
+            emit_rex(
+                bytes,
+                dst.width,
+                dst.code >= 8,
+                false,
+                src.code >= 8,
+                src.high8,
+                src.rex8,
+            )?;
+            bytes.extend_from_slice(&opcode);
+            bytes.push(ModRM::new(3, dst.code, src.code).encode());
+        }
+        Operand::Memory(mem) => {
+            if let Some(symbol) = &mem.symbol {
+                if mem.base.is_some() || mem.index.is_some() {
+                    return Err(AsmError::EncodeError(
+                        "symbol + register memory form is not implemented yet".into(),
+                    ));
+                }
+                emit_rex(bytes, dst.width, dst.code >= 8, false, false, false, false)?;
+                bytes.extend_from_slice(&opcode);
+                bytes.push(ModRM::new(0, dst.code, 5).encode());
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: symbol.clone(),
+                    kind: RelocKind::Relative32,
+                    addend: relative_addend(mem.disp)?,
+                });
+                bytes.extend_from_slice(&[0; 4]);
+            } else {
+                let addr = encode_address(mem, 64)?;
+                emit_rex(
+                    bytes,
+                    dst.width,
+                    dst.code >= 8,
+                    addr.rex_x,
+                    addr.rex_b,
+                    false,
+                    false,
+                )?;
+                bytes.extend_from_slice(&opcode);
+                bytes.push(ModRM::new(addr.mod_bits, dst.code, addr.rm_bits).encode());
+                emit_addr_tail(bytes, &addr);
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+fn encode_push_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError("push expects 1 operand".into()));
+    }
+    let Operand::Immediate(imm) = ins.operands[0] else {
+        unreachable!()
+    };
+    if (-128..=127).contains(&imm) {
+        bytes.extend_from_slice(&[0x6a, imm as u8]);
+    } else if (i32::MIN as i128..=i32::MAX as i128).contains(&imm) {
+        bytes.push(0x68);
+        bytes.extend_from_slice(&(imm as i32).to_le_bytes());
+    } else {
+        return Err(AsmError::EncodeError(
+            "push immediate requires signed imm8 or signed imm32 in AMD64 mode".into(),
+        ));
     }
     Ok(())
 }
@@ -1379,6 +2016,7 @@ enum JumpOpcode {
 
 struct JumpSpec {
     previous_len: usize,
+    force_near: bool,
     near_opcode: JumpOpcode,
     short_opcode: Option<u8>,
     reloc_kind: RelocKind,
@@ -1426,7 +2064,7 @@ fn encode_jump(
 
     if let Some((target_sec, target_off)) = label_locs.get(&label) {
         if *target_sec == current_section {
-            if let Some(short_op) = spec.short_opcode {
+            if let Some(short_op) = spec.short_opcode.filter(|_| !spec.force_near) {
                 let short_len = 2i64;
                 // A forward target moves when this branch itself shrinks.
                 // Its previous encoded length keeps the inclusive +127 edge
@@ -1520,7 +2158,7 @@ fn encode_loop(
 
 fn eval_directive_expr(
     expr: &ExprValue,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<EvaluatedExpr, AsmError> {
     eval_expr(expr, consts)
 }
@@ -1547,13 +2185,16 @@ fn encode_data_expr(
                     bytes.extend_from_slice(&(n as i16).to_le_bytes());
                 }
                 4 => {
-                    if !(i32::MIN as i64..=u32::MAX as i64).contains(&n) {
+                    if !(i32::MIN as i128..=u32::MAX as i128).contains(&n) {
                         return Err(AsmError::EncodeError("dd value out of range".into()));
                     }
                     bytes.extend_from_slice(&(n as u32).to_le_bytes());
                 }
                 8 => {
-                    bytes.extend_from_slice(&n.to_le_bytes());
+                    if !(i64::MIN as i128..=u64::MAX as i128).contains(&n) {
+                        return Err(AsmError::EncodeError("dq value out of range".into()));
+                    }
+                    bytes.extend_from_slice(&(n as u64).to_le_bytes());
                 }
                 _ => return Err(AsmError::EncodeError("Unsupported data width".into())),
             }
@@ -1587,10 +2228,33 @@ fn encode_data_expr(
     }
 }
 
+fn alignment_value(dir: &Directive, consts: &HashMap<String, i128>) -> Result<u64, AsmError> {
+    if dir.values.len() != 1 {
+        return Err(AsmError::EncodeError(
+            "align expects one power-of-two operand".into(),
+        ));
+    }
+    let DirectiveValue::Expr(expr) = &dir.values[0] else {
+        return Err(AsmError::EncodeError(
+            "align requires numeric expression".into(),
+        ));
+    };
+    let EvaluatedExpr::Number(number) = eval_expr(expr, consts)? else {
+        return Err(AsmError::EncodeError(
+            "align requires a resolved constant".into(),
+        ));
+    };
+    let value = u64::try_from(number)
+        .ok()
+        .filter(|value| value.is_power_of_two())
+        .ok_or_else(|| AsmError::EncodeError("align requires a positive power of two".into()))?;
+    Ok(value)
+}
+
 fn reservation_size(
     unit: u64,
     values: &[DirectiveValue],
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<u64, AsmError> {
     if values.len() != 1 {
         return Err(AsmError::EncodeError(
@@ -1620,7 +2284,8 @@ fn reservation_size(
             "res* count must be non-negative".into(),
         ));
     }
-    (count as u64)
+    u64::try_from(count)
+        .map_err(|_| AsmError::EncodeError("res* size overflow".into()))?
         .checked_mul(unit)
         .ok_or_else(|| AsmError::EncodeError("res* size overflow".into()))
 }
@@ -1629,7 +2294,7 @@ fn reserve_bytes(
     bytes: &mut Vec<u8>,
     unit: u64,
     values: &[DirectiveValue],
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     let extra = usize::try_from(reservation_size(unit, values, consts)?)
         .map_err(|_| AsmError::EncodeError("res* size exceeds host capacity".into()))?;
@@ -1670,7 +2335,7 @@ fn reserve_output(
     Ok(())
 }
 
-fn directive_size(dir: &Directive, consts: &HashMap<String, i64>) -> Result<usize, AsmError> {
+fn directive_size(dir: &Directive, consts: &HashMap<String, i128>) -> Result<usize, AsmError> {
     if let Some(unit) = match dir.name.as_str() {
         "resb" => Some(1),
         "resw" => Some(2),
@@ -1712,7 +2377,7 @@ fn directive_size(dir: &Directive, consts: &HashMap<String, i64>) -> Result<usiz
 fn encode_bss_directive(
     dir: &Directive,
     section: &mut AsmSection,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     let extra = match dir.name.as_str() {
         "resb" => reservation_size(1, &dir.values, consts)?,
@@ -1723,7 +2388,7 @@ fn encode_bss_directive(
             let size = directive_size(dir, consts)?;
             for value in &dir.values {
                 let zero = match value {
-                    DirectiveValue::StringLiteral(s) => s.as_bytes().iter().all(|b| *b == 0),
+                    DirectiveValue::StringLiteral(s) => s.as_slice().iter().all(|b| *b == 0),
                     DirectiveValue::Expr(expr) => {
                         matches!(eval_directive_expr(expr, consts)?, EvaluatedExpr::Number(0))
                     }
@@ -1748,13 +2413,13 @@ fn encode_directive(
     dir: &Directive,
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     match dir.name.as_str() {
         "db" => {
             for v in &dir.values {
                 match v {
-                    DirectiveValue::StringLiteral(s) => bytes.extend_from_slice(s.as_bytes()),
+                    DirectiveValue::StringLiteral(s) => bytes.extend_from_slice(s.as_slice()),
                     DirectiveValue::Expr(expr) => {
                         let eval = eval_directive_expr(expr, consts)?;
                         encode_data_expr(eval, 1, bytes, relocs)?;

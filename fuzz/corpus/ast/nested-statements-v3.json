@@ -1,0 +1,84 @@
+{
+  "format_version": 3,
+  "semantics_version": 1,
+  "features": [],
+  "program": {
+    "declarations": [],
+    "globals": [],
+    "functions": [
+      {
+        "name": "nested",
+        "convention": "Whale",
+        "linkage": "Internal",
+        "link_name": null,
+        "parameters": [],
+        "return_type": "Void",
+        "body": [
+          {
+            "If": {
+              "cond": {
+                "Binary": {
+                  "left": {
+                    "Lit": {
+                      "Bool": true
+                    }
+                  },
+                  "op": "LogicalAnd",
+                  "right": {
+                    "Lit": {
+                      "Bool": false
+                    }
+                  }
+                }
+              },
+              "then_body": [
+                {
+                  "While": {
+                    "cond": {
+                      "Lit": {
+                        "Bool": false
+                      }
+                    },
+                    "body": [
+                      "Break"
+                    ]
+                  }
+                }
+              ],
+              "else_body": [
+                {
+                  "ExprStmt": {
+                    "Binary": {
+                      "left": {
+                        "Lit": {
+                          "Int": {
+                            "bits": 8,
+                            "signed": false,
+                            "value": "255"
+                          }
+                        }
+                      },
+                      "op": "BitXor",
+                      "right": {
+                        "Lit": {
+                          "Int": {
+                            "bits": 8,
+                            "signed": false,
+                            "value": "1"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "Return": null
+          }
+        ]
+      }
+    ]
+  }
+}

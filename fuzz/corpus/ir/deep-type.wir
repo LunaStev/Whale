@@ -1,0 +1,1 @@
+module { format_version 3 semantics_version 1 target "x86_64-whale-linux" datalayout {ptr=64,endian=little} declare @f900 "nested": whale (array<tuple<i8, ptr<array<u64, 4>>>, 2>) -> void, linkage external, link_name "nested" }

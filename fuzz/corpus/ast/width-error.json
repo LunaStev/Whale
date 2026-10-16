@@ -1,0 +1,1 @@
+{"format_version":3,"semantics_version":1,"features":[],"program":{"declarations":[],"globals":[{"name":"bad","ty":{"Int":{"bits":129,"signed":false}},"init":{"Lit":{"Int":{"bits":129,"signed":false,"value":"1"}}}}],"functions":[]}}

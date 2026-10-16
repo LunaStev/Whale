@@ -1,4 +1,4 @@
-use crate::ast::AST;
+pub use crate::ast::AsmSectionKind;
 use crate::error::AsmError;
 use crate::tokens::tokenize;
 use crate::traits::ISA;
@@ -9,6 +9,9 @@ pub struct AssemblerOutput {
 }
 
 pub struct AsmSection {
+    pub kind: AsmSectionKind,
+    /// Maximum power-of-two alignment requested by this section.
+    pub align: u64,
     pub name: String,
     pub data: Vec<u8>,
     /// Unbacked zero storage, used by .bss instead of allocating bytes.
@@ -16,7 +19,25 @@ pub struct AsmSection {
     pub relocs: Vec<Relocation>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolKind {
+    #[default]
+    NoType,
+    Function,
+    Object,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolVisibility {
+    #[default]
+    Default,
+    Hidden,
+}
+
 pub struct AsmSymbol {
+    pub kind: SymbolKind,
+    pub size: u64,
+    pub visibility: SymbolVisibility,
     pub name: String,
     pub section_index: Option<usize>,
     pub offset: u64,
@@ -69,7 +90,27 @@ pub fn assemble_with_limits(
     isa: &impl ISA,
     limits: &AssemblyLimits,
 ) -> Result<AssemblerOutput, AsmError> {
-    let tokens = tokenize(source)?;
-    let ast: AST = isa.parse(&tokens)?;
+    assemble_named_with_limits("<input>", source, isa, limits)
+}
+/// Assemble a named UTF-8 source with filename/range diagnostics.
+pub fn assemble_named(
+    source_name: &str,
+    source: &str,
+    isa: &impl ISA,
+) -> Result<AssemblerOutput, AsmError> {
+    assemble_named_with_limits(source_name, source, isa, &AssemblyLimits::default())
+}
+pub fn assemble_named_with_limits(
+    source_name: &str,
+    source: &str,
+    isa: &impl ISA,
+    limits: &AssemblyLimits,
+) -> Result<AssemblerOutput, AsmError> {
+    let tokens = tokenize(source).map_err(|error| error.with_source_name(source_name))?;
+    let mut ast = isa
+        .parse(&tokens)
+        .map_err(|error| error.with_source_name(source_name))?;
+    ast.source_name = source_name.into();
     isa.encode_with_limits(&ast, limits)
+        .map_err(|error| ast.error_at(error, 0, None))
 }

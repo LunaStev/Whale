@@ -49,6 +49,8 @@ pub enum MemoryTrap {
     Uninitialized { offset: u64 },
     InvalidBool { byte: u8 },
     OverlappingCopy,
+    DifferentAllocation,
+    InvalidLifetimeEnd,
 }
 impl std::fmt::Display for MemoryTrap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -68,6 +70,12 @@ impl std::fmt::Display for MemoryTrap {
             }
             Self::InvalidBool { byte } => write!(f, "invalid Bool storage byte {byte:#x}"),
             Self::OverlappingCopy => f.write_str("overlapping memcpy ranges"),
+            Self::DifferentAllocation => {
+                f.write_str("pointer operands belong to different allocations")
+            }
+            Self::InvalidLifetimeEnd => f.write_str(
+                "lifetime_end requires the current frame\'s exact stack allocation base",
+            ),
         }
     }
 }
@@ -128,7 +136,13 @@ struct Fragment {
     pointer: StoredPointer,
     byte: u8,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AllocationKind {
+    Stack,
+    Global,
+}
 struct Allocation {
+    kind: AllocationKind,
     address: u64,
     generation: u64,
     alive: bool,
@@ -232,6 +246,7 @@ impl Memory {
             write: true,
         };
         self.allocations.push(Allocation {
+            kind: AllocationKind::Stack,
             address,
             generation: 0,
             alive: true,
@@ -247,6 +262,55 @@ impl Memory {
             address,
             capability: Some(capability),
         })
+    }
+    pub fn allocate_global(&mut self, size: u64, natural: u32, align: u32) -> Result<Pointer> {
+        let pointer = self.allocate(size, natural, align)?;
+        self.allocations[pointer.capability.unwrap().allocation].kind = AllocationKind::Global;
+        Ok(pointer)
+    }
+    pub fn seal_global(&mut self, mut pointer: Pointer, readonly: bool) -> Result<Pointer> {
+        let (id, _) = self.identity(pointer)?;
+        if self.allocations[id].kind != AllocationKind::Global {
+            return Err(MemoryTrap::InvalidLifetimeEnd.into());
+        }
+        self.allocations[id].write = !readonly;
+        pointer.capability.as_mut().unwrap().write = !readonly;
+        Ok(pointer)
+    }
+    pub fn retire_stack(&mut self, pointer: Pointer, owner_start: usize) -> Result<()> {
+        let (id, capability) = self.identity(pointer)?;
+        if id < owner_start
+            || self.allocations[id].kind != AllocationKind::Stack
+            || capability.offset != 0
+            || capability.lower != 0
+            || capability.upper != self.allocations[id].bytes.len() as u64
+        {
+            return Err(MemoryTrap::InvalidLifetimeEnd.into());
+        }
+        self.charge(1 + self.allocations[id].fragments.len() as u64)?;
+        self.retire_allocation(id);
+        Ok(())
+    }
+    fn retire_allocation(&mut self, id: usize) {
+        let allocation = &mut self.allocations[id];
+        if allocation.alive {
+            allocation.alive = false;
+            self.fragments -= allocation.fragments.len();
+            allocation.fragments.clear();
+            allocation.bytes.clear();
+            allocation.initialized.clear();
+        }
+    }
+    pub fn difference(&self, lhs: Pointer, rhs: Pointer) -> Result<i128> {
+        let (a, left) = self.identity(lhs)?;
+        let (b, right) = self.identity(rhs)?;
+        if a != b || left.generation != right.generation {
+            return Err(MemoryTrap::DifferentAllocation.into());
+        }
+        Ok(i128::from(left.offset) - i128::from(right.offset))
+    }
+    pub fn compare_order(&self, lhs: Pointer, rhs: Pointer) -> Result<std::cmp::Ordering> {
+        Ok(self.difference(lhs, rhs)?.cmp(&0))
     }
     fn identity(&self, pointer: Pointer) -> Result<(usize, Capability)> {
         if pointer.address == 0 {
@@ -633,13 +697,9 @@ impl Memory {
     }
     pub fn retire_from(&mut self, start: usize) -> Result<()> {
         self.charge((self.allocations.len() - start) as u64)?;
-        for a in &mut self.allocations[start..] {
-            if a.alive {
-                a.alive = false;
-                self.fragments -= a.fragments.len();
-                a.fragments.clear();
-                a.bytes.clear();
-                a.initialized.clear();
+        for id in start..self.allocations.len() {
+            if self.allocations[id].kind == AllocationKind::Stack {
+                self.retire_allocation(id);
             }
         }
         Ok(())
@@ -765,3 +825,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod generated;

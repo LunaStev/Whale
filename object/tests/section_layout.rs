@@ -51,6 +51,7 @@ fn sparse_bss_uses_logical_symbol_ranges_without_growing_the_elf_file() {
         let index = object.add_section(".bss", SectionKind::Bss, 4096);
         object.sections[index].zero_fill = size;
         object.symbols.push(ObjectSymbol {
+            kind: object::SymbolKind::NoType,
             name: "end".into(),
             section_index: Some(index),
             value: size,

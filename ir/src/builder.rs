@@ -11,6 +11,8 @@ pub enum BuilderError {
     UnknownBlock(BlockId),
     UnknownParameter { index: usize, count: usize },
     UnknownValue(ValueId),
+    UnknownGlobal(crate::GlobalId),
+    InvalidPointerOperands,
     TerminatedBlock(BlockId),
     PhiAfterInstruction(BlockId),
 }
@@ -22,6 +24,8 @@ impl std::fmt::Display for BuilderError {
                 write!(f, "parameter {index} is outside 0..{count}")
             }
             Self::UnknownValue(id) => write!(f, "unknown builder value {id:?}"),
+            Self::UnknownGlobal(id) => write!(f, "unknown addressable global {id:?}"),
+            Self::InvalidPointerOperands => f.write_str("matching data-pointer operands required"),
             Self::TerminatedBlock(id) => write!(f, "builder block {id:?} is already terminated"),
             Self::PhiAfterInstruction(id) => {
                 write!(f, "phi must precede other instructions in {id:?}")
@@ -36,9 +40,54 @@ pub struct ModuleBuilder {
     next_value: u32,
     next_block: u32,
     next_global: u32,
+    #[cfg(feature = "socket")]
+    source_work: usize,
+    source_shifts: std::collections::HashMap<crate::FunctionId, (usize, usize)>,
+    source_mapped_functions: std::collections::HashSet<crate::FunctionId>,
 }
 
 impl<'a> FunctionBuilder<'a> {
+    pub fn try_global_addr(&mut self, global: crate::GlobalId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        let ty = self
+            .mb
+            .module
+            .global_storage
+            .iter()
+            .find(|g| g.id == global)
+            .ok_or(BuilderError::UnknownGlobal(global))?
+            .ty
+            .clone();
+        let dst = self.define_value(Type::ptr_to(ty.clone()));
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::GlobalAddr { dst, global, ty });
+        Ok(dst)
+    }
+    pub fn try_lifetime_end(&mut self, ptr: ValueId) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[ptr])?;
+        if !matches!(self.func.value_type(ptr), Some(Type::Ptr(_))) {
+            return Err(BuilderError::InvalidPointerOperands);
+        }
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::LifetimeEnd { ptr });
+        Ok(())
+    }
+    pub fn try_ptrdiff(&mut self, lhs: ValueId, rhs: ValueId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        let ty = self.func.value_type(lhs).unwrap();
+        if !matches!(ty, Type::Ptr(_)) || self.func.value_type(rhs) != Some(ty) {
+            return Err(BuilderError::InvalidPointerOperands);
+        }
+        let dst = self.define_value(Type::I128);
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::PtrDiff { dst, lhs, rhs });
+        Ok(dst)
+    }
     pub fn current_block_id(&self) -> BlockId {
         self.insert_block
     }
@@ -135,6 +184,14 @@ impl<'a> FunctionBuilder<'a> {
             .instructions
             .insert(pos, Instruction::Alloca { dst, ty, align });
 
+        if self.mb.source_mapped_functions.contains(&self.func.id) {
+            self.mb
+                .source_shifts
+                .entry(self.func.id)
+                .and_modify(|(_, count)| *count += 1)
+                .or_insert((pos, 1));
+        }
+
         dst
     }
 }
@@ -146,6 +203,10 @@ impl ModuleBuilder {
             next_value: 0,
             next_block: 0,
             next_global: 0,
+            #[cfg(feature = "socket")]
+            source_work: crate::IrLimits::default().max_analysis_work,
+            source_shifts: std::collections::HashMap::new(),
+            source_mapped_functions: std::collections::HashSet::new(),
         }
     }
 
@@ -184,6 +245,47 @@ impl ModuleBuilder {
         id
     }
 
+    /// Add initialized or explicitly uninitialized addressable scalar storage.
+    /// The shared global namespace and explicit external names are checked atomically.
+    pub fn try_add_global_storage(
+        &mut self,
+        mut storage: crate::GlobalStorage,
+    ) -> Result<crate::GlobalId, crate::GlobalStorageError> {
+        if let Err(error) = storage.validate_with_limits(crate::IrLimits::default()) {
+            crate::limits::discard_type(storage.ty);
+            return Err(error);
+        }
+        if self.module.globals.iter().any(|g| g.name == storage.name)
+            || self
+                .module
+                .global_storage
+                .iter()
+                .any(|g| g.name == storage.name)
+        {
+            return Err(crate::GlobalStorageError::DuplicateName);
+        }
+        if storage.link_name.as_ref().is_some_and(|link| {
+            self.module
+                .declarations
+                .iter()
+                .any(|d| d.link_name.as_ref() == Some(link))
+                || self
+                    .module
+                    .global_storage
+                    .iter()
+                    .any(|g| g.link_name.as_ref() == Some(link))
+        }) {
+            return Err(crate::GlobalStorageError::LinkNameCollision);
+        }
+        let id = crate::GlobalId(self.next_global);
+        self.next_global = self
+            .next_global
+            .checked_add(1)
+            .ok_or(crate::GlobalStorageError::DuplicateIdentity)?;
+        storage.id = id;
+        self.module.global_storage.push(storage);
+        Ok(id)
+    }
     pub fn declare_function(
         &mut self,
         name: impl Into<String>,
@@ -363,6 +465,227 @@ pub struct FunctionBuilder<'a> {
     mb: &'a mut ModuleBuilder,
     func: Function,
     insert_block: BlockId,
+}
+
+#[cfg(feature = "socket")]
+pub(crate) struct SourceCheckpoint(Vec<(BlockId, usize, usize, bool)>);
+
+#[cfg(feature = "socket")]
+impl FunctionBuilder<'_> {
+    fn charge_source_work(&mut self, amount: usize) -> Result<(), crate::LowerError> {
+        self.mb.charge_source_work(amount)
+    }
+    pub(crate) fn retain_const_sources(
+        &mut self,
+        expression: &crate::lower_ast::frontend::Expr,
+    ) -> Result<(), crate::LowerError> {
+        self.mb.retain_const_sources(expression)
+    }
+    /// Flush the final hoisting adjustment while resource failures can still be
+    /// returned to the frontend. Public finish then has no pending metadata scan.
+    pub(crate) fn finish_source_mapping(&mut self) -> Result<(), crate::LowerError> {
+        if self.mb.source_shifts.contains_key(&self.func.id) {
+            self.charge_source_work(self.mb.module.sources.mappings.len())?;
+            self.flush_source_shifts();
+        }
+        Ok(())
+    }
+    pub(crate) fn source_checkpoint(&mut self) -> Result<SourceCheckpoint, crate::LowerError> {
+        self.charge_source_work(self.func.blocks.len())?;
+        let work = self
+            .func
+            .blocks
+            .iter()
+            .map(|b| b.instructions.len())
+            .sum::<usize>();
+        self.charge_source_work(work + self.mb.module.sources.mappings.len())?;
+        self.flush_source_shifts();
+        Ok(SourceCheckpoint(
+            self.func
+                .blocks
+                .iter()
+                .map(|b| {
+                    (
+                        b.id,
+                        b.instructions.len(),
+                        b.instructions
+                            .iter()
+                            .take_while(|i| matches!(i, Instruction::Alloca { .. }))
+                            .count(),
+                        b.terminator.is_some(),
+                    )
+                })
+                .collect(),
+        ))
+    }
+    pub(crate) fn annotate_source(
+        &mut self,
+        annotation: &crate::SourceAnnotation,
+        before: SourceCheckpoint,
+    ) -> Result<(), crate::LowerError> {
+        self.charge_source_work(self.func.blocks.len() + self.mb.module.sources.files.len())?;
+        let work = self
+            .func
+            .blocks
+            .iter()
+            .map(|b| b.instructions.len())
+            .sum::<usize>()
+            + self.mb.module.sources.mappings.len()
+            + self.mb.module.sources.originals.len()
+            + self
+                .mb
+                .module
+                .sources
+                .files
+                .iter()
+                .map(|f| f.name.len())
+                .sum::<usize>()
+            + annotation.source.as_ref().map_or(0, |s| s.file.len());
+        self.charge_source_work(work)?;
+        self.flush_source_shifts();
+        let sources = &mut self.mb.module.sources;
+        sources.add_frontend_original(annotation);
+        let existing: std::collections::HashSet<_> =
+            sources.mappings.iter().map(|m| m.target).collect();
+        let before: std::collections::HashMap<_, _> = before
+            .0
+            .into_iter()
+            .map(|(id, len, allocas, terminated)| (id, (len, allocas, terminated)))
+            .collect();
+        for b in &self.func.blocks {
+            let (old_len, old_allocas, old_term) =
+                before.get(&b.id).copied().unwrap_or((0, 0, false));
+            let allocas = b
+                .instructions
+                .iter()
+                .take_while(|i| matches!(i, Instruction::Alloca { .. }))
+                .count();
+            let new_allocas = allocas.saturating_sub(old_allocas);
+            for index in 0..b.instructions.len() {
+                let new = if b.id == self.func.entry {
+                    (old_allocas..allocas).contains(&index) || index >= old_len + new_allocas
+                } else {
+                    index >= old_len
+                };
+                let target = crate::SourceTarget::Instruction {
+                    function: self.func.id,
+                    block: b.id,
+                    index,
+                };
+                if new && !existing.contains(&target) {
+                    sources.mappings.push(crate::SourceMapping {
+                        target,
+                        original: annotation.id,
+                    });
+                }
+            }
+            let target = crate::SourceTarget::Terminator {
+                function: self.func.id,
+                block: b.id,
+            };
+            if b.terminator.is_some() && !old_term && !existing.contains(&target) {
+                sources.mappings.push(crate::SourceMapping {
+                    target,
+                    original: annotation.id,
+                });
+            }
+        }
+        self.mb.source_mapped_functions.insert(self.func.id);
+        Ok(())
+    }
+}
+
+impl FunctionBuilder<'_> {
+    fn flush_source_shifts(&mut self) {
+        if let Some((position, count)) = self.mb.source_shifts.remove(&self.func.id) {
+            for mapping in &mut self.mb.module.sources.mappings {
+                if let crate::SourceTarget::Instruction {
+                    function,
+                    block,
+                    index,
+                } = &mut mapping.target
+                {
+                    if *function == self.func.id && *block == self.func.entry && *index >= position
+                    {
+                        *index += count;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "socket")]
+impl ModuleBuilder {
+    pub(crate) fn set_source_work_limit(&mut self, work: usize) {
+        self.source_work = work;
+    }
+    fn charge_source_work(&mut self, amount: usize) -> Result<(), crate::LowerError> {
+        self.source_work =
+            self.source_work
+                .checked_sub(amount)
+                .ok_or(crate::LowerError::ResourceLimit(
+                    crate::AstLimitError::SourceWork,
+                ))?;
+        Ok(())
+    }
+    fn retain_source(
+        &mut self,
+        annotation: &crate::SourceAnnotation,
+    ) -> Result<(), crate::LowerError> {
+        let work = 1
+            + self.module.sources.originals.len()
+            + self.module.sources.files.len()
+            + self
+                .module
+                .sources
+                .files
+                .iter()
+                .map(|f| f.name.len())
+                .sum::<usize>()
+            + annotation.source.as_ref().map_or(0, |s| s.file.len());
+        self.charge_source_work(work)?;
+        self.module.sources.add_frontend_original(annotation);
+        Ok(())
+    }
+    pub(crate) fn retain_const_sources(
+        &mut self,
+        expression: &crate::lower_ast::frontend::Expr,
+    ) -> Result<(), crate::LowerError> {
+        use crate::lower_ast::frontend::Expr;
+        let mut pending = vec![expression];
+        while let Some(expression) = pending.pop() {
+            self.charge_source_work(1)?;
+            match expression {
+                Expr::Located {
+                    annotation,
+                    expression,
+                } => {
+                    self.retain_source(annotation)?;
+                    pending.push(expression);
+                }
+                Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
+                    pending.push(right);
+                    pending.push(left);
+                }
+                Expr::BitNot(value) => pending.push(value),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn annotate_global_source(
+        &mut self,
+        id: crate::GlobalId,
+        annotation: &crate::SourceAnnotation,
+    ) -> Result<(), crate::LowerError> {
+        self.retain_source(annotation)?;
+        self.module.sources.mappings.push(crate::SourceMapping {
+            target: crate::SourceTarget::Global(id),
+            original: annotation.id,
+        });
+        Ok(())
+    }
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -925,7 +1248,8 @@ impl<'a> FunctionBuilder<'a> {
         Ok(dst)
     }
 
-    pub fn finish(self) {
+    pub fn finish(mut self) {
+        self.flush_source_shifts();
         self.mb.module.functions.push(self.func);
     }
 

@@ -32,7 +32,7 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
     let value: UniqueValue = serde_json::from_str(source).map_err(|e| e.to_string())?;
     let envelope: Envelope = serde_json::from_value(value.0)
         .map_err(|e| format!("AST envelope/schema error: {e}; expected format_version {AST_FORMAT_VERSION}, semantics_version {}, features [], program", crate::SEMANTICS_VERSION))?;
-    if envelope.format_version != 2 && envelope.format_version != AST_FORMAT_VERSION {
+    if !(2..=AST_FORMAT_VERSION).contains(&envelope.format_version) {
         return Err(format!(
             "unsupported AST format_version {}; expected {AST_FORMAT_VERSION}",
             envelope.format_version
@@ -52,10 +52,12 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
         ));
     }
     let extended =
-        super::limits::inspect_program_features(&envelope.program, super::AstLimits::default())
-            .map_err(|e| e.to_string())?;
-    if envelope.format_version < 3 && extended {
+        super::limits::inspect_program_wire(&envelope.program, super::AstLimits::default())?;
+    if envelope.format_version < 3 && extended & 1 != 0 {
         return Err("extended frontend operators require AST format 3".into());
+    }
+    if envelope.format_version < 4 && extended & 2 != 0 {
+        return Err("source annotations require AST format 4".into());
     }
     Ok(envelope.program)
 }
@@ -67,7 +69,7 @@ pub fn encode(program: Program) -> Result<String, String> {
 /// Guard direct Rust inputs before recursive pretty serialization. Rejected owned
 /// trees are disposed iteratively; output storage never grows past its budget.
 pub fn encode_with_limits(program: Program, limits: super::AstLimits) -> Result<String, String> {
-    if let Err(error) = super::limits::inspect_program(&program, limits) {
+    if let Err(error) = super::limits::inspect_program_wire(&program, limits) {
         super::limits::discard_program(program);
         return Err(error.to_string());
     }

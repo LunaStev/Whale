@@ -1,0 +1,36 @@
+module {
+  format_version 7
+  semantics_version 1
+  target "x86_64-whale-linux"
+  datalayout { ptr=64, endian=little }
+  source_file @s0 "original.wave"
+  original 100 @s0 3 5 3 9
+  original 200 @s0 7 9 7 14
+  original 300 @s0 11 13 11 18
+  original 301 @s0 12 1 12 7
+  source_map instruction @f0 %b0 0 100
+  source_map instruction @f1 %b0 1 200
+  source_map instruction @f2 %b0 1 300
+  source_map terminator @f2 %b0 301
+
+  declare @f0 "outer": whale () -> u32, linkage internal
+  declare @f1 "middle": whale () -> u32, linkage internal
+  declare @f2 "divide": whale () -> u32, linkage internal
+  fn @f0 "outer"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: u32 = call whale u32 @f1()
+    ret u32 %v0
+  }
+  fn @f1 "middle"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: fnptr<whale () -> u32> = function_addr @f2
+    %v1: u32 = call whale u32 indirect %v0()
+    ret u32 %v1
+  }
+  fn @f2 "divide"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: u32 = const u32 0
+    %v1: u32 = udiv u32 %v0, %v0
+    ret u32 %v1
+  }
+}

@@ -1,0 +1,16 @@
+# path\toutcome\tdiagnostic\tpurpose (tab-separated; every .asm must appear)
+competitor_test.asm	supported-positive	-	Historical competitor_test assembly fixture
+full_test.asm	supported-positive	-	Historical full_test assembly fixture
+massive/test_001.asm	supported-positive	-	Historical test_001 assembly fixture
+massive/test_002.asm	supported-positive	-	Historical test_002 assembly fixture
+massive/test_003.asm	supported-positive	-	Historical test_003 assembly fixture
+massive/test_004.asm	supported-positive	-	Historical test_004 assembly fixture
+massive/test_005.asm	supported-positive	-	Historical test_005 assembly fixture
+massive/test_006.asm	supported-positive	-	Historical test_006 assembly fixture
+massive/test_007.asm	supported-positive	-	Historical test_007 assembly fixture
+massive/test_008.asm	supported-positive	-	Historical test_008 assembly fixture
+massive/test_009.asm	supported-positive	-	Historical test_009 assembly fixture
+massive/test_010.asm	supported-positive	-	Historical test_010 assembly fixture
+mem_test.asm	supported-positive	-	Historical mem_test assembly fixture
+msg.asm	supported-positive	-	Historical msg assembly fixture
+test1.asm	supported-positive	-	Historical test1 assembly fixture

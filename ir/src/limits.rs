@@ -160,10 +160,27 @@ impl Budget {
 
 pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitError> {
     let mut b = Budget::new(limits)?;
+    b.nodes(m.sources.files.len())?;
+    b.nodes(m.sources.originals.len())?;
+    b.nodes(m.sources.mappings.len())?;
+    let mut source_bytes = 0usize;
+    for file in &m.sources.files {
+        source_bytes = source_bytes
+            .checked_add(file.name.len())
+            .filter(|n| *n <= limits.max_input_bytes)
+            .ok_or(LimitError {
+                resource: Resource::InputBytes,
+                limit: limits.max_input_bytes,
+            })?;
+    }
     for g in &m.globals {
         b.nodes(1)?;
         b.ty(&g.ty)?;
         b.expression(&g.init_expr)?;
+    }
+    for g in &m.global_storage {
+        b.nodes(1)?;
+        b.ty(&g.ty)?;
     }
     for d in &m.declarations {
         b.nodes(1)?;
@@ -200,7 +217,8 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     | Alloca { ty, .. }
                     | Load { ty, .. }
                     | Store { ty, .. }
-                    | Uninit { ty, .. } => b.ty(ty)?,
+                    | Uninit { ty, .. }
+                    | GlobalAddr { ty, .. } => b.ty(ty)?,
                     Phi { ty, incomings, .. } => {
                         b.ty(ty)?;
                         b.nodes(incomings.len())?;
