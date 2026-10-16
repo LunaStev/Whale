@@ -1,0 +1,30 @@
+# Retire opcode 9: dst/alias flags, offset, target(buffer/data/global/null/raw), frame start, unused.
+# Keep data and callable authority in separate surviving buffers.
+1 0 0 0 0 0
+2 1 0 0 0 4
+2 1 4 0 4 4
+1 1 8 2 0 0
+1 2 16 3 0 0
+# Reject caller-owned, global, nonbase, narrowed and wrong-frame requests atomically.
+9 0 0 1 2 0
+9 0 0 2 0 0
+9 0 1 0 0 0
+9 64 0 0 0 0
+9 0 0 0 3 0
+9 0 0 3 0 0
+9 0 0 4 0 0
+# End data target in its owning frame. Stored split-copy aliases become stale;
+# callable tokens in live buffers retain their targets/signatures.
+9 0 0 1 0 0
+9 0 0 1 0 0
+# Retire only buffer0; other buffers and global remain live.
+9 129 0 0 2 0
+6 0 0 0 0 0
+6 1 0 1 0 0
+# End buffer1 through an exact base; repeated termination is expired.
+9 1 0 0 2 0
+9 1 0 0 2 0
+# Zero length copies/sets still avoid access even with retired capabilities.
+2 0 0 1 0 0
+3 1 0 0 0 0
+7 0 0 0 0 0

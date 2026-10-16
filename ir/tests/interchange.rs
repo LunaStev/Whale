@@ -159,3 +159,26 @@ fn unit_variant_objects_have_the_same_meaning_and_encode_canonically() {
     ir::verify_module(&lower(source).unwrap()).unwrap();
     assert!(decode(&source.replace("\"Void\":null", "\"Void\":{\"extra\":0}")).is_err());
 }
+
+#[test]
+fn wire_numeric_syntax_matches_schema_while_ranges_remain_semantic() {
+    for value in ["+1", "1e2", " 1", "", "--1"] {
+        assert!(decode(&INTEGER.replace(&u128::MAX.to_string(), value))
+            .unwrap_err()
+            .contains("numeric width or spelling"));
+    }
+    for value in ["0x1234", "0xzzzzzzzz", "0X12345678"] {
+        assert!(decode(&FLOAT.replace("0xffc01234", value))
+            .unwrap_err()
+            .contains("numeric width or spelling"));
+    }
+    assert!(decode(&INTEGER.replace("\"bits\": 128", "\"bits\": 7"))
+        .unwrap_err()
+        .contains("numeric width or spelling"));
+    let range = INTEGER.replace(
+        &u128::MAX.to_string(),
+        "340282366920938463463374607431768211456",
+    );
+    decode(&range).unwrap();
+    assert!(lower(&range).is_err());
+}

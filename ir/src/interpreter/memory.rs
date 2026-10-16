@@ -825,3 +825,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod generated;

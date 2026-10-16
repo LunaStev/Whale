@@ -52,8 +52,7 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
         ));
     }
     let extended =
-        super::limits::inspect_program_features(&envelope.program, super::AstLimits::default())
-            .map_err(|e| e.to_string())?;
+        super::limits::inspect_program_wire(&envelope.program, super::AstLimits::default())?;
     if envelope.format_version < 3 && extended & 1 != 0 {
         return Err("extended frontend operators require AST format 3".into());
     }
@@ -70,7 +69,7 @@ pub fn encode(program: Program) -> Result<String, String> {
 /// Guard direct Rust inputs before recursive pretty serialization. Rejected owned
 /// trees are disposed iteratively; output storage never grows past its budget.
 pub fn encode_with_limits(program: Program, limits: super::AstLimits) -> Result<String, String> {
-    if let Err(error) = super::limits::inspect_program(&program, limits) {
+    if let Err(error) = super::limits::inspect_program_wire(&program, limits) {
         super::limits::discard_program(program);
         return Err(error.to_string());
     }
