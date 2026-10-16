@@ -6,13 +6,22 @@ pub struct AST {
 #[derive(Debug, Clone)]
 pub enum ASTNode {
     Instruction(Instruction),
+    SymbolMetadata {
+        name: String,
+        kind: crate::SymbolKind,
+        size: ExprValue,
+        visibility: crate::SymbolVisibility,
+    },
     Directive(Directive),
     Label(String),
     Section(String),
     SectionAttributes { name: String, kind: AsmSectionKind },
     Global(String),
     Extern(String),
-    Const { name: String, expr: ExprValue },
+    Const {
+        name: String,
+        expr: ExprValue,
+    },
 }
 
 #[derive(Debug, Clone)]

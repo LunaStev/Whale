@@ -7,6 +7,7 @@ fn object() -> ObjectFile {
 }
 fn sym(name: String) -> ObjectSymbol {
     ObjectSymbol {
+        kind: object::SymbolKind::NoType,
         name,
         section_index: Some(0),
         value: 0,

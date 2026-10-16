@@ -20,7 +20,25 @@ pub struct AsmSection {
     pub relocs: Vec<Relocation>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolKind {
+    #[default]
+    NoType,
+    Function,
+    Object,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolVisibility {
+    #[default]
+    Default,
+    Hidden,
+}
+
 pub struct AsmSymbol {
+    pub kind: SymbolKind,
+    pub size: u64,
+    pub visibility: SymbolVisibility,
     pub name: String,
     pub section_index: Option<usize>,
     pub offset: u64,

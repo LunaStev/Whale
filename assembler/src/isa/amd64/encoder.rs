@@ -140,6 +140,7 @@ fn encode_once(
     let mut instruction_offsets = vec![0; ast.items.len()];
     let mut extern_symbols = HashSet::<String>::new();
     let mut global_symbols = HashSet::<String>::new();
+    let mut symbol_metadata = HashMap::new();
 
     sections.push(AsmSection {
         kind: AsmSectionKind::Text,
@@ -204,11 +205,39 @@ fn encode_once(
                     continue;
                 }
                 symbols.push(AsmSymbol {
+                    kind: crate::SymbolKind::NoType,
+                    size: 0,
+                    visibility: crate::SymbolVisibility::Default,
                     name: resolved,
                     section_index: None,
                     offset: 0,
                     is_global: true,
                 });
+            }
+            ASTNode::SymbolMetadata {
+                name,
+                kind,
+                size,
+                visibility,
+            } => {
+                let name = resolve_symbol_name(name, &current_nonlocal_label)?;
+                let size = resolve_expr_symbols(size, &current_nonlocal_label)?;
+                let EvaluatedExpr::Number(size) = eval_expr(&size, consts)? else {
+                    return Err(AsmError::SymbolError(format!(
+                        "symbol '{name}' size must be a constant"
+                    )));
+                };
+                let size = u64::try_from(size).map_err(|_| {
+                    AsmError::SymbolError(format!("symbol '{name}' size must be a nonnegative u64"))
+                })?;
+                if symbol_metadata
+                    .insert(name.clone(), (*kind, size, *visibility))
+                    .is_some()
+                {
+                    return Err(AsmError::SymbolError(format!(
+                        "Duplicate symbol metadata for '{name}'"
+                    )));
+                }
             }
             ASTNode::Const { .. } => {}
             ASTNode::Label(name) => {
@@ -241,6 +270,9 @@ fn encode_once(
                 label_locs.insert(resolved.clone(), (current_section_idx, offset));
                 jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
                 symbols.push(AsmSymbol {
+                    kind: crate::SymbolKind::NoType,
+                    size: 0,
+                    visibility: crate::SymbolVisibility::Default,
                     name: resolved.clone(),
                     section_index: Some(current_section_idx),
                     offset,
@@ -353,7 +385,32 @@ fn encode_once(
         )));
     }
 
+    let symbol_names: HashSet<_> = symbols.iter().map(|s| &s.name).collect();
+    for name in symbol_metadata.keys() {
+        if !symbol_names.contains(name) {
+            return Err(AsmError::SymbolError(format!(
+                "Metadata symbol '{name}' has no label or extern declaration"
+            )));
+        }
+    }
     for sym in &mut symbols {
+        if let Some((kind, size, visibility)) = symbol_metadata.get(&sym.name) {
+            sym.kind = *kind;
+            sym.size = *size;
+            sym.visibility = *visibility;
+            if let Some(index) = sym.section_index {
+                let section = &sections[index];
+                let extent = (section.data.len() as u64)
+                    .checked_add(section.zero_fill)
+                    .ok_or_else(|| AsmError::SymbolError("symbol section size overflow".into()))?;
+                if sym.offset.checked_add(*size).is_none_or(|end| end > extent) {
+                    return Err(AsmError::SymbolError(format!(
+                        "Symbol '{}' size exceeds its section",
+                        sym.name
+                    )));
+                }
+            }
+        }
         if global_symbols.contains(&sym.name) {
             sym.is_global = true;
         }

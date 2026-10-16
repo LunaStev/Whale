@@ -258,16 +258,24 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
             .and_then(|idx| section_map.get(idx).copied());
 
         obj.symbols.push(ObjectSymbol {
+            kind: match sym.kind {
+                assembler::SymbolKind::NoType => object::SymbolKind::NoType,
+                assembler::SymbolKind::Function => object::SymbolKind::Function,
+                assembler::SymbolKind::Object => object::SymbolKind::Object,
+            },
             name: sym.name.clone(),
             section_index,
             value: sym.offset,
-            size: 0,
+            size: sym.size,
             binding: if sym.is_global {
                 SymbolBinding::Global
             } else {
                 SymbolBinding::Local
             },
-            visibility: SymbolVisibility::Default,
+            visibility: match sym.visibility {
+                assembler::SymbolVisibility::Default => SymbolVisibility::Default,
+                assembler::SymbolVisibility::Hidden => SymbolVisibility::Hidden,
+            },
         });
     }
 
@@ -308,6 +316,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
 
             if obj.symbols.iter().all(|s| s.name != reloc.symbol) {
                 obj.symbols.push(ObjectSymbol {
+                    kind: object::SymbolKind::NoType,
                     name: reloc.symbol.clone(),
                     section_index: None,
                     value: 0,

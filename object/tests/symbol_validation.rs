@@ -11,6 +11,7 @@ fn object() -> ObjectFile {
 
 fn symbol(section: Option<usize>, value: u64, size: u64) -> ObjectSymbol {
     ObjectSymbol {
+        kind: object::SymbolKind::NoType,
         name: "entry".into(),
         section_index: section,
         value,

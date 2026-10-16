@@ -108,6 +108,7 @@ pub fn run(args: Vec<String>) {
     obj.sections[sec_idx].data = bytes;
 
     obj.symbols.push(ObjectSymbol {
+        kind: object::SymbolKind::NoType,
         name: "start".to_string(),
         section_index: Some(sec_idx),
         value: 0,

@@ -531,6 +531,47 @@ rejects unsupported records, short buffers and field overflow before writing.
 Dedicated tests compare complete ELF output with the Rust path. This is the
 first partial Wave implementation, not a self-hosted Whale build.
 
+### Assembly symbol metadata and library resolution
+
+Unannotated labels remain ELF `STT_NOTYPE`, size zero and default visibility.
+Optional declarations attach explicit metadata without changing the label's
+binding or inventing an external name:
+
+```asm
+section .text
+global entry
+symbol entry, function, 1, hidden
+entry: ret
+section .data
+symbol payload, object, 4, default
+payload: dd 42
+```
+
+`symbol NAME, KIND, SIZE, VISIBILITY` accepts `function`, `object`, or `notype`;
+`SIZE` is a nonnegative integer or `equ` expression; visibility is `default` or
+`hidden`. Metadata may precede or follow the label/`extern` declaration. Local
+names retain the surrounding nonlocal label's scope. Unknown symbols, duplicate
+metadata, invalid fields and extents outside the defining section are errors.
+The Rust `AsmSymbol` and `ObjectSymbol` APIs expose kind, size and visibility.
+
+The linker library's `SymbolTable::resolve` preserves object-local scope. Strong
+definitions override weak ones in either input order; weak/weak selects the first
+input, and strong/strong diagnoses both input indices. Actual relocation
+references resolve before layout. Unreferenced undefined declarations impose no
+requirement; a referenced undefined weak symbol has the defined value zero.
+Unresolved strong references report their input object, section and offset.
+`SymbolTable::references` records each selected target and whether it is weak
+undefined. This API does not implement executable linking.
+
+Normal ELF regression tests independently decode symbols and RELA records without
+external programs. An additional GNU binutils oracle is opt-in:
+
+```sh
+cargo test -p whale --locked --test symbol_metadata readelf_fixture_confirms_symbol_metadata -- --ignored --nocapture
+```
+
+The checked-in fixture is [symbol-metadata.asm](tests/fixtures/symbol-metadata.asm).
+
 ## Development
 
 | Path | Responsibility |

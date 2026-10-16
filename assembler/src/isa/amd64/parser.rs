@@ -315,6 +315,72 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
     };
     *pos += 1;
 
+    if name == "symbol" {
+        let symbol = match tokens.get(*pos).map(|t| &t.kind) {
+            Some(TokenKind::Identifier(s)) => s.clone(),
+            _ => return Err(parser_err(tokens, *pos, "Expected symbol name")),
+        };
+        *pos += 1;
+        let comma = |pos: &mut usize| -> Result<(), AsmError> {
+            if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma)) {
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Expected comma in symbol declaration",
+                ));
+            }
+            *pos += 1;
+            Ok(())
+        };
+        comma(pos)?;
+        let kind = match tokens.get(*pos).map(|t| &t.kind) {
+            Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("function") => {
+                crate::SymbolKind::Function
+            }
+            Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("object") => {
+                crate::SymbolKind::Object
+            }
+            Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("notype") => {
+                crate::SymbolKind::NoType
+            }
+            _ => {
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Expected symbol kind function, object or notype",
+                ))
+            }
+        };
+        *pos += 1;
+        comma(pos)?;
+        let size = parse_expr(tokens, pos, |k| {
+            matches!(k, TokenKind::Comma | TokenKind::Newline)
+        })?;
+        comma(pos)?;
+        let visibility = match tokens.get(*pos).map(|t| &t.kind) {
+            Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("default") => {
+                crate::SymbolVisibility::Default
+            }
+            Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("hidden") => {
+                crate::SymbolVisibility::Hidden
+            }
+            _ => {
+                return Err(parser_err(
+                    tokens,
+                    *pos,
+                    "Expected symbol visibility default or hidden",
+                ))
+            }
+        };
+        *pos += 1;
+        finish_statement(tokens, pos)?;
+        return Ok(ASTNode::SymbolMetadata {
+            name: symbol,
+            kind,
+            size,
+            visibility,
+        });
+    }
     if matches!(name.as_str(), "section" | "global" | "extern") {
         let argument = match tokens.get(*pos).map(|t| &t.kind) {
             Some(TokenKind::Identifier(s)) => s.clone(),
@@ -626,5 +692,6 @@ fn is_directive(name: &str) -> bool {
             | "section"
             | "global"
             | "extern"
+            | "symbol"
     )
 }

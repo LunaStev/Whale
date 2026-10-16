@@ -11,7 +11,17 @@ pub enum SymbolVisibility {
     Hidden,
 }
 
+/// ELF symbol classification. Legacy assembly labels remain `NoType`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolKind {
+    #[default]
+    NoType,
+    Function,
+    Object,
+}
+
 pub struct ObjectSymbol {
+    pub kind: SymbolKind,
     pub name: String,
     pub section_index: Option<usize>,
     pub value: u64,
