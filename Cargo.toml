@@ -2,6 +2,7 @@
 members = [
     "diagnostic",
     "assembler",
+    "reverse",
     "target-spec",
     "object",
     "linker", "ir",
@@ -19,9 +20,11 @@ rust-version.workspace = true
 [features]
 default = []
 socket-cli = ["ir/socket", "dep:serde_json"]
+wave-reverse = ["reverse/wave"]
 
 [dependencies]
 assembler = { path = "assembler" }
+reverse = { path = "reverse" }
 linker = { path = "linker" }
 object = { path = "object" }
 ir = { path = "ir", version = "0.1.0", default-features = false }
