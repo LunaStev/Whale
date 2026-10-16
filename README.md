@@ -37,7 +37,7 @@ native compilation pipeline are still being developed.
 | --- | --- | --- |
 | Assembler | AMD64 assembly, sections, symbols, and relocations emitted as ELF64 object files | Available |
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
-| Object library | Object model and ELF64 relocatable object serialization | Available |
+| Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
 
@@ -55,6 +55,11 @@ layout arithmetic and rejects extended section numbering. Its default output
 budget is 256 MiB; library clients can override it with `write_with_limit`.
 The linker layout API returns `Result` and records separate file/memory positions
 and sizes for every input section. It does not yet emit executable segments.
+
+The [object input API](object/README.md) reads the supported bounded AMD64 ELF64
+relocatable subset and preserves section, symbol and relocation semantics.
+[Shared diagnostic conversions](diagnostic/README.md) retain machine-readable
+phase/category and available source/object context alongside typed component errors.
 
 The current emitted object target is AMD64 ELF64. Object metadata records the machine,
 format, byte order, and address width; writers and linker inputs reject unsupported

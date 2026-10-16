@@ -45,78 +45,143 @@ impl ObjectFile {
     /// Validate in-memory structure before writing or consuming this object.
     /// This does not allocate payloads, serialize, or apply an output-size budget.
     pub fn validate(&self) -> Result<(), String> {
-        self.target.validate().map_err(|e| e.to_string())?;
-        let obj = self;
-        for section in &obj.sections {
-            section.memory_size()?;
-            if section.name.contains('\0') {
-                return Err(format!(
-                    "section name {:?} contains embedded NUL byte",
-                    section.name
-                ));
+        self.validate_diagnostic().map_err(|e| e.to_string())
+    }
+
+    /// Typed structural validation; legacy `validate` renders this same cause.
+    pub fn validate_diagnostic(&self) -> Result<(), crate::ObjectError> {
+        use crate::{ObjectError as E, ObjectErrorKind as K};
+        let error = |kind, message: String| E::new("validate", kind, message);
+        self.target
+            .validate()
+            .map_err(|e| error(K::InvalidTarget, e.to_string()))?;
+        for (index, section) in self.sections.iter().enumerate() {
+            if section.kind != SectionKind::Bss && section.zero_fill != 0 {
+                return Err(error(
+                    K::InvalidSection,
+                    format!(
+                        "section {:?}: zero_fill is only valid for BSS",
+                        section.name
+                    ),
+                )
+                .section(index));
             }
-            // Zero means no alignment constraint and is serialized as one.
+            if section.kind == SectionKind::Bss && section.data.iter().any(|b| *b != 0) {
+                return Err(error(
+                    K::InvalidSection,
+                    format!("BSS section {:?} has a nonzero initializer", section.name),
+                )
+                .section(index));
+            }
+            (section.data.len() as u64)
+                .checked_add(section.zero_fill)
+                .ok_or_else(|| {
+                    error(
+                        K::Overflow,
+                        format!("section {:?}: memory size overflow", section.name),
+                    )
+                    .section(index)
+                })?;
+            if section.name.contains('\0') {
+                return Err(error(
+                    K::InvalidName,
+                    format!("section name {:?} contains embedded NUL byte", section.name),
+                )
+                .section(index));
+            }
             if section.align != 0 && !section.align.is_power_of_two() {
-                return Err(format!(
-                    "section {:?} alignment {} must be zero or a power of two",
-                    section.name, section.align
-                ));
+                return Err(error(
+                    K::InvalidAlignment,
+                    format!(
+                        "section {:?} alignment {} must be zero or a power of two",
+                        section.name, section.align
+                    ),
+                )
+                .section(index));
             }
         }
-
-        // Relocations in the current object API name symbols by string. Until typed
-        // symbol references are available, duplicate names are ambiguous even when
-        // their metadata happens to agree.
-        let mut symbol_names = HashSet::new();
-        for sym in &obj.symbols {
-            if sym.name.contains('\0') {
-                return Err(format!(
-                    "symbol name {:?} contains embedded NUL byte",
-                    sym.name
-                ));
+        let mut names = HashSet::new();
+        for symbol in &self.symbols {
+            if symbol.name.contains('\0') {
+                return Err(error(
+                    K::InvalidName,
+                    format!("symbol name {:?} contains embedded NUL byte", symbol.name),
+                )
+                .symbol(&symbol.name));
             }
-            if !symbol_names.insert(&sym.name) {
-                return Err(format!("duplicate symbol name {:?}", sym.name));
+            if !names.insert(&symbol.name) {
+                return Err(error(
+                    K::DuplicateSymbol,
+                    format!("duplicate symbol name {:?}", symbol.name),
+                )
+                .symbol(&symbol.name));
             }
-            if let Some(index) = sym.section_index {
-                let section = obj.sections.get(index).ok_or_else(|| {
-                    format!("symbol {:?} references invalid section {index}", sym.name)
+            if let Some(index) = symbol.section_index {
+                let section = self.sections.get(index).ok_or_else(|| {
+                    error(
+                        K::InvalidSection,
+                        format!(
+                            "symbol {:?} references invalid section {index}",
+                            symbol.name
+                        ),
+                    )
+                    .section(index)
+                    .symbol(&symbol.name)
                 })?;
-                let end = sym
-                    .value
-                    .checked_add(sym.size)
-                    .ok_or_else(|| format!("symbol range overflow for {:?}", sym.name))?;
-                if end > section.memory_size()? {
-                    return Err(format!(
-                        "symbol range for {:?} exceeds section {:?} size {}",
-                        sym.name,
-                        section.name,
-                        section.memory_size()?
-                    ));
+                let end = symbol.value.checked_add(symbol.size).ok_or_else(|| {
+                    error(
+                        K::Overflow,
+                        format!("symbol range overflow for {:?}", symbol.name),
+                    )
+                    .symbol(&symbol.name)
+                })?;
+                if end > section.memory_size().expect("validated section size") {
+                    return Err(error(
+                        K::OutOfBounds,
+                        format!(
+                            "symbol range for {:?} exceeds section {:?} size {}",
+                            symbol.name,
+                            section.name,
+                            section.memory_size().unwrap()
+                        ),
+                    )
+                    .section(index)
+                    .symbol(&symbol.name));
                 }
             }
         }
-
-        for reloc in &obj.relocations {
-            if reloc.symbol.contains('\0') {
-                return Err(format!(
-                    "relocation reference {:?} contains embedded NUL byte",
-                    reloc.symbol
-                ));
-            }
-            let section = obj.sections.get(reloc.section_index).ok_or_else(|| {
-                format!(
-                    "relocation for {:?} references invalid section {}",
-                    reloc.symbol, reloc.section_index
+        for relocation in &self.relocations {
+            if relocation.symbol.contains('\0') {
+                return Err(error(
+                    K::InvalidName,
+                    format!(
+                        "relocation reference {:?} contains embedded NUL byte",
+                        relocation.symbol
+                    ),
                 )
+                .symbol(&relocation.symbol));
+            }
+            let section = self.sections.get(relocation.section_index).ok_or_else(|| {
+                error(
+                    K::InvalidSection,
+                    format!(
+                        "relocation for {:?} references invalid section {}",
+                        relocation.symbol, relocation.section_index
+                    ),
+                )
+                .section(relocation.section_index)
             })?;
             if section.kind == SectionKind::Bss {
-                return Err(format!(
-                    "relocations targeting BSS section {:?} are not supported",
-                    section.name
-                ));
+                return Err(error(
+                    K::InvalidRelocation,
+                    format!(
+                        "relocations targeting BSS section {:?} are not supported",
+                        section.name
+                    ),
+                )
+                .section(relocation.section_index));
             }
-            let width = match reloc.kind {
+            let width = match relocation.kind {
                 crate::RelocKind::Absolute64 => 8,
                 crate::RelocKind::Relative8 => 1,
                 crate::RelocKind::Absolute32
@@ -124,24 +189,52 @@ impl ObjectFile {
                 | crate::RelocKind::GOTPCREL
                 | crate::RelocKind::PLT32 => 4,
             };
-            let end = reloc.offset.checked_add(width).ok_or_else(|| {
-                format!(
-                    "relocation range overflow in section {:?} at offset {}",
-                    section.name, reloc.offset
+            let end = relocation.offset.checked_add(width).ok_or_else(|| {
+                error(
+                    K::Overflow,
+                    format!(
+                        "relocation range overflow in section {:?} at offset {}",
+                        section.name, relocation.offset
+                    ),
                 )
+                .section(relocation.section_index)
             })?;
             if end > section.data.len() {
-                return Err(format!(
-                    "relocation range {}..{} exceeds section {:?} size {}",
-                    reloc.offset,
-                    end,
-                    section.name,
-                    section.data.len()
-                ));
+                return Err(error(
+                    K::OutOfBounds,
+                    format!(
+                        "relocation range {}..{} exceeds section {:?} size {}",
+                        relocation.offset,
+                        end,
+                        section.name,
+                        section.data.len()
+                    ),
+                )
+                .section(relocation.section_index));
             }
         }
-
         Ok(())
+    }
+
+    pub fn read(bytes: &[u8]) -> Result<Self, crate::ObjectReadError> {
+        Self::read_with_limits(bytes, crate::ObjectReadLimits::default())
+    }
+    pub fn read_with_limits(
+        bytes: &[u8],
+        limits: crate::ObjectReadLimits,
+    ) -> Result<Self, crate::ObjectReadError> {
+        crate::formats::elf_read::read_elf(bytes, limits)
+    }
+
+    /// Typed counterpart of `write`, including output budgets and allocation causes.
+    pub fn write_diagnostic(&self) -> Result<Vec<u8>, crate::ObjectError> {
+        self.write_diagnostic_with_limit(crate::formats::elf::DEFAULT_MAX_OUTPUT_SIZE)
+    }
+    pub fn write_diagnostic_with_limit(
+        &self,
+        max_output_size: u64,
+    ) -> Result<Vec<u8>, crate::ObjectError> {
+        crate::formats::elf::write_elf_checked(self, max_output_size)
     }
 
     pub fn write_with_limit(&self, max_output_size: u64) -> Result<Vec<u8>, String> {

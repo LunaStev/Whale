@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "assembler"
 version = "0.1.0"
+dependencies = [
+ "whale-diagnostic",
+]
 
 [[package]]
 name = "bitflags"
@@ -49,6 +52,7 @@ dependencies = [
 name = "ir"
 version = "0.1.0"
 dependencies = [
+ "whale-diagnostic",
  "serde",
  "serde_json",
  "whale-target",
@@ -70,6 +74,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "linker"
 version = "0.1.0"
 dependencies = [
+ "whale-diagnostic",
  "object",
 ]
 
@@ -89,6 +94,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "object"
 version = "0.1.0"
 dependencies = [
+ "whale-diagnostic",
  "whale-target",
 ]
 
@@ -228,6 +234,10 @@ dependencies = [
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "whale-diagnostic"
+version = "0.1.0"
 
 [[package]]
 name = "whale-target"

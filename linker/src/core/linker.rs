@@ -22,16 +22,31 @@ impl Linker {
     }
 
     pub fn link(&mut self) -> Result<Vec<u8>, String> {
-        // Resolve references before any future layout/output work. This also
-        // applies the shared structural validator to every in-memory input.
+        self.link_checked().map_err(|error| error.to_string())
+    }
+
+    /// Structured conversion boundary; components retain typed input causes.
+    pub fn link_checked(&mut self) -> Result<Vec<u8>, crate::LinkError> {
+        use crate::{LinkError, LinkErrorKind};
+        use whale_diagnostic::Context;
+        for (index, object) in self.objects.iter().enumerate() {
+            object.validate_diagnostic().map_err(|error| {
+                let mut result =
+                    LinkError::new(LinkErrorKind::Input, format!("link input {index}: {error}"));
+                result.contexts = error.contexts.clone();
+                result.input_cause = Some(Box::new(error));
+                result.contexts.push(Context::Input(index));
+                result
+            })?;
+        }
         let mut symbols = super::symbol_table::SymbolTable::new();
-        symbols.resolve(&self.objects)?;
-        // 1. Symbol Resolution
-        // 2. Section Merging & Layout
-        // 3. Relocation Processing
-        // 4. Output Generation
+        symbols
+            .resolve(&self.objects)
+            .map_err(|error| LinkError::new(LinkErrorKind::Symbols, error))?;
         match self.output_format {
-            OutputFormat::ELF64Executable => self.link_elf64(),
+            OutputFormat::ELF64Executable => self
+                .link_elf64()
+                .map_err(|error| LinkError::new(LinkErrorKind::Emission, error)),
         }
     }
 

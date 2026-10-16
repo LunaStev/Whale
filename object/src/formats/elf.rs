@@ -1,4 +1,16 @@
+use crate::{ObjectError, ObjectErrorKind as ErrorKind, ObjectResource};
 use std::collections::{HashMap, HashSet};
+fn write_error(kind: ErrorKind, message: impl Into<String>) -> ObjectError {
+    ObjectError::new("write", kind, message)
+}
+fn output_limit() -> ObjectError {
+    let mut e = write_error(
+        ErrorKind::ResourceLimit,
+        "ELF output exceeds configured size limit",
+    );
+    e.resource = Some(ObjectResource::OutputBytes);
+    e
+}
 
 use crate::core::object::ObjectFile;
 use crate::core::reloc::RelocKind;
@@ -214,11 +226,18 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
 }
 
 pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u8>, String> {
-    let machine = obj.target.elf_machine().map_err(|e| e.to_string())?;
+    write_elf_checked(obj, max_output_size).map_err(|e| e.to_string())
+}
+/// Serialize using typed validation, budget and allocation causes.
+pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u8>, ObjectError> {
+    let machine = obj
+        .target
+        .elf_machine()
+        .map_err(|e| write_error(ErrorKind::InvalidTarget, e.to_string()))?;
     let relocation_sections: HashSet<_> = obj.relocations.iter().map(|r| r.section_index).collect();
     checked_section_count(obj.sections.len(), relocation_sections.len())?;
     preflight(obj, max_output_size)?;
-    obj.validate()?;
+    obj.validate_diagnostic()?;
     let mut symbol_names: HashSet<_> = obj.symbols.iter().map(|s| &s.name).collect();
 
     let mut shstrtab = vec![0u8];
@@ -235,7 +254,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     for (sec_idx, section) in obj.sections.iter().enumerate() {
         let name_idx = push_name(&mut shstrtab, &section.name)?;
         let (type_, flags) = section_type_and_flags(section.kind);
-        let data_size = section.memory_size()?;
+        let data_size = section.memory_size().expect("validated section extent");
 
         section_to_shdr_idx[sec_idx] = shdrs.len();
         shdrs.push(Elf64Shdr {
@@ -302,13 +321,13 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     let symbol_count = ordered_syms
         .len()
         .checked_add(1)
-        .ok_or("ELF symbol count overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF symbol count overflow"))?;
     checked_u32(symbol_count, "symbol count")?;
     checked_table_bytes(symbol_count, ELF_SYM_SIZE as usize, max_output_size)?;
     let mut elf_syms = Vec::new();
     elf_syms
         .try_reserve_exact(symbol_count)
-        .map_err(|_| "ELF symbol allocation failed")?;
+        .map_err(|_| write_error(ErrorKind::HostAllocation, "ELF symbol allocation failed"))?;
     elf_syms.push(Elf64Sym::default()); // STN_UNDEF
 
     let mut symbol_index_by_name: HashMap<&str, usize> = HashMap::new();
@@ -324,7 +343,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
                 .and_then(|idx| section_to_shdr_idx.get(idx).copied())
                 .unwrap_or(0),
         )
-        .map_err(|_| "ELF symbol section index overflow")?;
+        .map_err(|_| write_error(ErrorKind::Overflow, "ELF symbol section index overflow"))?;
 
         let elf_sym = Elf64Sym {
             name: name_idx,
@@ -362,14 +381,22 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
 
         let capacity = checked_table_bytes(relocs.len(), ELF_RELA_SIZE as usize, max_output_size)?;
         let mut rela_data = Vec::new();
-        rela_data
-            .try_reserve_exact(capacity)
-            .map_err(|_| "ELF relocation allocation failed")?;
+        rela_data.try_reserve_exact(capacity).map_err(|_| {
+            write_error(
+                ErrorKind::HostAllocation,
+                "ELF relocation allocation failed",
+            )
+        })?;
         for reloc in relocs {
             let sym_idx = u64::from(checked_u32(
                 *symbol_index_by_name
                     .get(reloc.symbol.as_str())
-                    .ok_or("ELF relocation symbol missing")?,
+                    .ok_or_else(|| {
+                        write_error(
+                            ErrorKind::InvalidRelocation,
+                            "ELF relocation symbol missing",
+                        )
+                    })?,
                 "relocation symbol index",
             )?);
             let rtype = reloc_type(reloc.kind) as u64;
@@ -402,9 +429,12 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     let symtab_idx = shdrs.len();
     let capacity = checked_table_bytes(elf_syms.len(), ELF_SYM_SIZE as usize, max_output_size)?;
     let mut symtab_data = Vec::new();
-    symtab_data
-        .try_reserve_exact(capacity)
-        .map_err(|_| "ELF symbol table allocation failed")?;
+    symtab_data.try_reserve_exact(capacity).map_err(|_| {
+        write_error(
+            ErrorKind::HostAllocation,
+            "ELF symbol table allocation failed",
+        )
+    })?;
     for sym in &elf_syms {
         symtab_data.extend_from_slice(&sym.to_bytes());
     }
@@ -455,7 +485,9 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         if shdrs[idx].type_ != SHT_NOBITS {
             let size = payloads[idx].as_ref().map(|p| p.len()).unwrap_or(0) as u64;
             shdrs[idx].size = size;
-            current_offset = offset.checked_add(size).ok_or("ELF file layout overflow")?;
+            current_offset = offset
+                .checked_add(size)
+                .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF file layout overflow"))?;
         }
     }
 
@@ -463,7 +495,7 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
     let section_bytes = checked_table_bytes(shdrs.len(), ELF_SHDR_SIZE as usize, max_output_size)?;
     let total_size = shoff
         .checked_add(section_bytes as u64)
-        .ok_or("ELF header layout overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF header layout overflow"))?;
     let output_capacity = checked_output_size(total_size, max_output_size)?;
     let hdr = Elf64Header {
         ident: [0x7f, b'E', b'L', b'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -474,22 +506,23 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         ehsize: ELF_HDR_SIZE as u16,
         shentsize: ELF_SHDR_SIZE,
         shnum: checked_section_count(obj.sections.len(), relocation_sections.len())?,
-        shstrndx: u16::try_from(shstrtab_idx)
-            .map_err(|_| "ELF section-name table index overflow")?,
+        shstrndx: u16::try_from(shstrtab_idx).map_err(|_| {
+            write_error(ErrorKind::Overflow, "ELF section-name table index overflow")
+        })?,
         ..Default::default()
     };
 
     let mut out = Vec::new();
     out.try_reserve_exact(output_capacity)
-        .map_err(|_| "ELF output allocation failed")?;
+        .map_err(|_| write_error(ErrorKind::HostAllocation, "ELF output allocation failed"))?;
     out.extend_from_slice(&hdr.to_bytes());
 
     for idx in 1..shdrs.len() {
         if shdrs[idx].type_ == SHT_NOBITS {
             continue;
         }
-        let offset =
-            usize::try_from(shdrs[idx].offset).map_err(|_| "ELF offset exceeds host capacity")?;
+        let offset = usize::try_from(shdrs[idx].offset)
+            .map_err(|_| write_error(ErrorKind::Overflow, "ELF offset exceeds host capacity"))?;
         if out.len() < offset {
             out.resize(offset, 0);
         }
@@ -498,7 +531,12 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
         }
     }
 
-    let shoff = usize::try_from(shoff).map_err(|_| "ELF header offset exceeds host capacity")?;
+    let shoff = usize::try_from(shoff).map_err(|_| {
+        write_error(
+            ErrorKind::Overflow,
+            "ELF header offset exceeds host capacity",
+        )
+    })?;
     if out.len() < shoff {
         out.resize(shoff, 0);
     }
@@ -512,19 +550,23 @@ pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Ve
 
 /// Account for the complete output before cloning any name or payload. Borrowed
 /// name sets and counts are the only working metadata built during this pass.
-fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
+fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), ObjectError> {
     let mut relocation_counts = HashMap::<usize, usize>::new();
     for reloc in &obj.relocations {
         if reloc.section_index >= obj.sections.len() {
-            return Err(format!(
-                "relocation references invalid section {}",
-                reloc.section_index
-            ));
+            return Err(write_error(
+                ErrorKind::InvalidSection,
+                format!(
+                    "relocation references invalid section {}",
+                    reloc.section_index
+                ),
+            )
+            .section(reloc.section_index));
         }
         let count = relocation_counts.entry(reloc.section_index).or_default();
         *count = count
             .checked_add(1)
-            .ok_or("ELF relocation count overflow")?;
+            .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF relocation count overflow"))?;
     }
     let section_count = checked_section_count(obj.sections.len(), relocation_counts.len())?;
     let mut shstr_size = 1usize;
@@ -534,23 +576,27 @@ fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
         shstr_size = checked_name_end(shstr_size, section.name.len())?;
         checked_output_size(shstr_size as u64, limit)?;
         if section.align != 0 && !section.align.is_power_of_two() {
-            return Err(format!(
-                "section {:?} alignment {} must be zero or a power of two",
-                section.name, section.align
-            ));
+            return Err(write_error(
+                ErrorKind::InvalidAlignment,
+                format!(
+                    "section {:?} alignment {} must be zero or a power of two",
+                    section.name, section.align
+                ),
+            )
+            .section(index));
         }
         let aligned = align_up(offset, section.align.max(1))?;
         if section.kind != SectionKind::Bss {
             offset = aligned
                 .checked_add(section.file_size())
-                .ok_or("ELF file layout overflow")?;
+                .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF file layout overflow"))?;
         }
         if relocation_counts.contains_key(&index) {
             let name_len = section
                 .name
                 .len()
                 .checked_add(5)
-                .ok_or("ELF string table overflow")?;
+                .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF string table overflow"))?;
             shstr_size = checked_name_end(shstr_size, name_len)?;
             checked_output_size(shstr_size as u64, limit)?;
         }
@@ -567,7 +613,9 @@ fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
         // Reject a huge name before hashing it or copying string-table data.
         checked_output_size(name.len() as u64, limit)?;
         if names.insert(name) {
-            symbols = symbols.checked_add(1).ok_or("ELF symbol count overflow")?;
+            symbols = symbols
+                .checked_add(1)
+                .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF symbol count overflow"))?;
             if !name.is_empty() {
                 str_size = checked_name_end(str_size, name.len())?;
                 checked_output_size(str_size as u64, limit)?;
@@ -580,24 +628,24 @@ fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
             let bytes = checked_table_bytes(*count, ELF_RELA_SIZE as usize, limit)?;
             offset = align_up(offset, 8)?
                 .checked_add(bytes as u64)
-                .ok_or("ELF file layout overflow")?;
+                .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF file layout overflow"))?;
         }
     }
     let sym_bytes = checked_table_bytes(symbols, ELF_SYM_SIZE as usize, limit)?;
     offset = align_up(offset, 8)?
         .checked_add(sym_bytes as u64)
-        .ok_or("ELF file layout overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF file layout overflow"))?;
     for name in [".symtab", ".strtab", ".shstrtab"] {
         shstr_size = checked_name_end(shstr_size, name.len())?;
     }
     offset = offset
         .checked_add(str_size as u64)
         .and_then(|n| n.checked_add(shstr_size as u64))
-        .ok_or("ELF file layout overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF file layout overflow"))?;
     let headers = checked_table_bytes(usize::from(section_count), ELF_SHDR_SIZE as usize, limit)?;
     let total = align_up(offset, 8)?
         .checked_add(headers as u64)
-        .ok_or("ELF header layout overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF header layout overflow"))?;
     checked_output_size(total, limit)?;
     // Also check host addressability of proportional metadata before allocation.
     for (count, stride) in [
@@ -610,62 +658,79 @@ fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), String> {
     Ok(())
 }
 
-fn align_up(value: u64, align: u64) -> Result<u64, String> {
+fn align_up(value: u64, align: u64) -> Result<u64, ObjectError> {
     if !align.is_power_of_two() {
-        return Err("ELF alignment must be a power of two".into());
+        return Err(write_error(
+            ErrorKind::InvalidAlignment,
+            "ELF alignment must be a power of two",
+        ));
     }
     value
         .checked_add(value.wrapping_neg() & (align - 1))
-        .ok_or_else(|| "ELF alignment overflow".into())
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF alignment overflow"))
 }
 
-fn checked_u32(value: usize, field: &str) -> Result<u32, String> {
-    u32::try_from(value).map_err(|_| format!("ELF {field} exceeds 32-bit range"))
+fn checked_u32(value: usize, field: &str) -> Result<u32, ObjectError> {
+    u32::try_from(value).map_err(|_| {
+        write_error(
+            ErrorKind::Overflow,
+            format!("ELF {field} exceeds 32-bit range"),
+        )
+    })
 }
 
-fn checked_section_count(input: usize, relocation_sections: usize) -> Result<u16, String> {
+fn checked_section_count(input: usize, relocation_sections: usize) -> Result<u16, ObjectError> {
     let count = input
         .checked_add(relocation_sections)
         .and_then(|n| n.checked_add(4))
-        .ok_or("ELF section count overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF section count overflow"))?;
     // ELF reserves indices >= SHN_LORESERVE. Extended numbering is not supported.
     if count >= 0xff00 {
-        return Err("ELF extended section numbering is not supported".into());
+        return Err(write_error(
+            ErrorKind::Unsupported,
+            "ELF extended section numbering is not supported",
+        ));
     }
     Ok(count as u16)
 }
 
-fn checked_output_size(size: u64, limit: u64) -> Result<usize, String> {
+fn checked_output_size(size: u64, limit: u64) -> Result<usize, ObjectError> {
     if size > limit {
-        return Err("ELF output exceeds configured size limit".into());
+        return Err(output_limit());
     }
-    let size = usize::try_from(size).map_err(|_| "ELF output exceeds host capacity")?;
+    let size = usize::try_from(size)
+        .map_err(|_| write_error(ErrorKind::Overflow, "ELF output exceeds host capacity"))?;
     if size > isize::MAX as usize {
-        return Err("ELF output exceeds host capacity".into());
+        return Err(write_error(
+            ErrorKind::Overflow,
+            "ELF output exceeds host capacity",
+        ));
     }
     Ok(size)
 }
 
-fn checked_table_bytes(count: usize, stride: usize, limit: u64) -> Result<usize, String> {
-    let size = count.checked_mul(stride).ok_or("ELF table size overflow")?;
+fn checked_table_bytes(count: usize, stride: usize, limit: u64) -> Result<usize, ObjectError> {
+    let size = count
+        .checked_mul(stride)
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF table size overflow"))?;
     checked_output_size(size as u64, limit)
 }
 
-fn checked_name_end(current: usize, name_len: usize) -> Result<usize, String> {
+fn checked_name_end(current: usize, name_len: usize) -> Result<usize, ObjectError> {
     let end = current
         .checked_add(name_len)
         .and_then(|n| n.checked_add(1))
-        .ok_or("ELF string table overflow")?;
+        .ok_or_else(|| write_error(ErrorKind::Overflow, "ELF string table overflow"))?;
     checked_u32(end, "string table size")?;
     Ok(end)
 }
 
-fn push_name(table: &mut Vec<u8>, name: &str) -> Result<u32, String> {
+fn push_name(table: &mut Vec<u8>, name: &str) -> Result<u32, ObjectError> {
     let end = checked_name_end(table.len(), name.len())?;
     let index = checked_u32(table.len(), "string offset")?;
     table
         .try_reserve(end - table.len())
-        .map_err(|_| "ELF string allocation failed")?;
+        .map_err(|_| write_error(ErrorKind::HostAllocation, "ELF string allocation failed"))?;
     table.extend_from_slice(name.as_bytes());
     table.push(0);
     Ok(index)

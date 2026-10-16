@@ -325,3 +325,5 @@ _start:
         }
     }
 }
+
+mod diagnostic;
