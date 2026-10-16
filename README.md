@@ -650,6 +650,13 @@ cargo test -p whale --locked --test symbol_metadata readelf_fixture_confirms_sym
 
 The checked-in fixture is [symbol-metadata.asm](tests/fixtures/symbol-metadata.asm).
 
+## Release packages
+
+Native Linux, macOS and Windows x64/ARM64 packaging, extracted-binary checks and
+exact checksum manifests are documented in [the release guide](tools/RELEASING.md).
+The manual workflow validates one tagged source commit across every package;
+draft creation is opt-in and runs only after all checks pass.
+
 ## Development
 
 | Path | Responsibility |

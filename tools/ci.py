@@ -7,11 +7,21 @@ import os
 from pathlib import Path
 import platform
 import re
+import shutil
 import signal
 import subprocess
 import sys
 import threading
 import time
+
+# Windows CRT exec creates a new PID and destroys its caller. Keep the owned
+# gate alive until the real child finishes so wait()/status still mean command
+# completion. The child inherits its Job membership and output handles.
+_WINDOWS_GATE = (
+    "import subprocess,sys; token=sys.stdin.buffer.read(1); sys.stdin.close(); "
+    "sys.exit(125) if token != b'1' else None; "
+    "sys.exit(subprocess.call(sys.argv[1:],stdin=subprocess.DEVNULL))"
+)
 
 
 def run(command, name, timeout, artifacts, max_bytes=8 * 1024 * 1024):
@@ -26,19 +36,46 @@ def run(command, name, timeout, artifacts, max_bytes=8 * 1024 * 1024):
     truncated = False
     errors = []
     code = 1
+    process = None
+    job = None
+    reader = None
+    stop_capture = threading.Event()
     with (artifacts / f"{name}.log").open("wb") as log:
         try:
+            launched = command
+            if os.name == "nt":
+                from ci_windows import Job
+                if not shutil.which(str(command[0])):
+                    raise FileNotFoundError(f"program not found: {command[0]}")
+                job = Job()
+                # Only this gate exists before Job assignment; no command can
+                # create descendants before the parent grants permission.
+                launched = [sys.executable, "-c", _WINDOWS_GATE, *command]
             process = subprocess.Popen(
-                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                launched, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.PIPE if job else subprocess.DEVNULL,
                 start_new_session=os.name != "nt",
             )
+            if job:
+                job.assign(process)
+                process.stdin.write(b"1")
+                process.stdin.close()
+            os.set_blocking(process.stdout.fileno(), False)
 
             def capture():
                 nonlocal truncated
                 remaining = max_bytes
                 decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
                 try:
-                    while chunk := process.stdout.read(8192):
+                    while True:
+                        try:
+                            chunk = os.read(process.stdout.fileno(), 8192)
+                        except BlockingIOError:
+                            if stop_capture.wait(0.01):
+                                break
+                            continue
+                        if not chunk:
+                            break
                         kept = chunk[:remaining]
                         log.write(kept)
                         # Decode for consoles that do not use UTF-8 (notably Windows).
@@ -51,36 +88,48 @@ def run(command, name, timeout, artifacts, max_bytes=8 * 1024 * 1024):
                 except Exception as error:
                     errors.append(str(error))
 
-            reader = threading.Thread(target=capture, daemon=True)
+            reader = threading.Thread(target=capture)
             reader.start()
             try:
-                code = process.wait(timeout=timeout)
+                code = process.wait(timeout=max(0.001, timeout - (time.monotonic() - started)))
             except subprocess.TimeoutExpired:
                 metadata["timed_out"] = True
-                if os.name == "nt":
-                    subprocess.run(
-                        [str(Path(os.environ["SystemRoot"]) / "System32/taskkill.exe"),
-                         "/PID", str(process.pid), "/T", "/F"],
-                        check=False, timeout=10, capture_output=True,
-                    )
-                else:
+                code = 124
+            reader.join(timeout=min(0.25, max(0, timeout - (time.monotonic() - started))))
+            if reader.is_alive():
+                errors.append("output pipe remained open after command termination")
+                code = code or 1
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(str(error))
+            code = code or 1
+        finally:
+            # Ownership outlives the direct child, including success followed by
+            # a descendant retaining stdout. Always finish tree and reader cleanup
+            # before closing their shared log. No PID-based tree discovery.
+            try:
+                if job:
+                    job.close()
+                elif process:
                     try:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
-                process.kill()
-                process.wait(timeout=10)
-                code = 124
-            reader.join(timeout=10)
-            if reader.is_alive():
-                errors.append("output pipe remained open after command termination")
-                code = code or 1
-            else:
+                if process:
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError) as error:
+                errors.append(f"process cleanup failed: {error}")
+            if reader:
+                reader.join(timeout=1)
+                stop_capture.set()
+                reader.join()
+            if process:
                 process.stdout.close()
+                if process.stdin and not process.stdin.closed:
+                    process.stdin.close()
             if errors:
                 code = code or 1
-        except (OSError, subprocess.SubprocessError) as error:
-            errors.append(str(error))
     metadata.update(
         exit_code=code, elapsed_seconds=round(time.monotonic() - started, 3),
         log_truncated=truncated, errors=errors,
