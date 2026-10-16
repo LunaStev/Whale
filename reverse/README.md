@@ -63,3 +63,24 @@ memory operands remain distinct. `relative_target(base)` uses checked arithmetic
 relocation overlays belong to the host and must precede target interpretation.
 No executable loading, source recovery, IR lifting or native Whale backend is
 implied by this crate. The archive is generated through Wave's LLVM bootstrap.
+
+## Images and listing
+
+`image::Image` borrows code bytes and distinguishes region-relative offsets,
+file offsets and virtual addresses. ET_REL uses the bounded object importer and
+retains symbolic RELA annotations. ET_EXEC uses checked ELF header access and
+executable PT_LOAD file ranges, including files without section tables. Memory-only
+BSS tails are never copied or decoded. Dynamic/PIE images are outside this subset.
+
+`whale reverse inspect file --json` works without the Wave archive. `whale disasm`
+requires the linked Wave core, emits typed facts as JSON or a human listing, and
+preserves unsupported/truncated bytes as data records. A linear listing does not
+establish reachability after an unknown encoding. Executable listing starts at
+its entry in that region; `--entry NAME|ADDRESS` selects a particular start.
+Raw bytes require `--raw --amd64 --base ADDRESS`. Input/output/record budgets are
+explicit; file output publishes atomically after complete success.
+
+Text rendering is canonical presentation, not a promise of identical reassembly
+for every valid x86 encoding. Original bytes and exact encoding fields remain
+available. Relocations suppress the placeholder numeric branch target and carry
+symbol, addend, kind and field location independently.

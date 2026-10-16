@@ -39,6 +39,7 @@ native compilation pipeline are still being developed.
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
 | Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
+| Reverse | ELF inspection plus opt-in Wave AMD64 disassembly and CFG/xrefs | Experimental |
 | Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
 
 The IR target selector accepts only `x86_64-whale-linux`; unknown targets fail
@@ -756,3 +757,25 @@ and 1 MiB of names; selection has 10 million work units and a 4096-object cap.
 Outputs publish atomically after validation and protect every input alias. Unix
 executables receive mode 0755 without copying setuid/setgid bits. The produced
 artifact targets Linux AMD64 regardless of the machine running Whale.
+
+## Wave reverse tools
+
+The reusable [reverse module](reverse/README.md) uses a Wave decoding/analysis core
+with Rust file/ELF/CLI adapters. The initial linked core supports Linux AMD64
+hosts and decodes AMD64 bytes; these are separate host and decoded-ISA contracts.
+Normal Cargo builds need no Wave compiler and retain ELF inspection; disassembly
+reports an explicit unavailable capability until the core is built and linked.
+
+```sh
+python3 tools/build_wave_reverse.py --wave-source /path/to/Wave --out-dir /tmp/whale-wave-reverse
+WHALE_WAVE_REVERSE_DIR=/tmp/whale-wave-reverse cargo build --locked --features wave-reverse
+whale disasm --amd64 app.o --json
+whale reverse inspect app --json
+```
+
+The explicit bootstrap uses pinned official Wave sources, matching standard
+library, Rust 1.89.0 and LLVM 21. It reads committed sources without modifying the
+Wave checkout; ordinary Cargo never downloads or bootstraps a compiler. See the
+module guide for byte, encoding, unsupported-instruction and build contracts.
+The supported decoding scope is integer/scalar-SSE AMD64 long mode, not complete
+x86 coverage or recovery of original source code.

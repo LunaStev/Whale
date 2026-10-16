@@ -10,3 +10,7 @@ wave = []
 
 [dev-dependencies]
 assembler = { path = "../assembler" }
+
+[dependencies]
+object = { path = "../object" }
+serde_json = "1"

@@ -23,6 +23,8 @@ pub fn run() {
         "object" => commands::object::run(args.collect()),
         "link" => commands::linker::run(args.collect()),
         "ir" => commands::ir::run(args.collect()),
+        "disasm" => commands::reverse::disasm(args.collect()),
+        "reverse" => commands::reverse::reverse(args.collect()),
         _ => {
             eprintln!("Unknown command: {}", cmd);
             print_help();
@@ -37,11 +39,15 @@ fn print_help() {
     println!("  whale object <input> -o <output>");
     println!("  whale link <input.o|input.a>... -o <executable> [--entry NAME]");
     println!("  whale ir <subcommand> [options]");
+    println!("  whale disasm [--amd64] <file.o|executable> [--json]");
+    println!("  whale reverse inspect|cfg|xrefs <file> [options]");
     println!("  whale --version | -V");
     println!();
     println!("Commands:");
     println!("  asm     Assemble AMD64 source into an ELF64 object");
     println!("  object  Wrap raw bytes in an AMD64 ELF64 object");
     println!("  link    Static Linux AMD64 executable linking");
+    println!("  disasm  AMD64 disassembly (requires the opt-in Wave reverse core)");
+    println!("  reverse ELF inspection and Wave CFG/xref analysis");
     println!("  ir      IR tools (verify/print/run; socket-cli enables AST lower)");
 }

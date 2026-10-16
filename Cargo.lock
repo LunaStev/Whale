@@ -133,6 +133,8 @@ name = "reverse"
 version = "0.1.0"
 dependencies = [
  "assembler",
+ "object",
+ "serde_json",
 ]
 
 [[package]]
@@ -240,6 +242,7 @@ dependencies = [
  "object",
  "reverse",
  "same-file",
+ "serde",
  "serde_json",
  "tempfile",
 ]
