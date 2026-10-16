@@ -17,6 +17,8 @@ pub struct Module {
     pub target: String,
     pub datalayout: DataLayout,
     pub globals: Vec<Global>,
+    /// Addressable storage is distinct from compile-time ConstRef declarations.
+    pub global_storage: Vec<crate::GlobalStorage>,
     pub functions: Vec<Function>,
     pub declarations: Vec<crate::FunctionDecl>,
 }
@@ -27,6 +29,7 @@ impl Module {
             target: target.into(),
             datalayout,
             globals: Vec::new(),
+            global_storage: Vec::new(),
             functions: Vec::new(),
             declarations: Vec::new(),
         }

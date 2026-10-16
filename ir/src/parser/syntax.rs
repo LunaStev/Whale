@@ -56,7 +56,8 @@ impl<'a> Parser<'a> {
             DuplicateFunction { name }
             | DuplicateGlobal { name }
             | InvalidGlobalInitializer { name, .. }
-            | InvalidGlobalAlignment { name, .. } => Some(name),
+            | InvalidGlobalAlignment { name, .. }
+            | GlobalStorage { name, .. } => Some(name),
             InvalidConstExpression { scope, .. } => Some(scope),
             _ => None,
         };
@@ -424,7 +425,7 @@ impl<'a> Parser<'a> {
         self.expect("{")?;
         self.expect("format_version")?;
         let version: u32 = self.number()?;
-        if version != 3 && version != 4 && version != IR_FORMAT_VERSION {
+        if version != 3 && version != 4 && version != 5 && version != IR_FORMAT_VERSION {
             return Err(self.previous_error("unsupported IR format version"));
         }
         self.format_version = version;
@@ -476,6 +477,63 @@ impl<'a> Parser<'a> {
                         init,
                         init_expr,
                         align,
+                    });
+                }
+                "storage" => {
+                    if self.format_version < 6 {
+                        return Err(
+                            self.previous_error("global storage requires typed IR format 6")
+                        );
+                    }
+                    let id = GlobalId(self.id("@g")?);
+                    let location = self.location();
+                    let name = self.string()?;
+                    self.locations.entry(name.clone()).or_insert(location);
+                    self.expect(":")?;
+                    let ty = self.ty(0)?;
+                    self.expect("=")?;
+                    let init = match self.word()? {
+                        "uninitialized" => GlobalStorageInit::Uninitialized,
+                        "value" => {
+                            let annotation = self.ty(0)?;
+                            self.equal_type(&ty, &annotation)?;
+                            GlobalStorageInit::Value(self.literal(&ty)?)
+                        }
+                        _ => {
+                            return Err(self
+                                .previous_error("expected value or uninitialized global storage"))
+                        }
+                    };
+                    let align = self.align()?;
+                    self.comma()?;
+                    self.expect("access")?;
+                    let readonly = match self.word()? {
+                        "readonly" => true,
+                        "readwrite" => false,
+                        _ => return Err(self.previous_error("expected readonly or readwrite")),
+                    };
+                    self.comma()?;
+                    self.expect("linkage")?;
+                    let linkage = match self.word()? {
+                        "internal" => Linkage::Internal,
+                        "external" => Linkage::External,
+                        _ => return Err(self.previous_error("unknown linkage")),
+                    };
+                    let link_name = if self.eat(",") {
+                        self.expect("link_name")?;
+                        Some(self.string()?)
+                    } else {
+                        None
+                    };
+                    module.global_storage.push(GlobalStorage {
+                        id,
+                        name,
+                        ty,
+                        init,
+                        readonly,
+                        align,
+                        linkage,
+                        link_name,
                     });
                 }
                 "declare" => {

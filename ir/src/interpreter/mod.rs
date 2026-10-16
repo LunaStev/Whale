@@ -110,6 +110,16 @@ pub enum CallResource {
 pub enum InterpreterError {
     Verification(Box<VerifyError>),
     UnknownFunction(FunctionId),
+    UnsupportedGlobal(crate::GlobalId),
+    GlobalMemory {
+        global: crate::GlobalId,
+        reason: MemoryTrap,
+    },
+    GlobalMemoryLimit {
+        global: crate::GlobalId,
+        resource: MemoryResource,
+        limit: u64,
+    },
     UnsupportedSignature(FunctionId),
     ArgumentCount {
         expected: usize,
@@ -143,6 +153,9 @@ impl fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Verification(e) => write!(f, "IR verification failed: {e:?}"),
+            Self::UnsupportedGlobal(id) => write!(f, "unsupported interpreter global storage @g{}", id.0),
+            Self::GlobalMemory { global, reason } => write!(f, "global storage @g{}: {reason}", global.0),
+            Self::GlobalMemoryLimit { global, resource, limit } => write!(f, "global storage @g{} memory {resource:?} limit {limit}", global.0),
             Self::UnknownFunction(id) => write!(f, "no body for function @f{}", id.0),
             Self::UnsupportedSignature(id) => write!(f, "unsupported interpreter signature for @f{} (requires Whale convention and supported integer/bool/pointer parameters and scalar/pointer or void return)", id.0),
             Self::ArgumentCount { expected, got } => write!(f, "expected {expected} arguments, got {got}"),
@@ -350,9 +363,16 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | Load { dst, .. }
         | Gep { dst, .. }
         | NullFunction { dst, .. }
-        | FunctionAddr { dst, .. } => Some(*dst),
+        | FunctionAddr { dst, .. }
+        | GlobalAddr { dst, .. }
+        | PtrDiff { dst, .. } => Some(*dst),
         Call { dst, .. } => *dst,
-        Uninit { .. } | Store { .. } | Memcpy { .. } | Memset { .. } | TrapIf { .. } => None,
+        LifetimeEnd { .. }
+        | Uninit { .. }
+        | Store { .. }
+        | Memcpy { .. }
+        | Memset { .. }
+        | TrapIf { .. } => None,
     }
 }
 fn supported(inst: &Instruction) -> Result<(), &'static str> {
@@ -391,7 +411,12 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
             op: CastOp::IntToPtr | CastOp::PtrToInt,
             ..
         } => return Ok(()),
-        TrapIf { .. } | Memcpy { .. } | Memset { .. } => return Ok(()),
+        GlobalAddr { .. }
+        | LifetimeEnd { .. }
+        | PtrDiff { .. }
+        | TrapIf { .. }
+        | Memcpy { .. }
+        | Memset { .. } => return Ok(()),
         Undef { .. } => "undef",
         ConstDecl { .. } | Const { .. } => "non-integer constant",
         Mov { .. } | Phi { .. } | Select { .. } | Extract { .. } => "non-scalar value",
@@ -467,6 +492,26 @@ fn gep_plan(
         }
     }
     plan
+}
+fn pointer_compare(
+    memory: &memory::Memory,
+    pred: &ICmpPred,
+    lhs: memory::Pointer,
+    rhs: memory::Pointer,
+) -> Result<bool, memory::Fault> {
+    use ICmpPred::*;
+    if matches!(pred, Eq | Ne) {
+        let equal = memory.equal(lhs, rhs)?;
+        return Ok(if *pred == Eq { equal } else { !equal });
+    }
+    let ordering = memory.compare_order(lhs, rhs)?;
+    Ok(match pred {
+        Ult | Slt => ordering.is_lt(),
+        Ule | Sle => ordering.is_le(),
+        Ugt | Sgt => ordering.is_gt(),
+        Uge | Sge => ordering.is_ge(),
+        _ => unreachable!(),
+    })
 }
 fn cmp_pred(op: CmpOp) -> ICmpPred {
     use CmpOp::*;
@@ -893,7 +938,51 @@ fn run<'module>(
             },
         );
     }
+    // Validate all global storage before allocating or executing any instruction.
+    for global in &module.global_storage {
+        if !call_value_type(&global.ty) {
+            return Err(InterpreterError::UnsupportedGlobal(global.id));
+        }
+    }
     let mut memory = memory::Memory::new(options.memory_limits);
+    let mut global_pointers = HashMap::new();
+    for global in &module.global_storage {
+        let failure = |fault| match fault {
+            memory::Fault::Trap(reason) => InterpreterError::GlobalMemory {
+                global: global.id,
+                reason,
+            },
+            memory::Fault::Limit { resource, limit } => InterpreterError::GlobalMemoryLimit {
+                global: global.id,
+                resource,
+                limit,
+            },
+        };
+        let layout = layout_of_with_limit(
+            &global.ty,
+            Target::X86_64WhaleLinux,
+            options.ir_limits.max_type_depth,
+        )
+        .expect("verified scalar layout");
+        let pointer = memory
+            .allocate_global(layout.size, layout.align, global.align)
+            .map_err(failure)?;
+        if let crate::GlobalStorageInit::Value(value) = &global.init {
+            memory
+                .store(
+                    pointer,
+                    &global.ty,
+                    &Value::Scalar(value.clone()),
+                    global.align,
+                )
+                .map_err(failure)?;
+        }
+        let pointer = memory
+            .seal_global(pointer, global.readonly)
+            .map_err(failure)?;
+        global_pointers.insert(global.id, pointer);
+    }
+    let entry_allocation_start = memory.allocation_count();
     let entry_site = ExecutionSite {
         function,
         block: entry_fun.entry,
@@ -931,7 +1020,7 @@ fn run<'module>(
         current: entry_fun.entry,
         predecessor: None,
         instruction: 0,
-        allocation_start: 0,
+        allocation_start: entry_allocation_start,
         return_destination: None,
     }];
     let mut frames_created = 1u64;
@@ -1003,6 +1092,18 @@ fn run<'module>(
             let get = |id: &ValueId| &values[id];
             let scalar = |id: &ValueId| get(id).scalar();
             let result = match inst {
+                Instruction::GlobalAddr { global, .. } => Value::Pointer(global_pointers[global]),
+                Instruction::LifetimeEnd { ptr } => {
+                    memory
+                        .retire_stack(get(ptr).pointer(), frame.allocation_start)
+                        .map_err(|e| memory_failure(e, at, steps))?;
+                    continue;
+                }
+                Instruction::PtrDiff { lhs, rhs, .. } => Value::Scalar(ConstValue::I(
+                    memory
+                        .difference(get(lhs).pointer(), get(rhs).pointer())
+                        .map_err(|e| memory_failure(e, at, steps))?,
+                )),
                 Instruction::NullFunction { .. } => Value::FunctionPointer(FunctionPointer {
                     signature: prepared[&function].signatures[&(current, index)].clone(),
                     target: FunctionTarget::Null,
@@ -1122,14 +1223,13 @@ fn run<'module>(
                     op, ty, lhs, rhs, ..
                 } => {
                     let result = if matches!(ty, Type::Ptr(_)) {
-                        let equal = memory
-                            .equal(get(lhs).pointer(), get(rhs).pointer())
-                            .map_err(|e| memory_failure(e, at, steps))?;
-                        if *op == CmpOp::Eq {
-                            equal
-                        } else {
-                            !equal
-                        }
+                        pointer_compare(
+                            &memory,
+                            &cmp_pred(*op),
+                            get(lhs).pointer(),
+                            get(rhs).pointer(),
+                        )
+                        .map_err(|e| memory_failure(e, at, steps))?
                     } else {
                         integer::compare(&cmp_pred(*op), ty, scalar(lhs), scalar(rhs))
                     };
@@ -1139,14 +1239,8 @@ fn run<'module>(
                     pred, ty, lhs, rhs, ..
                 } => {
                     let result = if matches!(ty, Type::Ptr(_)) {
-                        let equal = memory
-                            .equal(get(lhs).pointer(), get(rhs).pointer())
-                            .map_err(|e| memory_failure(e, at, steps))?;
-                        if *pred == ICmpPred::Eq {
-                            equal
-                        } else {
-                            !equal
-                        }
+                        pointer_compare(&memory, pred, get(lhs).pointer(), get(rhs).pointer())
+                            .map_err(|e| memory_failure(e, at, steps))?
                     } else {
                         integer::compare(pred, ty, scalar(lhs), scalar(rhs))
                     };

@@ -11,6 +11,8 @@ pub enum BuilderError {
     UnknownBlock(BlockId),
     UnknownParameter { index: usize, count: usize },
     UnknownValue(ValueId),
+    UnknownGlobal(crate::GlobalId),
+    InvalidPointerOperands,
     TerminatedBlock(BlockId),
     PhiAfterInstruction(BlockId),
 }
@@ -22,6 +24,8 @@ impl std::fmt::Display for BuilderError {
                 write!(f, "parameter {index} is outside 0..{count}")
             }
             Self::UnknownValue(id) => write!(f, "unknown builder value {id:?}"),
+            Self::UnknownGlobal(id) => write!(f, "unknown addressable global {id:?}"),
+            Self::InvalidPointerOperands => f.write_str("matching data-pointer operands required"),
             Self::TerminatedBlock(id) => write!(f, "builder block {id:?} is already terminated"),
             Self::PhiAfterInstruction(id) => {
                 write!(f, "phi must precede other instructions in {id:?}")
@@ -39,6 +43,47 @@ pub struct ModuleBuilder {
 }
 
 impl<'a> FunctionBuilder<'a> {
+    pub fn try_global_addr(&mut self, global: crate::GlobalId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        let ty = self
+            .mb
+            .module
+            .global_storage
+            .iter()
+            .find(|g| g.id == global)
+            .ok_or(BuilderError::UnknownGlobal(global))?
+            .ty
+            .clone();
+        let dst = self.define_value(Type::ptr_to(ty.clone()));
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::GlobalAddr { dst, global, ty });
+        Ok(dst)
+    }
+    pub fn try_lifetime_end(&mut self, ptr: ValueId) -> Result<(), BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[ptr])?;
+        if !matches!(self.func.value_type(ptr), Some(Type::Ptr(_))) {
+            return Err(BuilderError::InvalidPointerOperands);
+        }
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::LifetimeEnd { ptr });
+        Ok(())
+    }
+    pub fn try_ptrdiff(&mut self, lhs: ValueId, rhs: ValueId) -> Result<ValueId, BuilderError> {
+        self.ensure_insertable()?;
+        self.ensure_values(&[lhs, rhs])?;
+        let ty = self.func.value_type(lhs).unwrap();
+        if !matches!(ty, Type::Ptr(_)) || self.func.value_type(rhs) != Some(ty) {
+            return Err(BuilderError::InvalidPointerOperands);
+        }
+        let dst = self.define_value(Type::I128);
+        self.cur_block_mut()
+            .instructions
+            .push(Instruction::PtrDiff { dst, lhs, rhs });
+        Ok(dst)
+    }
     pub fn current_block_id(&self) -> BlockId {
         self.insert_block
     }
@@ -184,6 +229,47 @@ impl ModuleBuilder {
         id
     }
 
+    /// Add initialized or explicitly uninitialized addressable scalar storage.
+    /// The shared global namespace and explicit external names are checked atomically.
+    pub fn try_add_global_storage(
+        &mut self,
+        mut storage: crate::GlobalStorage,
+    ) -> Result<crate::GlobalId, crate::GlobalStorageError> {
+        if let Err(error) = storage.validate_with_limits(crate::IrLimits::default()) {
+            crate::limits::discard_type(storage.ty);
+            return Err(error);
+        }
+        if self.module.globals.iter().any(|g| g.name == storage.name)
+            || self
+                .module
+                .global_storage
+                .iter()
+                .any(|g| g.name == storage.name)
+        {
+            return Err(crate::GlobalStorageError::DuplicateName);
+        }
+        if storage.link_name.as_ref().is_some_and(|link| {
+            self.module
+                .declarations
+                .iter()
+                .any(|d| d.link_name.as_ref() == Some(link))
+                || self
+                    .module
+                    .global_storage
+                    .iter()
+                    .any(|g| g.link_name.as_ref() == Some(link))
+        }) {
+            return Err(crate::GlobalStorageError::LinkNameCollision);
+        }
+        let id = crate::GlobalId(self.next_global);
+        self.next_global = self
+            .next_global
+            .checked_add(1)
+            .ok_or(crate::GlobalStorageError::DuplicateIdentity)?;
+        storage.id = id;
+        self.module.global_storage.push(storage);
+        Ok(id)
+    }
     pub fn declare_function(
         &mut self,
         name: impl Into<String>,

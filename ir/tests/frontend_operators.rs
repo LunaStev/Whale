@@ -617,7 +617,7 @@ fn new_ast_and_constant_syntax_requires_its_version_and_old_versions_still_read(
     assert!(text.contains("bit_xor(u8 5, u8 3)"));
     for old in [3, 4] {
         assert!(
-            parse_module(&text.replace("format_version 5", &format!("format_version {old}")))
+            parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
                 .unwrap_err()
                 .to_string()
                 .contains("require typed IR format 5")
@@ -628,7 +628,7 @@ fn new_ast_and_constant_syntax_requires_its_version_and_old_versions_still_read(
     let text = print_module(&lower(&program(int(8, false, 1), ty(8, false), false)).unwrap());
     for old in [3, 4] {
         canonical(
-            &parse_module(&text.replace("format_version 5", &format!("format_version {old}")))
+            &parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
                 .unwrap(),
         );
     }
@@ -693,7 +693,7 @@ fn new_constant_trees_stay_visible_at_o0_and_all_new_forms_are_version_gated() {
     assert!(text.contains("bit_not(u8 1)"));
     for old in [3, 4] {
         assert!(
-            parse_module(&text.replace("format_version 5", &format!("format_version {old}")))
+            parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
                 .unwrap_err()
                 .to_string()
                 .contains("require typed IR format 5")

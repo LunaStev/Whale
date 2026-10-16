@@ -41,6 +41,37 @@ pub fn print_module(m: &Module) -> String {
         out.push('\n');
     }
 
+    for g in &m.global_storage {
+        out.push_str(&format!(
+            "  storage @g{} \"{}\": {} = ",
+            g.id.0,
+            escape(&g.name),
+            g.ty
+        ));
+        match &g.init {
+            crate::GlobalStorageInit::Value(value) => {
+                out.push_str(&format!("value {} {}", g.ty, fmt_const(value)))
+            }
+            crate::GlobalStorageInit::Uninitialized => out.push_str("uninitialized"),
+        }
+        out.push_str(&format!(
+            ", align {}, access {}, linkage {}",
+            g.align,
+            if g.readonly { "readonly" } else { "readwrite" },
+            if g.linkage == crate::Linkage::Internal {
+                "internal"
+            } else {
+                "external"
+            }
+        ));
+        if let Some(name) = &g.link_name {
+            out.push_str(&format!(", link_name \"{}\"", escape(name)));
+        }
+        out.push('\n');
+    }
+    if !m.global_storage.is_empty() {
+        out.push('\n');
+    }
     for d in &m.declarations {
         out.push_str(&format!(
             "  declare @f{} \"{}\": {}, linkage {}",
@@ -110,6 +141,9 @@ fn print_block(b: &BasicBlock) -> String {
 fn print_instr(i: &Instruction) -> String {
     use Instruction::*;
     match i {
+        GlobalAddr { dst, global, ty } => format!("{dst}: ptr<{ty}> = global_addr @g{}", global.0),
+        LifetimeEnd { ptr } => format!("lifetime_end {ptr}"),
+        PtrDiff { dst, lhs, rhs } => format!("{dst}: i128 = ptrdiff {lhs}, {rhs}"),
         ConstDecl {
             dst,
             name,

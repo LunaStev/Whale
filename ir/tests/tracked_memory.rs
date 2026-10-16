@@ -243,7 +243,7 @@ fn published_memory_fixtures_match_results_trap_sites_and_canonical_output() {
     let m = parse_module(source).unwrap();
     assert_eq!(
         print_module(&m),
-        source.replace("format_version 4", "format_version 5")
+        source.replace("format_version 4", "format_version 6")
     );
     assert_eq!(
         interpret(&m, FunctionId(0), &[]).unwrap().value,
@@ -266,7 +266,7 @@ fn published_memory_fixtures_match_results_trap_sites_and_canonical_output() {
     let m = parse_module(source).unwrap();
     assert_eq!(
         print_module(&m),
-        source.replace("format_version 4", "format_version 5")
+        source.replace("format_version 4", "format_version 6")
     );
     assert!(matches!(
         interpret(&m, FunctionId(0), &[]),
@@ -303,7 +303,7 @@ fn storage_overflow_undef_and_versioned_uninit_are_rejected_precisely() {
     );
     let m = parse_module(&s).unwrap();
     let printed = print_module(&m);
-    assert!(printed.contains("format_version 5"));
+    assert!(printed.contains("format_version 6"));
     assert_eq!(printed, print_module(&parse_module(&printed).unwrap()));
     assert!(format!(
         "{}",

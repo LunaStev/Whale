@@ -6,6 +6,7 @@ pub mod const_expr;
 mod constant;
 pub mod float;
 pub mod function;
+pub mod global_storage;
 pub mod instr;
 mod interpreter;
 pub mod layout;
@@ -29,9 +30,10 @@ pub use builder::*;
 pub use const_expr::*;
 pub use float::*;
 pub use function::*;
+pub use global_storage::*;
 
 /// Independently versioned printed typed IR and shared execution semantics.
-pub const IR_FORMAT_VERSION: u32 = 5;
+pub const IR_FORMAT_VERSION: u32 = 6;
 pub const SEMANTICS_VERSION: u32 = 1;
 pub use instr::*;
 pub use interpreter::*;

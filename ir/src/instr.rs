@@ -111,6 +111,24 @@ pub enum Callee {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Instruction {
+    /// Address of an addressable scalar global; `ty` is its pointee type.
+    GlobalAddr {
+        dst: ValueId,
+        global: crate::GlobalId,
+        ty: Type,
+    },
+    /// Retire a current-invocation stack allocation using its exact base pointer.
+    /// This is an observable effect, distinct from resetting initialization.
+    LifetimeEnd {
+        ptr: ValueId,
+    },
+    /// Signed byte-offset difference, lhs - rhs, returned as i128.
+    /// Operands must have the same data-pointer type and live allocation identity.
+    PtrDiff {
+        dst: ValueId,
+        lhs: ValueId,
+        rhs: ValueId,
+    },
     /// A named compile-time declaration retained at its original IR position.
     /// Its value is already evaluated; the expression is preserved for O0
     /// inspection and validation, never executed as runtime arithmetic.

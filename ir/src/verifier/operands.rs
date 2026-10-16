@@ -284,12 +284,31 @@ pub(super) fn verify_instruction(
         } => {
             let valid = match op {
                 BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem => is_float(ty),
-                BinOp::SDiv | BinOp::SRem => is_signed(ty),
-                BinOp::UDiv | BinOp::URem => is_unsigned(ty),
+                BinOp::SDiv | BinOp::SRem => is_signed(ty) || matches!(ty, Type::Ptr(_)),
+                BinOp::UDiv | BinOp::URem => is_unsigned(ty) || matches!(ty, Type::Ptr(_)),
                 _ => is_integer(ty),
             };
             verify_type_category(f, "binary operation", ty, valid)?;
             verify_operand(f, *lhs, ty)?;
+            verify_operand(f, *rhs, ty)?;
+        }
+        Instruction::LifetimeEnd { ptr } => {
+            let ty = f
+                .value_type(*ptr)
+                .ok_or_else(|| VerifyError::MissingValueType {
+                    func: f.name.clone(),
+                    value: *ptr,
+                })?;
+            verify_type_category(f, "lifetime_end", ty, matches!(ty, Type::Ptr(_)))?;
+        }
+        Instruction::PtrDiff { lhs, rhs, .. } => {
+            let ty = f
+                .value_type(*lhs)
+                .ok_or_else(|| VerifyError::MissingValueType {
+                    func: f.name.clone(),
+                    value: *lhs,
+                })?;
+            verify_type_category(f, "ptrdiff", ty, matches!(ty, Type::Ptr(_)))?;
             verify_operand(f, *rhs, ty)?;
         }
         Instruction::Not { ty, src, .. } => {
@@ -305,8 +324,12 @@ pub(super) fn verify_instruction(
         } => {
             let valid = match op {
                 CmpOp::Eq | CmpOp::Ne => supports_equality(ty),
-                CmpOp::SLt | CmpOp::SLe | CmpOp::SGt | CmpOp::SGe => is_signed(ty),
-                CmpOp::ULt | CmpOp::ULe | CmpOp::UGt | CmpOp::UGe => is_unsigned(ty),
+                CmpOp::SLt | CmpOp::SLe | CmpOp::SGt | CmpOp::SGe => {
+                    is_signed(ty) || matches!(ty, Type::Ptr(_))
+                }
+                CmpOp::ULt | CmpOp::ULe | CmpOp::UGt | CmpOp::UGe => {
+                    is_unsigned(ty) || matches!(ty, Type::Ptr(_))
+                }
                 _ => is_float(ty),
             };
             verify_type_category(f, "comparison", ty, valid)?;
@@ -318,8 +341,10 @@ pub(super) fn verify_instruction(
         } => {
             let valid = match pred {
                 ICmpPred::Eq | ICmpPred::Ne => supports_equality(ty),
-                ICmpPred::Slt | ICmpPred::Sle | ICmpPred::Sgt | ICmpPred::Sge => is_signed(ty),
-                _ => is_unsigned(ty),
+                ICmpPred::Slt | ICmpPred::Sle | ICmpPred::Sgt | ICmpPred::Sge => {
+                    is_signed(ty) || matches!(ty, Type::Ptr(_))
+                }
+                _ => is_unsigned(ty) || matches!(ty, Type::Ptr(_)),
             };
             verify_type_category(f, "integer comparison", ty, valid)?;
             verify_operand(f, *lhs, ty)?;

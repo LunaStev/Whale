@@ -1,0 +1,90 @@
+module {
+  format_version 6
+  semantics_version 1
+  target "x86_64-whale-linux"
+  datalayout { ptr=64, endian=little }
+
+  global @g90 "constant": u32 = const u32 3, align 4, init_expr u32 3
+  storage @g0 "counter": u32 = value u32 10, align 4, access readwrite, linkage internal
+  storage @g1 "answer": u32 = value u32 42, align 4, access readonly, linkage external, link_name "public_answer"
+  storage @g2 "uninitialized": u32 = uninitialized, align 4, access readwrite, linkage internal
+  storage @g3 "pointer": ptr<u32> = uninitialized, align 8, access readwrite, linkage internal
+
+  declare @f0 "increment": whale () -> u32, linkage internal
+  declare @f1 "twice": whale () -> u32, linkage internal
+  declare @f2 "counter_address": whale () -> ptr<u32>, linkage internal
+  declare @f3 "read_answer": whale () -> u32, linkage internal
+  declare @f4 "read_uninitialized": whale () -> u32, linkage internal
+  declare @f5 "write_readonly": whale () -> void, linkage internal
+  declare @f6 "expired_alias": whale () -> u32, linkage internal
+  declare @f7 "byte_difference": whale () -> i128, linkage internal
+
+  fn @f0 "increment"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = global_addr @g0
+    %v1: u32 = load u32, ptr<u32> %v0, align 4
+    %v2: u32 = const u32 1
+    %v3: u32 = add u32 %v1, %v2
+    store u32 %v3, ptr<u32> %v0, align 4
+    ret u32 %v3
+  }
+
+  fn @f1 "twice"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = call whale ptr<u32> @f2()
+    %v1: u32 = call whale u32 @f0()
+    %v2: u32 = call whale u32 @f0()
+    %v3: u32 = load u32, ptr<u32> %v0, align 4
+    ret u32 %v3
+  }
+
+  fn @f2 "counter_address"() -> ptr<u32>, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = global_addr @g0
+    ret ptr<u32> %v0
+  }
+
+  fn @f3 "read_answer"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = global_addr @g1
+    %v1: u32 = load u32, ptr<u32> %v0, align 4
+    ret u32 %v1
+  }
+
+  fn @f4 "read_uninitialized"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = global_addr @g2
+    %v1: u32 = load u32, ptr<u32> %v0, align 4
+    ret u32 %v1
+  }
+
+  fn @f5 "write_readonly"() -> void, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = global_addr @g1
+    %v1: u32 = const u32 0
+    store u32 %v1, ptr<u32> %v0, align 4
+    ret void
+  }
+
+  fn @f6 "expired_alias"() -> u32, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<u32> = alloca u32, align 4
+    %v1: ptr<ptr<u32>> = alloca ptr<u32>, align 8
+    store ptr<u32> %v0, ptr<ptr<u32>> %v1, align 8
+    lifetime_end %v0
+    %v2: ptr<u32> = load ptr<u32>, ptr<ptr<u32>> %v1, align 8
+    %v3: u32 = load u32, ptr<u32> %v2, align 4
+    ret u32 %v3
+  }
+
+  fn @f7 "byte_difference"() -> i128, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<array<u32, 4>> = alloca array<u32, 4>, align 4
+    %v1: u64 = const u64 0
+    %v2: u64 = const u64 4
+    %v3: ptr<u32> = gep %v0, %v1, %v1
+    %v4: ptr<u32> = gep %v0, %v1, %v2
+    %v5: i128 = ptrdiff %v4, %v3
+    ret i128 %v5
+  }
+}

@@ -41,6 +41,11 @@ impl AnalysisBudget {
 
 #[derive(Debug)]
 pub enum VerifyError {
+    GlobalStorage {
+        name: String,
+        global: crate::GlobalId,
+        reason: crate::GlobalStorageError,
+    },
     ResourceLimit(crate::LimitError),
     ForbiddenUndef {
         func: String,
@@ -277,6 +282,41 @@ pub fn verify_module_with_stats(
             });
         }
     }
+    let mut global_ids: HashSet<_> = m.globals.iter().map(|g| g.id).collect();
+    let mut links: HashSet<_> = m
+        .declarations
+        .iter()
+        .filter_map(|d| d.link_name.as_deref())
+        .collect();
+    let mut storage_types = std::collections::HashMap::new();
+    for g in &m.global_storage {
+        let error = |reason| VerifyError::GlobalStorage {
+            name: g.name.clone(),
+            global: g.id,
+            reason,
+        };
+        g.validate_with_limits(limits).map_err(error)?;
+        if !global_ids.insert(g.id) {
+            return Err(error(crate::GlobalStorageError::DuplicateIdentity));
+        }
+        if !globals.insert(&g.name) {
+            return Err(error(crate::GlobalStorageError::DuplicateName));
+        }
+        if g.link_name
+            .as_deref()
+            .is_some_and(|link| !links.insert(link))
+        {
+            return Err(error(crate::GlobalStorageError::LinkNameCollision));
+        }
+        crate::layout_of_with_limit(&g.ty, target, limits.max_type_depth).map_err(|reason| {
+            VerifyError::InvalidMemoryLayout {
+                func: g.name.clone(),
+                operation: "global storage",
+                reason,
+            }
+        })?;
+        storage_types.insert(g.id, &g.ty);
+    }
     let constant_globals = constants::verify_globals(m, limits)?;
     let mut functions = HashSet::new();
     for f in &indexed {
@@ -491,6 +531,22 @@ pub fn verify_module_with_stats(
         // misreported as a consumer's operand mismatch.
         for block in &f.blocks {
             for instruction in &block.instructions {
+                if let Instruction::GlobalAddr { global, ty, .. } = instruction {
+                    let reason = match storage_types.get(global) {
+                        None => Some(crate::GlobalStorageError::UnknownGlobal),
+                        Some(declared) if *declared != ty => {
+                            Some(crate::GlobalStorageError::AddressTypeMismatch)
+                        }
+                        _ => None,
+                    };
+                    if let Some(reason) = reason {
+                        return Err(VerifyError::GlobalStorage {
+                            name: f.name.clone(),
+                            global: *global,
+                            reason,
+                        });
+                    }
+                }
                 calls::verify_instruction(m, f, instruction, limits)?;
                 operands::verify_instruction(f, instruction)?;
             }
@@ -586,9 +642,13 @@ fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
             Some((*dst, dst_ty.clone()))
         }
         Checked { dst, ty, .. } => Some((*dst, Type::Tuple(vec![ty.clone(), Type::Bool]))),
-        Alloca { dst, ty, .. } => Some((*dst, Type::ptr_to(ty.clone()))),
+        Alloca { dst, ty, .. } | GlobalAddr { dst, ty, .. } => {
+            Some((*dst, Type::ptr_to(ty.clone())))
+        }
+        PtrDiff { dst, .. } => Some((*dst, Type::I128)),
 
-        Uninit { .. }
+        LifetimeEnd { .. }
+        | Uninit { .. }
         | Store { .. }
         | Memcpy { .. }
         | Memset { .. }
@@ -630,11 +690,15 @@ fn instr_uses(ins: &Instruction) -> Vec<ValueId> {
                 crate::ConstRef::Global(_) => None,
             })
             .collect(),
-        Const { .. } | Undef { .. } | NullFunction { .. } | FunctionAddr { .. } => vec![],
+        GlobalAddr { .. }
+        | Const { .. }
+        | Undef { .. }
+        | NullFunction { .. }
+        | FunctionAddr { .. } => vec![],
 
         Mov { src, .. } => vec![*src],
 
-        Bin { lhs, rhs, .. } => vec![*lhs, *rhs],
+        Bin { lhs, rhs, .. } | PtrDiff { lhs, rhs, .. } => vec![*lhs, *rhs],
         Not { src, .. } => vec![*src],
 
         Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
@@ -657,7 +721,7 @@ fn instr_uses(ins: &Instruction) -> Vec<ValueId> {
         Checked { lhs, rhs, .. } => vec![*lhs, *rhs],
 
         Alloca { .. } => vec![],
-        Load { ptr, .. } | Uninit { ptr, .. } => vec![*ptr],
+        Load { ptr, .. } | Uninit { ptr, .. } | LifetimeEnd { ptr } => vec![*ptr],
         Store { value, ptr, .. } => vec![*value, *ptr],
 
         Gep {

@@ -16,7 +16,7 @@ calls; the cast case includes signed extension, integer-to-float and float
 truncation with memory loads/stores.
 
 `text_parser.rs` reads every retained output, verifies it and requires canonical
-print-parse-print equality, upgrading the header to format 5. These tests do not require a Wave checkout
+print-parse-print equality, upgrading the header to format 6. These tests do not require a Wave checkout
 or claim native execution. To regenerate with a matching Wave checkout and a
 Whale dependency containing this reader/printer, run from the Wave root:
 
@@ -26,7 +26,7 @@ cargo run -- --whale build /path/to/wave-casts.wave --emit=ir
 ```
 
 Legacy AST JSON format 2 remains readable; canonical AST JSON is format 3.
-Canonical typed text IR is format 5 (the reader also accepts 3/4). Readers reject
+Canonical typed text IR is format 6 (the reader also accepts 3/4/5). Readers reject
 unsupported versions; fixtures are migrated explicitly when the format changes.
 
 ## Scalar integer execution oracle
@@ -51,3 +51,10 @@ function still rejects calls, and the cast fixture still rejects float execution
 `tracked-memory-v4.wir` provides runnable pointer-copy and uninitialized-read
 cases. `initialization-loop-v4.wir` resets a hoisted slot on every declaration
 and traps on the second loop iteration instead of reading the first value.
+
+
+`runtime-storage-v6.wir` executes scalar global state shared across calls, explicit
+lifetime end and same-allocation pointer ordering/differences. Run `@f1` for u32 12,
+`@f3` for u32 42 and `@f7` for i128 16. `@f4` traps on uninitialized global storage,
+`@f5` on a read-only write and `@f6` on an expired stored alias. A fresh public
+interpreter invocation recreates globals; calls in that invocation share them.

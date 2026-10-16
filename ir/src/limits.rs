@@ -165,6 +165,10 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
         b.ty(&g.ty)?;
         b.expression(&g.init_expr)?;
     }
+    for g in &m.global_storage {
+        b.nodes(1)?;
+        b.ty(&g.ty)?;
+    }
     for d in &m.declarations {
         b.nodes(1)?;
         b.signature(&d.signature)?;
@@ -200,7 +204,8 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     | Alloca { ty, .. }
                     | Load { ty, .. }
                     | Store { ty, .. }
-                    | Uninit { ty, .. } => b.ty(ty)?,
+                    | Uninit { ty, .. }
+                    | GlobalAddr { ty, .. } => b.ty(ty)?,
                     Phi { ty, incomings, .. } => {
                         b.ty(ty)?;
                         b.nodes(incomings.len())?;

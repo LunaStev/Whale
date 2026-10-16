@@ -69,7 +69,7 @@ fn comparisons_check_operand_types_and_categories() {
         (CmpOp::FEq, Type::I32, false),
         (CmpOp::Eq, Type::F64, false),
         (CmpOp::SLt, Type::Bool, false),
-        (CmpOp::ULt, Type::ptr_to(Type::I32), false),
+        (CmpOp::ULt, Type::ptr_to(Type::I32), true),
     ] {
         let m = module(vec![ty.clone(), ty.clone()], Some(Type::Bool), |dst| {
             Instruction::Cmp {
