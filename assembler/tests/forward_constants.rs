@@ -39,7 +39,7 @@ fn unresolved_cyclic_conflicting_and_overflowing_constants_are_errors() {
         ("extern a\na equ 1", "conflict"),
         ("a:\na equ 1", "conflict"),
         ("a equ 1\na:", "conflict"),
-        ("a equ b + 1\nb equ 9223372036854775807", "overflow"),
+        ("a equ b + 1\nb equ 18446744073709551615", "overflow"),
     ] {
         let error = assemble(source, &AMD64).err().expect(source).to_string();
         assert!(error.contains(diagnostic), "{source}: {error}");

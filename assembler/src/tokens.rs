@@ -3,8 +3,8 @@ use crate::error::AsmError;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Identifier(String),
-    Number(i64),
-    StringLiteral(String),
+    Number(i128),
+    StringLiteral(Vec<u8>),
     Comma,
     Colon,
     LBracket,
@@ -172,7 +172,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                 pos += 1;
                 column += 1;
 
-                let mut s = String::new();
+                let mut s = Vec::new();
                 let mut closed = false;
                 // Multiline quoted strings preserve their source bytes. CRLF is
                 // one display line, as are lone CR and LF.
@@ -183,12 +183,66 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                         closed = true;
                         break;
                     }
-                    s.push(c);
+                    if c == '\\' {
+                        let escape_line = line;
+                        let escape_column = column;
+                        column += 1;
+                        let escaped = chars.next().ok_or_else(|| {
+                            lexer_err("Truncated escape", escape_line, escape_column)
+                        })?;
+                        pos += escaped.len_utf8();
+                        column += 1;
+                        let byte = match escaped {
+                            '"' => b'"',
+                            '\\' => b'\\',
+                            'n' => b'\n',
+                            'r' => b'\r',
+                            't' => b'\t',
+                            '0' => 0,
+                            'x' => {
+                                let mut value = 0;
+                                for _ in 0..2 {
+                                    let digit = chars.next().ok_or_else(|| {
+                                        lexer_err(
+                                            "Truncated byte escape; expected two hex digits",
+                                            escape_line,
+                                            escape_column,
+                                        )
+                                    })?;
+                                    pos += digit.len_utf8();
+                                    column += 1;
+                                    let digit = digit
+                                        .to_digit(16)
+                                        .filter(|_| digit.is_ascii_hexdigit())
+                                        .ok_or_else(|| {
+                                            lexer_err(
+                                                "Invalid byte escape; expected two hex digits",
+                                                escape_line,
+                                                escape_column,
+                                            )
+                                        })?;
+                                    value = value * 16 + digit as u8;
+                                }
+                                value
+                            }
+                            _ => {
+                                return Err(lexer_err(
+                                    "Unknown string escape",
+                                    escape_line,
+                                    escape_column,
+                                ))
+                            }
+                        };
+                        s.push(byte);
+                        continue;
+                    }
+                    let mut encoded = [0; 4];
+                    s.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
                     if c == '\r' || c == '\n' {
                         if c == '\r' && chars.peek() == Some(&'\n') {
                             chars.next();
                             pos += 1;
-                            s.push('\n');
+                            s.push(b'\n');
                         }
                         line += 1;
                         column = 1;
@@ -241,9 +295,16 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                             if n.is_empty() {
                                 return Err(lexer_err("Invalid hex number", start_line, start_col));
                             }
-                            let parsed = i64::from_str_radix(&n, 16).map_err(|_| {
+                            let parsed = i128::from_str_radix(&n, 16).map_err(|_| {
                                 lexer_err("Hex number out of range", start_line, start_col)
                             })?;
+                            if parsed > u64::MAX as i128 {
+                                return Err(lexer_err(
+                                    "Number exceeds unsigned 64-bit range",
+                                    start_line,
+                                    start_col,
+                                ));
+                            }
                             tokens.push(Token {
                                 kind: TokenKind::Number(parsed),
                                 position: start_pos,
@@ -274,9 +335,16 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                                     start_col,
                                 ));
                             }
-                            let parsed = i64::from_str_radix(&n, 2).map_err(|_| {
+                            let parsed = i128::from_str_radix(&n, 2).map_err(|_| {
                                 lexer_err("Binary number out of range", start_line, start_col)
                             })?;
+                            if parsed > u64::MAX as i128 {
+                                return Err(lexer_err(
+                                    "Number exceeds unsigned 64-bit range",
+                                    start_line,
+                                    start_col,
+                                ));
+                            }
                             tokens.push(Token {
                                 kind: TokenKind::Number(parsed),
                                 position: start_pos,
@@ -299,8 +367,15 @@ pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
                     }
                 }
                 let parsed = n
-                    .parse::<i64>()
+                    .parse::<i128>()
                     .map_err(|_| lexer_err("Decimal number out of range", start_line, start_col))?;
+                if parsed > u64::MAX as i128 {
+                    return Err(lexer_err(
+                        "Number exceeds unsigned 64-bit range",
+                        start_line,
+                        start_col,
+                    ));
+                }
                 tokens.push(Token {
                     kind: TokenKind::Number(parsed),
                     position: start_pos,

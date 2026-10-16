@@ -29,26 +29,28 @@ pub struct Directive {
 #[derive(Debug, Clone)]
 pub enum DirectiveValue {
     Expr(ExprValue),
-    StringLiteral(String),
+    StringLiteral(Vec<u8>),
 }
 
 #[derive(Debug, Clone)]
 pub enum ExprValue {
-    Number(i64),
-    Symbol { name: String, addend: i64 },
+    Number(i128),
+    Symbol { name: String, addend: i128 },
 }
 
 #[derive(Debug, Clone)]
 pub enum Operand {
     Register(String),
-    Immediate(i64),
+    Immediate(i128),
     Label(String),
-    SymbolExpr { name: String, addend: i64 },
+    SymbolExpr { name: String, addend: i128 },
     Memory(MemoryOperand),
 }
 
 #[derive(Debug, Clone)]
 pub struct MemoryOperand {
+    /// Explicit data width in bits; absence permits register inference.
+    pub width: Option<u8>,
     pub base: Option<String>,
     pub index: Option<String>,
     pub scale: u8,

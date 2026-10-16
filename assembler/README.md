@@ -73,3 +73,46 @@ and addressing expectations. The 13 accepted LEA fixtures were additionally
 checked with `objdump -D -b binary -m i386:x86-64 -M intel`; all disassembled to
 the intended destination and effective address. Neither objdump nor NASM is a
 normal test dependency.
+
+## Literals, byte strings and memory widths
+
+Decimal, hexadecimal (`0x`) and binary (`0b`) literals preserve every bit up to
+`18446744073709551615`. Unary minus supports `-9223372036854775808`. Constant
+expressions retain the signed-minimum through unsigned-maximum range; narrowing
+occurs at the selected register, directive, displacement or relocation boundary.
+For example `dq 0xffffffffffffffff` and `mov rax, 18446744073709551615` emit the
+complete 64-bit pattern. Expression intermediates use checked i128 arithmetic,
+so `0xffffffffffffffff + 1 - 1` and wide subtraction can cancel before the
+final numeric value is checked against that range. Equ symbol expressions
+check the final value after resolving their constant. ELF addends remain
+checked signed 64-bit values; address displacements keep their existing ranges.
+
+Quoted `db` strings encode ordinary source text as UTF-8. Supported escapes are
+`\"`, `\\`, `\n`, `\r`, `\t`, `\0`, and `\xHH` with exactly two hexadecimal
+digits. A byte escape inserts one raw byte, including `\xFF`; it is not converted
+to a Unicode character. Unknown or truncated escapes are errors. Literal
+backslashes must now be doubled: `db "C:\\tmp"`. Empty strings remain valid and
+physical multiline strings preserve their original newline bytes.
+
+Memory operands accept `byte`, `word`, `dword` or `qword` before `[address]`.
+Register/memory forms infer width when omitted and reject conflicting explicit
+widths. Memory immediates require the annotation:
+
+```asm
+mov byte [rax], 255
+mov word [r8], 4660
+mov dword [rsp+8], 4294967295
+mov qword [r13], -2147483648
+add qword [r12], 127
+mov rax, [rcx*4]
+mov rax, [r9*8+16]
+```
+
+Initial memory-immediate forms are MOV and ADD/SUB/AND/OR/XOR/CMP. Qword forms
+require a signed 32-bit immediate because hardware sign extends it; other forms
+accept their complete signed/unsigned immediate-width ranges. Arithmetic chooses
+an imm8 encoding only when its sign extension preserves the value. Symbol-only
+memory remains RIP-relative, and relocation addends include any trailing
+immediate bytes. A scaled first register denotes an index without a base;
+optional displacement and a subsequent base are supported, while invalid scales,
+RSP as index and excess registers are rejected.

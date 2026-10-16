@@ -17,7 +17,7 @@ struct EncodingLayout {
 
 // Resolve the one-symbol constant dependency graph before encoding any use.
 // Worklist traversal avoids recursion and repeated whole-source rescans.
-fn resolve_constants(ast: &AST) -> Result<HashMap<String, i64>, AsmError> {
+fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
     let mut definitions = Vec::new();
     let mut positions = HashMap::new();
     let mut reserved = HashSet::new();
@@ -116,7 +116,7 @@ pub fn encode_with_limits(
 fn encode_once(
     ast: &AST,
     jump_hint_layout: Option<&EncodingLayout>,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
     limits: &crate::AssemblyLimits,
 ) -> Result<(AssemblerOutput, EncodingLayout), AsmError> {
     let mut materialized = 0usize;
@@ -321,7 +321,7 @@ struct RegInfo {
 
 #[derive(Clone)]
 enum EvaluatedExpr {
-    Number(i64),
+    Number(i128),
     Symbol { name: String, addend: i64 },
 }
 
@@ -354,7 +354,7 @@ fn resolve_expr_symbols(
     }
 }
 
-fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> Result<EvaluatedExpr, AsmError> {
+fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i128>) -> Result<EvaluatedExpr, AsmError> {
     Ok(match expr {
         ExprValue::Number(n) => EvaluatedExpr::Number(*n),
         ExprValue::Symbol { name, addend } => {
@@ -363,19 +363,22 @@ fn eval_expr(expr: &ExprValue, consts: &HashMap<String, i64>) -> Result<Evaluate
             } else {
                 EvaluatedExpr::Symbol {
                     name: name.clone(),
-                    addend: *addend,
+                    addend: i64::try_from(*addend)
+                        .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                 }
             }
         }
     })
 }
 
-fn checked_expression_add(a: i64, b: i64, symbol: &str) -> Result<i64, AsmError> {
-    a.checked_add(b).ok_or_else(|| {
-        AsmError::EncodeError(format!(
-            "Signed expression overflow while resolving {symbol:?}"
-        ))
-    })
+fn checked_expression_add(a: i128, b: i128, symbol: &str) -> Result<i128, AsmError> {
+    a.checked_add(b)
+        .filter(|n| (i64::MIN as i128..=u64::MAX as i128).contains(n))
+        .ok_or_else(|| {
+            AsmError::EncodeError(format!(
+                "Signed expression overflow while resolving {symbol:?}"
+            ))
+        })
 }
 
 fn relative_addend(displacement: i64) -> Result<i64, AsmError> {
@@ -419,7 +422,7 @@ fn resolve_instruction_symbols(
 
 fn resolve_instruction_consts(
     ins: &Instruction,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<Instruction, AsmError> {
     let mut resolved_ops = Vec::with_capacity(ins.operands.len());
     for op in &ins.operands {
@@ -444,7 +447,11 @@ fn resolve_instruction_consts(
                 let mut mem = mem.clone();
                 if let Some(sym) = &mem.symbol {
                     if let Some(v) = consts.get(sym) {
-                        mem.disp = checked_expression_add(mem.disp, *v, sym)?;
+                        mem.disp =
+                            i64::try_from(checked_expression_add(*v, mem.disp as i128, sym)?)
+                                .map_err(|_| {
+                                    AsmError::EncodeError("Memory displacement overflow".into())
+                                })?;
                         mem.symbol = None;
                     }
                 }
@@ -586,6 +593,15 @@ fn emit_reg_reg(
     Ok(())
 }
 
+fn validate_memory_width(mem: &MemoryOperand, width: u8) -> Result<(), AsmError> {
+    if mem.width.is_some_and(|explicit| explicit != width) {
+        return Err(AsmError::EncodeError(
+            "Memory width conflicts with register-derived width".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn emit_reg_mem(
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
@@ -593,6 +609,7 @@ fn emit_reg_mem(
     reg: &RegInfo,
     mem: &MemoryOperand,
 ) -> Result<(), AsmError> {
+    validate_memory_width(mem, reg.width)?;
     emit_operand_size_prefix(bytes, reg.width);
 
     if let Some(sym) = &mem.symbol {
@@ -647,6 +664,7 @@ fn emit_mem_reg(
     mem: &MemoryOperand,
     reg: &RegInfo,
 ) -> Result<(), AsmError> {
+    validate_memory_width(mem, reg.width)?;
     emit_operand_size_prefix(bytes, reg.width);
 
     if let Some(sym) = &mem.symbol {
@@ -821,7 +839,7 @@ fn encode_instruction(
     }
 }
 
-fn symbol_operand(op: &Operand) -> Option<(String, i64)> {
+fn symbol_operand(op: &Operand) -> Option<(String, i128)> {
     match op {
         Operand::Label(name) => Some((name.clone(), 0)),
         Operand::SymbolExpr { name, addend } => Some((name.clone(), *addend)),
@@ -871,7 +889,7 @@ fn encode_mov(
                     bytes.extend_from_slice(&(*imm as i16).to_le_bytes());
                 }
                 32 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= u32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= u32::MAX as i128) {
                         return Err(AsmError::EncodeError("imm32 out of range".into()));
                     }
                     emit_rex(bytes, reg.width, false, false, reg.code >= 8, false, false)?;
@@ -881,7 +899,10 @@ fn encode_mov(
                 64 => {
                     emit_rex(bytes, reg.width, false, false, reg.code >= 8, false, false)?;
                     bytes.push(0xB8 + (reg.code & 7));
-                    bytes.extend_from_slice(&imm.to_le_bytes());
+                    if !(i64::MIN as i128..=u64::MAX as i128).contains(imm) {
+                        return Err(AsmError::EncodeError("imm64 out of range".into()));
+                    }
+                    bytes.extend_from_slice(&(*imm as u64).to_le_bytes());
                 }
                 _ => return Err(AsmError::EncodeError("Unsupported register width".into())),
             }
@@ -899,7 +920,8 @@ fn encode_mov(
                         offset: bytes.len(),
                         symbol: label,
                         kind: RelocKind::Absolute64,
-                        addend,
+                        addend: i64::try_from(addend)
+                            .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                     });
                     bytes.extend_from_slice(&0i64.to_le_bytes());
                 }
@@ -910,7 +932,8 @@ fn encode_mov(
                         offset: bytes.len(),
                         symbol: label,
                         kind: RelocKind::Absolute32,
-                        addend,
+                        addend: i64::try_from(addend)
+                            .map_err(|_| AsmError::EncodeError("Symbol addend overflow".into()))?,
                     });
                     bytes.extend_from_slice(&0u32.to_le_bytes());
                 }
@@ -944,6 +967,9 @@ fn encode_mov(
                 lookup_reg(src_name).ok_or(AsmError::EncodeError("Invalid register".into()))?;
             let opcode = if reg.width == 8 { 0x88 } else { 0x89 };
             emit_mem_reg(bytes, relocs, opcode, mem, &reg)
+        }
+        (Operand::Memory(mem), Operand::Immediate(imm)) => {
+            encode_memory_immediate(mem, *imm, None, bytes, relocs)
         }
         _ => Err(AsmError::EncodeError("Unsupported mov form".into())),
     }
@@ -1027,13 +1053,13 @@ fn encode_binop(
                     bytes.extend_from_slice(&(*imm as i16).to_le_bytes());
                 }
                 32 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= u32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= u32::MAX as i128) {
                         return Err(AsmError::EncodeError("imm32 out of range".into()));
                     }
                     bytes.extend_from_slice(&(*imm as u32).to_le_bytes());
                 }
                 64 => {
-                    if !(*imm >= i32::MIN as i64 && *imm <= i32::MAX as i64) {
+                    if !(*imm >= i32::MIN as i128 && *imm <= i32::MAX as i128) {
                         return Err(AsmError::EncodeError(
                             "imm32-sign-extended out of range for r64".into(),
                         ));
@@ -1070,11 +1096,89 @@ fn encode_binop(
             };
             emit_mem_reg(bytes, relocs, opcode, mem, &reg)
         }
+        (Operand::Memory(mem), Operand::Immediate(imm)) => {
+            encode_memory_immediate(mem, *imm, Some(imm_op_ext), bytes, relocs)
+        }
         _ => Err(AsmError::EncodeError(format!(
             "Unsupported {} form",
             ins.mnemonic
         ))),
     }
+}
+
+fn encode_memory_immediate(
+    mem: &MemoryOperand,
+    imm: i128,
+    operation: Option<u8>,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    let width = mem.width.ok_or_else(|| {
+        AsmError::EncodeError("Ambiguous memory immediate; specify byte/word/dword/qword".into())
+    })?;
+    let encoded_width = if width == 64 { 32 } else { width };
+    let valid = match width {
+        8 => (-128..=255).contains(&imm),
+        16 => (-32768..=65535).contains(&imm),
+        32 => (i32::MIN as i128..=u32::MAX as i128).contains(&imm),
+        64 => (i32::MIN as i128..=i32::MAX as i128).contains(&imm),
+        _ => false,
+    };
+    if !valid {
+        return Err(AsmError::EncodeError(
+            "Memory immediate out of range for selected width (qword requires signed imm32)".into(),
+        ));
+    }
+    let short = operation.is_some() && width != 8 && (-128..=127).contains(&imm);
+    let tail = if short { 1 } else { encoded_width / 8 };
+    let opcode = match operation {
+        None => {
+            if width == 8 {
+                0xc6
+            } else {
+                0xc7
+            }
+        }
+        Some(_) => {
+            if width == 8 {
+                0x80
+            } else if short {
+                0x83
+            } else {
+                0x81
+            }
+        }
+    };
+    emit_operand_size_prefix(bytes, width);
+    if let Some(symbol) = &mem.symbol {
+        if mem.base.is_some() || mem.index.is_some() {
+            return Err(AsmError::EncodeError(
+                "symbol + register memory form is not implemented yet".into(),
+            ));
+        }
+        emit_rex(bytes, width, false, false, false, false, false)?;
+        bytes.push(opcode);
+        bytes.push(ModRM::new(0, operation.unwrap_or(0), 5).encode());
+        relocs.push(Relocation {
+            offset: bytes.len(),
+            symbol: symbol.clone(),
+            kind: RelocKind::Relative32,
+            addend: relative_addend(mem.disp)?
+                .checked_sub(i64::from(tail))
+                .ok_or_else(|| {
+                    AsmError::EncodeError("Relative relocation addend overflow".into())
+                })?,
+        });
+        bytes.extend_from_slice(&[0; 4]);
+    } else {
+        let addr = encode_address(mem, 64)?;
+        emit_rex(bytes, width, false, addr.rex_x, addr.rex_b, false, false)?;
+        bytes.push(opcode);
+        bytes.push(ModRM::new(addr.mod_bits, operation.unwrap_or(0), addr.rm_bits).encode());
+        emit_addr_tail(bytes, &addr);
+    }
+    bytes.extend_from_slice(&(imm as u64).to_le_bytes()[..tail as usize]);
+    Ok(())
 }
 
 fn encode_imul(
@@ -1128,6 +1232,7 @@ fn encode_imul(
             Ok(())
         }
         Operand::Memory(mem) => {
+            validate_memory_width(mem, dst_reg.width)?;
             emit_operand_size_prefix(bytes, dst_reg.width);
             if let Some(sym) = &mem.symbol {
                 if mem.base.is_some() || mem.index.is_some() {
@@ -1310,8 +1415,8 @@ fn encode_imul_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), A
     let short = (-128..=127).contains(&imm);
     let valid = match dst.width {
         16 => (-32768..=65535).contains(&imm),
-        32 => (i32::MIN as i64..=u32::MAX as i64).contains(&imm),
-        64 => (i32::MIN as i64..=i32::MAX as i64).contains(&imm),
+        32 => (i32::MIN as i128..=u32::MAX as i128).contains(&imm),
+        64 => (i32::MIN as i128..=i32::MAX as i128).contains(&imm),
         _ => false,
     };
     if !valid {
@@ -1520,7 +1625,7 @@ fn encode_loop(
 
 fn eval_directive_expr(
     expr: &ExprValue,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<EvaluatedExpr, AsmError> {
     eval_expr(expr, consts)
 }
@@ -1547,13 +1652,16 @@ fn encode_data_expr(
                     bytes.extend_from_slice(&(n as i16).to_le_bytes());
                 }
                 4 => {
-                    if !(i32::MIN as i64..=u32::MAX as i64).contains(&n) {
+                    if !(i32::MIN as i128..=u32::MAX as i128).contains(&n) {
                         return Err(AsmError::EncodeError("dd value out of range".into()));
                     }
                     bytes.extend_from_slice(&(n as u32).to_le_bytes());
                 }
                 8 => {
-                    bytes.extend_from_slice(&n.to_le_bytes());
+                    if !(i64::MIN as i128..=u64::MAX as i128).contains(&n) {
+                        return Err(AsmError::EncodeError("dq value out of range".into()));
+                    }
+                    bytes.extend_from_slice(&(n as u64).to_le_bytes());
                 }
                 _ => return Err(AsmError::EncodeError("Unsupported data width".into())),
             }
@@ -1590,7 +1698,7 @@ fn encode_data_expr(
 fn reservation_size(
     unit: u64,
     values: &[DirectiveValue],
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<u64, AsmError> {
     if values.len() != 1 {
         return Err(AsmError::EncodeError(
@@ -1620,7 +1728,8 @@ fn reservation_size(
             "res* count must be non-negative".into(),
         ));
     }
-    (count as u64)
+    u64::try_from(count)
+        .map_err(|_| AsmError::EncodeError("res* size overflow".into()))?
         .checked_mul(unit)
         .ok_or_else(|| AsmError::EncodeError("res* size overflow".into()))
 }
@@ -1629,7 +1738,7 @@ fn reserve_bytes(
     bytes: &mut Vec<u8>,
     unit: u64,
     values: &[DirectiveValue],
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     let extra = usize::try_from(reservation_size(unit, values, consts)?)
         .map_err(|_| AsmError::EncodeError("res* size exceeds host capacity".into()))?;
@@ -1670,7 +1779,7 @@ fn reserve_output(
     Ok(())
 }
 
-fn directive_size(dir: &Directive, consts: &HashMap<String, i64>) -> Result<usize, AsmError> {
+fn directive_size(dir: &Directive, consts: &HashMap<String, i128>) -> Result<usize, AsmError> {
     if let Some(unit) = match dir.name.as_str() {
         "resb" => Some(1),
         "resw" => Some(2),
@@ -1712,7 +1821,7 @@ fn directive_size(dir: &Directive, consts: &HashMap<String, i64>) -> Result<usiz
 fn encode_bss_directive(
     dir: &Directive,
     section: &mut AsmSection,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     let extra = match dir.name.as_str() {
         "resb" => reservation_size(1, &dir.values, consts)?,
@@ -1723,7 +1832,7 @@ fn encode_bss_directive(
             let size = directive_size(dir, consts)?;
             for value in &dir.values {
                 let zero = match value {
-                    DirectiveValue::StringLiteral(s) => s.as_bytes().iter().all(|b| *b == 0),
+                    DirectiveValue::StringLiteral(s) => s.as_slice().iter().all(|b| *b == 0),
                     DirectiveValue::Expr(expr) => {
                         matches!(eval_directive_expr(expr, consts)?, EvaluatedExpr::Number(0))
                     }
@@ -1748,13 +1857,13 @@ fn encode_directive(
     dir: &Directive,
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
-    consts: &HashMap<String, i64>,
+    consts: &HashMap<String, i128>,
 ) -> Result<(), AsmError> {
     match dir.name.as_str() {
         "db" => {
             for v in &dir.values {
                 match v {
-                    DirectiveValue::StringLiteral(s) => bytes.extend_from_slice(s.as_bytes()),
+                    DirectiveValue::StringLiteral(s) => bytes.extend_from_slice(s.as_slice()),
                     DirectiveValue::Expr(expr) => {
                         let eval = eval_directive_expr(expr, consts)?;
                         encode_data_expr(eval, 1, bytes, relocs)?;
