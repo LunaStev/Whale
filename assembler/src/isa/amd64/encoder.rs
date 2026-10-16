@@ -917,6 +917,8 @@ fn encode_instruction(
                 ins.mnemonic
             )))
         }
+        "movss" | "movsd" | "addss" | "addsd" | "subss" | "subsd" | "mulss" | "mulsd" | "divss"
+        | "divsd" => encode_scalar_sse(ins, bytes, relocs),
         "mov" => encode_mov(ins, bytes, relocs),
         "movzx" | "movsx" | "movsxd" => encode_extension(ins, bytes, relocs),
         "adc" => encode_carry(ins, 0x10, 0x11, bytes),
@@ -1059,6 +1061,83 @@ fn symbol_operand(op: &Operand) -> Option<(String, i128)> {
         Operand::Label(name) => Some((name.clone(), 0)),
         Operand::SymbolExpr { name, addend } => Some((name.clone(), *addend)),
         _ => None,
+    }
+}
+
+fn xmm_operand(operand: &Operand) -> Result<u8, AsmError> {
+    if let Operand::Register(name) = operand {
+        if let Some(code) = xmm_register_code(name) {
+            return Ok(code);
+        }
+    }
+    Err(AsmError::EncodeError("Expected XMM0-XMM15 register".into()))
+}
+
+fn encode_scalar_sse(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 operands",
+            ins.mnemonic
+        )));
+    }
+    let single = ins.mnemonic.ends_with("ss");
+    let (prefix, width) = if single { (0xf3, 32) } else { (0xf2, 64) };
+    let move_instruction = matches!(ins.mnemonic.as_str(), "movss" | "movsd");
+    let opcode = match ins.mnemonic.as_str() {
+        "movss" | "movsd" => 0x10,
+        "addss" | "addsd" => 0x58,
+        "subss" | "subsd" => 0x5c,
+        "mulss" | "mulsd" => 0x59,
+        "divss" | "divsd" => 0x5e,
+        _ => unreachable!(),
+    };
+    // XMM registers are 128-bit registers. The scalar access width chooses the
+    // mandatory prefix, never REX.W or the integer operand-size prefix 66.
+    if let Operand::Memory(mem) = &ins.operands[0] {
+        if !move_instruction {
+            return Err(AsmError::EncodeError(
+                "Scalar SSE arithmetic destination must be XMM".into(),
+            ));
+        }
+        let code = xmm_operand(&ins.operands[1])?;
+        validate_memory_width(mem, width)?;
+        bytes.push(prefix);
+        let reg = RegInfo {
+            code,
+            width,
+            high8: false,
+            rex8: false,
+        };
+        return emit_memory_operation(bytes, relocs, &[0x0f, 0x11], &reg, mem, 0, 0);
+    }
+    let code = xmm_operand(&ins.operands[0])?;
+    match &ins.operands[1] {
+        Operand::Register(_) => {
+            let source = xmm_operand(&ins.operands[1])?;
+            bytes.push(prefix);
+            emit_rex(bytes, 0, code >= 8, false, source >= 8, false, false)?;
+            bytes.extend_from_slice(&[0x0f, opcode]);
+            bytes.push(ModRM::new(3, code, source).encode());
+            Ok(())
+        }
+        Operand::Memory(mem) => {
+            validate_memory_width(mem, width)?;
+            bytes.push(prefix);
+            let reg = RegInfo {
+                code,
+                width,
+                high8: false,
+                rex8: false,
+            };
+            emit_memory_operation(bytes, relocs, &[0x0f, opcode], &reg, mem, 0, 0)
+        }
+        _ => Err(AsmError::EncodeError(
+            "Scalar SSE source must be XMM or matching scalar memory".into(),
+        )),
     }
 }
 

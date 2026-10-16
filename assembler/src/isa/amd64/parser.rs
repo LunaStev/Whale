@@ -713,7 +713,7 @@ fn is_register(name: &str) -> bool {
             | "r13b"
             | "r14b"
             | "r15b"
-    )
+    ) || crate::isa::amd64::tables::xmm_register_code(name).is_some()
 }
 
 fn is_directive(name: &str) -> bool {

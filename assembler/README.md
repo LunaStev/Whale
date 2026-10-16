@@ -244,3 +244,31 @@ register addresses remain unchanged, and unqualified numeric-only addresses
 remain unsupported. LEA now shares these address forms, including symbolic
 RIP-relative and signed absolute addresses. MOV, supported memory ALU/IMUL,
 extensions, SETcc and indirect CALL/JMP use the same address/relocation path.
+
+## Legacy scalar SSE forms
+
+XMM0–XMM15 form a separate register class. The supported instructions operate
+on the low f32 (`ss`) or f64 (`sd`) scalar lane; this adds assembly encoding,
+not floating interpretation or a native IR backend.
+
+| Family | Forms | Encoding |
+| --- | --- | --- |
+| MOVSS / MOVSD | `xmm, xmm`, `xmm, memory`, `memory, xmm` | mandatory F3 / F2, `0F 10 /r` loads and register moves; `0F 11 /r` stores |
+| ADDSS / ADDSD | `xmm, xmm/memory` | F3 / F2, `0F 58 /r` |
+| SUBSS / SUBSD | `xmm, xmm/memory` | F3 / F2, `0F 5C /r` |
+| MULSS / MULSD | `xmm, xmm/memory` | F3 / F2, `0F 59 /r` |
+| DIVSS / DIVSD | `xmm, xmm/memory` | F3 / F2, `0F 5E /r` |
+
+The mandatory prefix precedes an optional REX prefix. REX.R/B extend XMM
+register operands; REX.X/B extend address registers. REX.W stays clear for
+these scalar SSE forms, including the f64 forms. Memory access width is inferred
+from the mnemonic, or an explicit `dword`/`qword` annotation must match it.
+Register/SIB, default symbol-relative, explicit rel and signed abs addresses
+share the existing checked memory/relocation rules.
+
+These are legacy scalar instructions: their architectural upper-lane and
+floating-environment behavior is not replaced by Whale IR semantics. GPR/XMM
+mixing, immediates, memory destinations for arithmetic, packed/vector and
+VEX/EVEX forms, MOVD/MOVQ and conversion instructions remain unsupported.
+Register recognition uses exact XMM spellings; names such as `xmm16` or
+`xmm_data` remain ordinary identifiers outside valid register operands.
