@@ -804,6 +804,18 @@ fn encode_instruction(
             )))
         }
         "mov" => encode_mov(ins, bytes, relocs),
+        "movzx" | "movsx" | "movsxd" => encode_extension(ins, bytes, relocs),
+        "adc" => encode_carry(ins, 0x10, 0x11, bytes),
+        "sbb" => encode_carry(ins, 0x18, 0x19, bytes),
+        mnemonic if prefixed_condition(mnemonic, "set").is_some() => encode_setcc(
+            ins,
+            prefixed_condition(mnemonic, "set").unwrap(),
+            bytes,
+            relocs,
+        ),
+        mnemonic if prefixed_condition(mnemonic, "cmov").is_some() => {
+            encode_cmovcc(ins, prefixed_condition(mnemonic, "cmov").unwrap(), bytes)
+        }
         "add" => encode_binop(ins, 0x00, 0x01, 0x02, 0x03, 0, bytes, relocs),
         "sub" => encode_binop(ins, 0x28, 0x29, 0x2A, 0x2B, 5, bytes, relocs),
         "and" => encode_binop(ins, 0x20, 0x21, 0x22, 0x23, 4, bytes, relocs),
@@ -832,8 +844,19 @@ fn encode_instruction(
             bytes.extend_from_slice(&[0x48, 0x99]);
             Ok(())
         }
+        "push" if matches!(ins.operands.first(), Some(Operand::Immediate(_))) => {
+            encode_push_immediate(ins, bytes)
+        }
         "push" => encode_push_pop(ins, 0x50, bytes),
         "pop" => encode_push_pop(ins, 0x58, bytes),
+        "jmp" | "call"
+            if matches!(
+                ins.operands.first(),
+                Some(Operand::Register(_) | Operand::Memory(_))
+            ) =>
+        {
+            encode_indirect_branch(ins, bytes, relocs)
+        }
         "jmp" => encode_jump(
             ins,
             JumpSpec {
@@ -1520,6 +1543,302 @@ fn encode_imul_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), A
         bytes.extend_from_slice(&(imm as u16).to_le_bytes());
     } else {
         bytes.extend_from_slice(&(imm as u32).to_le_bytes());
+    }
+    Ok(())
+}
+
+fn prefixed_condition(mnemonic: &str, prefix: &str) -> Option<u8> {
+    let suffix = mnemonic.strip_prefix(prefix)?;
+    CONDITION_CODES
+        .iter()
+        .find(|(name, _)| name.strip_prefix('j') == Some(suffix))
+        .map(|(_, code)| *code)
+}
+
+fn encode_carry(
+    ins: &Instruction,
+    byte_opcode: u8,
+    wide_opcode: u8,
+    bytes: &mut Vec<u8>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 register operands",
+            ins.mnemonic
+        )));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src = register_operand(&ins.operands[1])?;
+    if dst.width != src.width {
+        return Err(AsmError::EncodeError("Register width mismatch".into()));
+    }
+    emit_reg_reg(
+        bytes,
+        if dst.width == 8 {
+            byte_opcode
+        } else {
+            wide_opcode
+        },
+        &dst,
+        &src,
+    )
+}
+
+fn encode_setcc(
+    ins: &Instruction,
+    condition: u8,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError("setcc expects 1 byte operand".into()));
+    }
+    emit_group_operand(
+        &ins.operands[0],
+        8,
+        8,
+        &[0x0f, 0x90 + condition],
+        0,
+        bytes,
+        relocs,
+    )
+}
+
+fn encode_cmovcc(ins: &Instruction, condition: u8, bytes: &mut Vec<u8>) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(
+            "cmovcc expects 2 register operands".into(),
+        ));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src = register_operand(&ins.operands[1])?;
+    if dst.width != src.width || !matches!(dst.width, 16 | 32 | 64) {
+        return Err(AsmError::EncodeError(
+            "cmovcc requires matching r16/r32/r64 registers".into(),
+        ));
+    }
+    emit_operand_size_prefix(bytes, dst.width);
+    emit_rex(
+        bytes,
+        dst.width,
+        dst.code >= 8,
+        false,
+        src.code >= 8,
+        false,
+        false,
+    )?;
+    bytes.extend_from_slice(&[0x0f, 0x40 + condition]);
+    bytes.push(ModRM::new(3, dst.code, src.code).encode());
+    Ok(())
+}
+
+fn encode_indirect_branch(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 1 operand",
+            ins.mnemonic
+        )));
+    }
+    // Near indirect branches default to 64-bit in long mode; REX.W is unnecessary.
+    emit_group_operand(
+        &ins.operands[0],
+        64,
+        0,
+        &[0xff],
+        if ins.mnemonic == "call" { 2 } else { 4 },
+        bytes,
+        relocs,
+    )
+}
+
+fn emit_group_operand(
+    operand: &Operand,
+    width: u8,
+    rex_width: u8,
+    opcodes: &[u8],
+    extension: u8,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    emit_operand_size_prefix(bytes, width);
+    match operand {
+        Operand::Register(_) => {
+            let reg = register_operand(operand)?;
+            if reg.width != width {
+                return Err(AsmError::EncodeError(
+                    "Register width does not match instruction".into(),
+                ));
+            }
+            emit_rex(
+                bytes,
+                rex_width,
+                false,
+                false,
+                reg.code >= 8,
+                reg.high8,
+                reg.rex8,
+            )?;
+            bytes.extend_from_slice(opcodes);
+            bytes.push(ModRM::new(3, extension, reg.code).encode());
+        }
+        Operand::Memory(mem) => {
+            validate_memory_width(mem, width)?;
+            if let Some(symbol) = &mem.symbol {
+                if mem.base.is_some() || mem.index.is_some() {
+                    return Err(AsmError::EncodeError(
+                        "symbol + register memory form is not implemented yet".into(),
+                    ));
+                }
+                emit_rex(bytes, rex_width, false, false, false, false, false)?;
+                bytes.extend_from_slice(opcodes);
+                bytes.push(ModRM::new(0, extension, 5).encode());
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: symbol.clone(),
+                    kind: RelocKind::Relative32,
+                    addend: relative_addend(mem.disp)?,
+                });
+                bytes.extend_from_slice(&[0; 4]);
+            } else {
+                let addr = encode_address(mem, 64)?;
+                emit_rex(
+                    bytes, rex_width, false, addr.rex_x, addr.rex_b, false, false,
+                )?;
+                bytes.extend_from_slice(opcodes);
+                bytes.push(ModRM::new(addr.mod_bits, extension, addr.rm_bits).encode());
+                emit_addr_tail(bytes, &addr);
+            }
+        }
+        _ => {
+            return Err(AsmError::EncodeError(
+                "Expected register or memory operand".into(),
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn encode_extension(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 operands",
+            ins.mnemonic
+        )));
+    }
+    let dst = register_operand(&ins.operands[0])?;
+    let src_width = match &ins.operands[1] {
+        Operand::Register(_) => register_operand(&ins.operands[1])?.width,
+        Operand::Memory(mem) => mem.width.ok_or_else(|| {
+            AsmError::EncodeError("Extension memory source requires byte/word/dword width".into())
+        })?,
+        _ => {
+            return Err(AsmError::EncodeError(
+                "Extension source must be register or memory".into(),
+            ))
+        }
+    };
+    let valid = if ins.mnemonic == "movsxd" {
+        dst.width == 64 && src_width == 32
+    } else {
+        (src_width == 8 && matches!(dst.width, 16 | 32 | 64))
+            || (src_width == 16 && matches!(dst.width, 32 | 64))
+    };
+    if !valid {
+        return Err(AsmError::EncodeError(
+            "Invalid extension source/destination width pair".into(),
+        ));
+    }
+    let opcode = if ins.mnemonic == "movsxd" {
+        vec![0x63]
+    } else {
+        vec![
+            0x0f,
+            match (ins.mnemonic.as_str(), src_width) {
+                ("movzx", 8) => 0xb6,
+                ("movzx", 16) => 0xb7,
+                ("movsx", 8) => 0xbe,
+                _ => 0xbf,
+            },
+        ]
+    };
+    emit_operand_size_prefix(bytes, dst.width);
+    match &ins.operands[1] {
+        Operand::Register(_) => {
+            let src = register_operand(&ins.operands[1])?;
+            emit_rex(
+                bytes,
+                dst.width,
+                dst.code >= 8,
+                false,
+                src.code >= 8,
+                src.high8,
+                src.rex8,
+            )?;
+            bytes.extend_from_slice(&opcode);
+            bytes.push(ModRM::new(3, dst.code, src.code).encode());
+        }
+        Operand::Memory(mem) => {
+            if let Some(symbol) = &mem.symbol {
+                if mem.base.is_some() || mem.index.is_some() {
+                    return Err(AsmError::EncodeError(
+                        "symbol + register memory form is not implemented yet".into(),
+                    ));
+                }
+                emit_rex(bytes, dst.width, dst.code >= 8, false, false, false, false)?;
+                bytes.extend_from_slice(&opcode);
+                bytes.push(ModRM::new(0, dst.code, 5).encode());
+                relocs.push(Relocation {
+                    offset: bytes.len(),
+                    symbol: symbol.clone(),
+                    kind: RelocKind::Relative32,
+                    addend: relative_addend(mem.disp)?,
+                });
+                bytes.extend_from_slice(&[0; 4]);
+            } else {
+                let addr = encode_address(mem, 64)?;
+                emit_rex(
+                    bytes,
+                    dst.width,
+                    dst.code >= 8,
+                    addr.rex_x,
+                    addr.rex_b,
+                    false,
+                    false,
+                )?;
+                bytes.extend_from_slice(&opcode);
+                bytes.push(ModRM::new(addr.mod_bits, dst.code, addr.rm_bits).encode());
+                emit_addr_tail(bytes, &addr);
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+fn encode_push_immediate(ins: &Instruction, bytes: &mut Vec<u8>) -> Result<(), AsmError> {
+    if ins.operands.len() != 1 {
+        return Err(AsmError::EncodeError("push expects 1 operand".into()));
+    }
+    let Operand::Immediate(imm) = ins.operands[0] else {
+        unreachable!()
+    };
+    if (-128..=127).contains(&imm) {
+        bytes.extend_from_slice(&[0x6a, imm as u8]);
+    } else if (i32::MIN as i128..=i32::MAX as i128).contains(&imm) {
+        bytes.push(0x68);
+        bytes.extend_from_slice(&(imm as i32).to_le_bytes());
+    } else {
+        return Err(AsmError::EncodeError(
+            "push immediate requires signed imm8 or signed imm32 in AMD64 mode".into(),
+        ));
     }
     Ok(())
 }

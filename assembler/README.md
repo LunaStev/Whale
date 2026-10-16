@@ -156,3 +156,47 @@ fixtures are supported-positive and run under Cargo/CI. The runner compares the
 manifest with recursive file discovery, so missing, empty, duplicated and
 unclassified entries fail. A future-syntax entry must name its feature issue;
 negative/future entries must actually reject with their declared diagnostic.
+
+## Additional AMD64 scalar forms
+
+MOVZX/MOVSX accept an 8-bit source with a 16/32/64-bit destination, or a 16-bit
+source with a 32/64-bit destination. MOVSXD accepts a 32-bit source and a 64-bit
+destination. Sources can be registers or explicitly annotated byte/word/dword
+memory. Destination width chooses `66`/REX.W independently of the source width;
+AH/CH/DH/BH are rejected when any required REX prefix would change their meaning.
+
+SETcc accepts one byte register or byte memory destination (memory width can be
+omitted because the instruction intrinsically writes one byte). CMOVcc initially
+accepts matching 16/32/64-bit register pairs. Both families use every condition and
+alias in the Jcc table above, replacing the `j` prefix with `set` or `cmov`:
+`setz`, `setne`, `setb`, `cmovge`, `cmovle`, and the other listed aliases. These
+instructions do not implement source-language conditional evaluation or native
+IR Bool/Select lowering.
+
+```asm
+movzx eax, byte [rbx]
+movsx r8, r9b
+movsxd rax, dword [r13]
+setne spl
+setz byte [r12]
+cmovge r8, r9
+call r8
+jmp qword [r12]
+push -128
+adc r8, r9
+sbb eax, ebx
+```
+
+Near indirect CALL/JMP accept a 64-bit register or qword memory target. Long mode
+supplies their default 64-bit operand size without REX.W; address extension bits
+still select extended registers. Symbol-only memory uses the existing RIP-relative
+data-reference relocation, while direct labels retain their branch/PLT intent
+and relaxation. These raw instructions do not grant tracked pointer authority.
+
+Immediate PUSH supports AMD64's default 64-bit stack operation with signed imm8
+or signed imm32, choosing imm8 when possible. The hardware sign extends the
+immediate; positive values above `2147483647` are rejected rather than truncated.
+An immediate 16-bit override and memory PUSH/POP are outside this initial subset;
+existing 16/64-bit register forms remain supported. ADC/SBB initially accept
+matching register pairs at 8/16/32/64 bits and use carry/borrow-input opcodes;
+they do not substitute ADD/SUB or implement wide-integer native selection.

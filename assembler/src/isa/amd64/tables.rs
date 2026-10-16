@@ -83,7 +83,14 @@ pub const MNEMONICS: &[&str] = &[
     "call", "ret", "nop", "syscall", "int3", "lea", "test", "not", "neg", "div", "idiv", "shl",
     "sal", "shr", "sar", "cwd", "cdq", "cqo", "jo", "jno", "jb", "jc", "jnae", "jae", "jnb", "jnc",
     "jz", "jne", "jnz", "jbe", "jna", "ja", "jnbe", "js", "jns", "jp", "jpe", "jnp", "jpo", "jl",
-    "jnge", "jge", "jnl", "jle", "jng", "jg", "jnle",
+    "jnge", "jge", "jnl", "jle", "jng", "jg", "jnle", "movzx", "movsx", "movsxd", "adc", "sbb",
+    "seto", "setno", "setb", "setc", "setnae", "setae", "setnb", "setnc", "sete", "setz", "setne",
+    "setnz", "setbe", "setna", "seta", "setnbe", "sets", "setns", "setp", "setpe", "setnp",
+    "setpo", "setl", "setnge", "setge", "setnl", "setle", "setng", "setg", "setnle", "cmovo",
+    "cmovno", "cmovb", "cmovc", "cmovnae", "cmovae", "cmovnb", "cmovnc", "cmove", "cmovz",
+    "cmovne", "cmovnz", "cmovbe", "cmovna", "cmova", "cmovnbe", "cmovs", "cmovns", "cmovp",
+    "cmovpe", "cmovnp", "cmovpo", "cmovl", "cmovnge", "cmovge", "cmovnl", "cmovle", "cmovng",
+    "cmovg", "cmovnle",
 ];
 
 /// AMD64 integer condition codes and standard aliases.
