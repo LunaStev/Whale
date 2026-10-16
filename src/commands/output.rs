@@ -55,6 +55,43 @@ fn publish_with(
     Ok(())
 }
 
+/// Publish an artifact while protecting every input, including hard/symlink aliases.
+/// Executables receive an explicit 0755 mode on Unix; no input or previous mode
+/// can propagate setuid/setgid bits into a newly linked artifact.
+pub(super) fn publish_many(
+    inputs: &[&Path],
+    output: &Path,
+    bytes: &[u8],
+    executable: bool,
+) -> io::Result<()> {
+    for input in inputs {
+        check_distinct(input, output)?;
+    }
+    let directory = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".whale-output-")
+        .tempfile_in(directory)?;
+    temporary.write_all(bytes)?;
+    #[cfg(unix)]
+    if executable {
+        use std::os::unix::fs::PermissionsExt;
+        temporary
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o755))?;
+    }
+    #[cfg(not(unix))]
+    let _ = executable;
+    temporary.as_file().sync_all()?;
+    for input in inputs {
+        check_distinct(input, output)?;
+    }
+    temporary.persist(output).map_err(|e| e.error)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

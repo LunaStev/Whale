@@ -6,6 +6,7 @@ pub enum SectionKind {
     ReadOnlyData,
 }
 
+#[derive(Clone)]
 pub struct Section {
     pub name: String,
     pub kind: SectionKind,

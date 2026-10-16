@@ -1,0 +1,16 @@
+[package]
+name = "reverse"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+
+[features]
+default = []
+wave = []
+
+[dev-dependencies]
+assembler = { path = "../assembler" }
+
+[dependencies]
+object = { path = "../object" }
+serde_json = "1"

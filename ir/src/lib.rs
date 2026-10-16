@@ -415,3 +415,5 @@ mod parser;
 pub use parser::{
     parse_module, parse_module_with_limits, ParseError, ParseErrorKind, SourceLocation,
 };
+
+mod diagnostic;

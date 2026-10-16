@@ -2,6 +2,8 @@
 pub enum RelocKind {
     Absolute64,
     Absolute32,
+    /// Sign-extended 32-bit absolute value (R_X86_64_32S), distinct from unsigned 32.
+    SignedAbsolute32,
     Relative32,
     Relative8,
     GOTPCREL,

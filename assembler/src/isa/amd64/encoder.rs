@@ -806,6 +806,73 @@ fn validate_memory_width(mem: &MemoryOperand, width: u8) -> Result<(), AsmError>
     Ok(())
 }
 
+fn memory_address(mem: &MemoryOperand) -> Result<EncodedAddress, AsmError> {
+    if mem.symbol.is_none() {
+        return encode_address(mem, 64);
+    }
+    if mem.base.is_some() || mem.index.is_some() {
+        return Err(AsmError::EncodeError(
+            "symbol + register memory form is not implemented yet".into(),
+        ));
+    }
+    let mut address = mem.clone();
+    address.symbol = None;
+    address.disp = 0; // The linker applies the checked symbol value plus addend.
+    if address.address_mode == MemoryAddressMode::Default {
+        address.address_mode = MemoryAddressMode::Relative;
+    }
+    encode_address(&address, 64)
+}
+
+// Prefix selection belongs to each instruction; addressing and relocation
+// offsets share one path, including instructions with a trailing immediate.
+fn emit_memory_operation(
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+    opcodes: &[u8],
+    reg: &RegInfo,
+    mem: &MemoryOperand,
+    rex_width: u8,
+    trailing: u8,
+) -> Result<(), AsmError> {
+    let addr = memory_address(mem)?;
+    emit_rex(
+        bytes,
+        rex_width,
+        reg.code >= 8,
+        addr.rex_x,
+        addr.rex_b,
+        reg.high8,
+        reg.rex8,
+    )?;
+    bytes.extend_from_slice(opcodes);
+    bytes.push(ModRM::new(addr.mod_bits, reg.code, addr.rm_bits).encode());
+    if let Some(symbol) = &mem.symbol {
+        let absolute = mem.address_mode == MemoryAddressMode::Absolute;
+        let addend = if absolute {
+            mem.disp
+        } else {
+            relative_addend(mem.disp)?
+                .checked_sub(i64::from(trailing))
+                .ok_or_else(|| {
+                    AsmError::EncodeError("Relative relocation addend overflow".into())
+                })?
+        };
+        relocs.push(Relocation {
+            offset: bytes.len() + usize::from(addr.sib.is_some()),
+            symbol: symbol.clone(),
+            kind: if absolute {
+                RelocKind::SignedAbsolute32
+            } else {
+                RelocKind::Relative32
+            },
+            addend,
+        });
+    }
+    emit_addr_tail(bytes, &addr);
+    Ok(())
+}
+
 fn emit_reg_mem(
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
@@ -815,50 +882,7 @@ fn emit_reg_mem(
 ) -> Result<(), AsmError> {
     validate_memory_width(mem, reg.width)?;
     emit_operand_size_prefix(bytes, reg.width);
-
-    if let Some(sym) = &mem.symbol {
-        if mem.base.is_some() || mem.index.is_some() {
-            return Err(AsmError::EncodeError(
-                "symbol + register memory form is not implemented yet".into(),
-            ));
-        }
-
-        emit_rex(
-            bytes,
-            reg.width,
-            reg.code >= 8,
-            false,
-            false,
-            reg.high8,
-            reg.rex8,
-        )?;
-        bytes.push(opcode);
-        bytes.push(ModRM::new(0, reg.code, 5).encode()); // [rip + disp32]
-
-        relocs.push(Relocation {
-            offset: bytes.len(),
-            symbol: sym.clone(),
-            kind: RelocKind::Relative32,
-            addend: relative_addend(mem.disp)?,
-        });
-        bytes.extend_from_slice(&0i32.to_le_bytes());
-        return Ok(());
-    }
-
-    let addr = encode_address(mem, 64)?;
-    emit_rex(
-        bytes,
-        reg.width,
-        reg.code >= 8,
-        addr.rex_x,
-        addr.rex_b,
-        reg.high8,
-        reg.rex8,
-    )?;
-    bytes.push(opcode);
-    bytes.push(ModRM::new(addr.mod_bits, reg.code, addr.rm_bits).encode());
-    emit_addr_tail(bytes, &addr);
-    Ok(())
+    emit_memory_operation(bytes, relocs, &[opcode], reg, mem, reg.width, 0)
 }
 
 fn emit_mem_reg(
@@ -868,52 +892,7 @@ fn emit_mem_reg(
     mem: &MemoryOperand,
     reg: &RegInfo,
 ) -> Result<(), AsmError> {
-    validate_memory_width(mem, reg.width)?;
-    emit_operand_size_prefix(bytes, reg.width);
-
-    if let Some(sym) = &mem.symbol {
-        if mem.base.is_some() || mem.index.is_some() {
-            return Err(AsmError::EncodeError(
-                "symbol + register memory form is not implemented yet".into(),
-            ));
-        }
-
-        emit_rex(
-            bytes,
-            reg.width,
-            reg.code >= 8,
-            false,
-            false,
-            reg.high8,
-            reg.rex8,
-        )?;
-        bytes.push(opcode);
-        bytes.push(ModRM::new(0, reg.code, 5).encode()); // [rip + disp32]
-
-        relocs.push(Relocation {
-            offset: bytes.len(),
-            symbol: sym.clone(),
-            kind: RelocKind::Relative32,
-            addend: relative_addend(mem.disp)?,
-        });
-        bytes.extend_from_slice(&0i32.to_le_bytes());
-        return Ok(());
-    }
-
-    let addr = encode_address(mem, 64)?;
-    emit_rex(
-        bytes,
-        reg.width,
-        reg.code >= 8,
-        addr.rex_x,
-        addr.rex_b,
-        reg.high8,
-        reg.rex8,
-    )?;
-    bytes.push(opcode);
-    bytes.push(ModRM::new(addr.mod_bits, reg.code, addr.rm_bits).encode());
-    emit_addr_tail(bytes, &addr);
-    Ok(())
+    emit_reg_mem(bytes, relocs, opcode, reg, mem)
 }
 
 #[derive(Clone, Copy)]
@@ -938,6 +917,8 @@ fn encode_instruction(
                 ins.mnemonic
             )))
         }
+        "movss" | "movsd" | "addss" | "addsd" | "subss" | "subsd" | "mulss" | "mulsd" | "divss"
+        | "divsd" => encode_scalar_sse(ins, bytes, relocs),
         "mov" => encode_mov(ins, bytes, relocs),
         "movzx" | "movsx" | "movsxd" => encode_extension(ins, bytes, relocs),
         "adc" => encode_carry(ins, 0x10, 0x11, bytes),
@@ -1080,6 +1061,83 @@ fn symbol_operand(op: &Operand) -> Option<(String, i128)> {
         Operand::Label(name) => Some((name.clone(), 0)),
         Operand::SymbolExpr { name, addend } => Some((name.clone(), *addend)),
         _ => None,
+    }
+}
+
+fn xmm_operand(operand: &Operand) -> Result<u8, AsmError> {
+    if let Operand::Register(name) = operand {
+        if let Some(code) = xmm_register_code(name) {
+            return Ok(code);
+        }
+    }
+    Err(AsmError::EncodeError("Expected XMM0-XMM15 register".into()))
+}
+
+fn encode_scalar_sse(
+    ins: &Instruction,
+    bytes: &mut Vec<u8>,
+    relocs: &mut Vec<Relocation>,
+) -> Result<(), AsmError> {
+    if ins.operands.len() != 2 {
+        return Err(AsmError::EncodeError(format!(
+            "{} expects 2 operands",
+            ins.mnemonic
+        )));
+    }
+    let single = ins.mnemonic.ends_with("ss");
+    let (prefix, width) = if single { (0xf3, 32) } else { (0xf2, 64) };
+    let move_instruction = matches!(ins.mnemonic.as_str(), "movss" | "movsd");
+    let opcode = match ins.mnemonic.as_str() {
+        "movss" | "movsd" => 0x10,
+        "addss" | "addsd" => 0x58,
+        "subss" | "subsd" => 0x5c,
+        "mulss" | "mulsd" => 0x59,
+        "divss" | "divsd" => 0x5e,
+        _ => unreachable!(),
+    };
+    // XMM registers are 128-bit registers. The scalar access width chooses the
+    // mandatory prefix, never REX.W or the integer operand-size prefix 66.
+    if let Operand::Memory(mem) = &ins.operands[0] {
+        if !move_instruction {
+            return Err(AsmError::EncodeError(
+                "Scalar SSE arithmetic destination must be XMM".into(),
+            ));
+        }
+        let code = xmm_operand(&ins.operands[1])?;
+        validate_memory_width(mem, width)?;
+        bytes.push(prefix);
+        let reg = RegInfo {
+            code,
+            width,
+            high8: false,
+            rex8: false,
+        };
+        return emit_memory_operation(bytes, relocs, &[0x0f, 0x11], &reg, mem, 0, 0);
+    }
+    let code = xmm_operand(&ins.operands[0])?;
+    match &ins.operands[1] {
+        Operand::Register(_) => {
+            let source = xmm_operand(&ins.operands[1])?;
+            bytes.push(prefix);
+            emit_rex(bytes, 0, code >= 8, false, source >= 8, false, false)?;
+            bytes.extend_from_slice(&[0x0f, opcode]);
+            bytes.push(ModRM::new(3, code, source).encode());
+            Ok(())
+        }
+        Operand::Memory(mem) => {
+            validate_memory_width(mem, width)?;
+            bytes.push(prefix);
+            let reg = RegInfo {
+                code,
+                width,
+                high8: false,
+                rex8: false,
+            };
+            emit_memory_operation(bytes, relocs, &[0x0f, opcode], &reg, mem, 0, 0)
+        }
+        _ => Err(AsmError::EncodeError(
+            "Scalar SSE source must be XMM or matching scalar memory".into(),
+        )),
     }
 }
 
@@ -1386,33 +1444,13 @@ fn encode_memory_immediate(
         }
     };
     emit_operand_size_prefix(bytes, width);
-    if let Some(symbol) = &mem.symbol {
-        if mem.base.is_some() || mem.index.is_some() {
-            return Err(AsmError::EncodeError(
-                "symbol + register memory form is not implemented yet".into(),
-            ));
-        }
-        emit_rex(bytes, width, false, false, false, false, false)?;
-        bytes.push(opcode);
-        bytes.push(ModRM::new(0, operation.unwrap_or(0), 5).encode());
-        relocs.push(Relocation {
-            offset: bytes.len(),
-            symbol: symbol.clone(),
-            kind: RelocKind::Relative32,
-            addend: relative_addend(mem.disp)?
-                .checked_sub(i64::from(tail))
-                .ok_or_else(|| {
-                    AsmError::EncodeError("Relative relocation addend overflow".into())
-                })?,
-        });
-        bytes.extend_from_slice(&[0; 4]);
-    } else {
-        let addr = encode_address(mem, 64)?;
-        emit_rex(bytes, width, false, addr.rex_x, addr.rex_b, false, false)?;
-        bytes.push(opcode);
-        bytes.push(ModRM::new(addr.mod_bits, operation.unwrap_or(0), addr.rm_bits).encode());
-        emit_addr_tail(bytes, &addr);
-    }
+    let group = RegInfo {
+        code: operation.unwrap_or(0),
+        width,
+        high8: false,
+        rex8: false,
+    };
+    emit_memory_operation(bytes, relocs, &[opcode], &group, mem, width, tail)?;
     bytes.extend_from_slice(&(imm as u64).to_le_bytes()[..tail as usize]);
     Ok(())
 }
@@ -1470,48 +1508,15 @@ fn encode_imul(
         Operand::Memory(mem) => {
             validate_memory_width(mem, dst_reg.width)?;
             emit_operand_size_prefix(bytes, dst_reg.width);
-            if let Some(sym) = &mem.symbol {
-                if mem.base.is_some() || mem.index.is_some() {
-                    return Err(AsmError::EncodeError(
-                        "symbol + register memory form is not implemented yet".into(),
-                    ));
-                }
-                emit_rex(
-                    bytes,
-                    dst_reg.width,
-                    dst_reg.code >= 8,
-                    false,
-                    false,
-                    false,
-                    false,
-                )?;
-                bytes.push(0x0F);
-                bytes.push(0xAF);
-                bytes.push(ModRM::new(0, dst_reg.code, 5).encode());
-                relocs.push(Relocation {
-                    offset: bytes.len(),
-                    symbol: sym.clone(),
-                    kind: RelocKind::Relative32,
-                    addend: relative_addend(mem.disp)?,
-                });
-                bytes.extend_from_slice(&0i32.to_le_bytes());
-                return Ok(());
-            }
-
-            let addr = encode_address(mem, 64)?;
-            emit_rex(
+            emit_memory_operation(
                 bytes,
+                relocs,
+                &[0x0f, 0xaf],
+                &dst_reg,
+                mem,
                 dst_reg.width,
-                dst_reg.code >= 8,
-                addr.rex_x,
-                addr.rex_b,
-                false,
-                false,
+                0,
             )?;
-            bytes.push(0x0F);
-            bytes.push(0xAF);
-            bytes.push(ModRM::new(addr.mod_bits, dst_reg.code, addr.rm_bits).encode());
-            emit_addr_tail(bytes, &addr);
             Ok(())
         }
         _ => Err(AsmError::EncodeError(
@@ -1548,11 +1553,6 @@ fn encode_lea(
             "lea source must be memory address".into(),
         ));
     };
-    if mem.symbol.is_some() {
-        return Err(AsmError::EncodeError(
-            "Symbolic lea is not supported".into(),
-        ));
-    }
     emit_reg_mem(bytes, relocs, 0x8d, &reg, mem)
 }
 
@@ -1822,31 +1822,13 @@ fn emit_group_operand(
         }
         Operand::Memory(mem) => {
             validate_memory_width(mem, width)?;
-            if let Some(symbol) = &mem.symbol {
-                if mem.base.is_some() || mem.index.is_some() {
-                    return Err(AsmError::EncodeError(
-                        "symbol + register memory form is not implemented yet".into(),
-                    ));
-                }
-                emit_rex(bytes, rex_width, false, false, false, false, false)?;
-                bytes.extend_from_slice(opcodes);
-                bytes.push(ModRM::new(0, extension, 5).encode());
-                relocs.push(Relocation {
-                    offset: bytes.len(),
-                    symbol: symbol.clone(),
-                    kind: RelocKind::Relative32,
-                    addend: relative_addend(mem.disp)?,
-                });
-                bytes.extend_from_slice(&[0; 4]);
-            } else {
-                let addr = encode_address(mem, 64)?;
-                emit_rex(
-                    bytes, rex_width, false, addr.rex_x, addr.rex_b, false, false,
-                )?;
-                bytes.extend_from_slice(opcodes);
-                bytes.push(ModRM::new(addr.mod_bits, extension, addr.rm_bits).encode());
-                emit_addr_tail(bytes, &addr);
-            }
+            let group = RegInfo {
+                code: extension,
+                width,
+                high8: false,
+                rex8: false,
+            };
+            emit_memory_operation(bytes, relocs, opcodes, &group, mem, rex_width, 0)?;
         }
         _ => {
             return Err(AsmError::EncodeError(
@@ -1921,37 +1903,7 @@ fn encode_extension(
             bytes.push(ModRM::new(3, dst.code, src.code).encode());
         }
         Operand::Memory(mem) => {
-            if let Some(symbol) = &mem.symbol {
-                if mem.base.is_some() || mem.index.is_some() {
-                    return Err(AsmError::EncodeError(
-                        "symbol + register memory form is not implemented yet".into(),
-                    ));
-                }
-                emit_rex(bytes, dst.width, dst.code >= 8, false, false, false, false)?;
-                bytes.extend_from_slice(&opcode);
-                bytes.push(ModRM::new(0, dst.code, 5).encode());
-                relocs.push(Relocation {
-                    offset: bytes.len(),
-                    symbol: symbol.clone(),
-                    kind: RelocKind::Relative32,
-                    addend: relative_addend(mem.disp)?,
-                });
-                bytes.extend_from_slice(&[0; 4]);
-            } else {
-                let addr = encode_address(mem, 64)?;
-                emit_rex(
-                    bytes,
-                    dst.width,
-                    dst.code >= 8,
-                    addr.rex_x,
-                    addr.rex_b,
-                    false,
-                    false,
-                )?;
-                bytes.extend_from_slice(&opcode);
-                bytes.push(ModRM::new(addr.mod_bits, dst.code, addr.rm_bits).encode());
-                emit_addr_tail(bytes, &addr);
-            }
+            emit_memory_operation(bytes, relocs, &opcode, &dst, mem, dst.width, 0)?;
         }
         _ => unreachable!(),
     }

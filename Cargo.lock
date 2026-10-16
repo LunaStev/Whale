@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "assembler"
 version = "0.1.0"
+dependencies = [
+ "whale-diagnostic",
+]
 
 [[package]]
 name = "bitflags"
@@ -51,6 +54,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "whale-diagnostic",
  "whale-target",
 ]
 
@@ -71,6 +75,7 @@ name = "linker"
 version = "0.1.0"
 dependencies = [
  "object",
+ "whale-diagnostic",
 ]
 
 [[package]]
@@ -89,6 +94,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "object"
 version = "0.1.0"
 dependencies = [
+ "whale-diagnostic",
  "whale-target",
 ]
 
@@ -121,6 +127,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "reverse"
+version = "0.1.0"
+dependencies = [
+ "assembler",
+ "object",
+ "serde_json",
+]
 
 [[package]]
 name = "rustix"
@@ -223,11 +238,18 @@ version = "0.1.0"
 dependencies = [
  "assembler",
  "ir",
+ "linker",
  "object",
+ "reverse",
  "same-file",
+ "serde",
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "whale-diagnostic"
+version = "0.1.0"
 
 [[package]]
 name = "whale-target"

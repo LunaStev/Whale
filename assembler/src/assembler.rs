@@ -56,6 +56,8 @@ pub struct Relocation {
 pub enum RelocKind {
     Absolute64,
     Absolute32,
+    /// A sign-extended absolute disp32 address (ELF R_X86_64_32S).
+    SignedAbsolute32,
     /// A PC-relative data/address reference, independent of symbol definition.
     Relative32,
     /// A near control transfer; an undefined target may require a PLT entry.

@@ -295,6 +295,9 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
             let kind = match reloc.kind {
                 assembler::assembler::RelocKind::Absolute64 => ObjectRelocKind::Absolute64,
                 assembler::assembler::RelocKind::Absolute32 => ObjectRelocKind::Absolute32,
+                assembler::assembler::RelocKind::SignedAbsolute32 => {
+                    ObjectRelocKind::SignedAbsolute32
+                }
                 assembler::assembler::RelocKind::Relative32 => ObjectRelocKind::Relative32,
                 assembler::assembler::RelocKind::Branch32 => {
                     if is_undefined_symbol {

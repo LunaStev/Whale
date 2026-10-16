@@ -84,8 +84,19 @@ pub enum Operand {
     Memory(MemoryOperand),
 }
 
+/// Explicit intent for base-less AMD64 memory addresses. Default preserves the
+/// original symbol-only RIP-relative and register-based address rules.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryAddressMode {
+    #[default]
+    Default,
+    Relative,
+    Absolute,
+}
+
 #[derive(Debug, Clone)]
 pub struct MemoryOperand {
+    pub address_mode: MemoryAddressMode,
     /// Explicit data width in bits; absence permits register inference.
     pub width: Option<u8>,
     pub base: Option<String>,

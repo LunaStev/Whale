@@ -79,6 +79,7 @@ pub const REGISTERS_8: &[(&str, u8)] = &[
 ];
 
 pub const MNEMONICS: &[&str] = &[
+    "movss", "movsd", "addss", "addsd", "subss", "subsd", "mulss", "mulsd", "divss", "divsd",
     "mov", "add", "sub", "and", "or", "xor", "cmp", "imul", "push", "pop", "jmp", "je", "loop",
     "call", "ret", "nop", "syscall", "int3", "lea", "test", "not", "neg", "div", "idiv", "shl",
     "sal", "shr", "sar", "cwd", "cdq", "cqo", "jo", "jno", "jb", "jc", "jnae", "jae", "jnb", "jnc",
@@ -131,5 +132,31 @@ pub fn condition_code(mnemonic: &str) -> Option<u8> {
     CONDITION_CODES
         .iter()
         .find(|(name, _)| *name == mnemonic)
+        .map(|(_, code)| *code)
+}
+
+/// Legacy scalar SSE register class; no packed/vector instruction support implied.
+pub const REGISTERS_XMM: &[(&str, u8)] = &[
+    ("xmm0", 0),
+    ("xmm1", 1),
+    ("xmm2", 2),
+    ("xmm3", 3),
+    ("xmm4", 4),
+    ("xmm5", 5),
+    ("xmm6", 6),
+    ("xmm7", 7),
+    ("xmm8", 8),
+    ("xmm9", 9),
+    ("xmm10", 10),
+    ("xmm11", 11),
+    ("xmm12", 12),
+    ("xmm13", 13),
+    ("xmm14", 14),
+    ("xmm15", 15),
+];
+pub fn xmm_register_code(name: &str) -> Option<u8> {
+    REGISTERS_XMM
+        .iter()
+        .find(|(register, _)| *register == name)
         .map(|(_, code)| *code)
 }

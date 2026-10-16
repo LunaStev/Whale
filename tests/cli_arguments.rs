@@ -86,7 +86,7 @@ fn help_describes_available_commands_and_object_options() {
         let text = String::from_utf8(result.stdout).unwrap();
         assert!(text.contains("whale asm --amd64"));
         assert!(text.contains("raw bytes"));
-        assert!(text.contains("not implemented"));
+        assert!(text.contains("Static Linux AMD64"));
         assert!(text.contains("run"));
         assert!(!text.contains("--aarch64"));
     }

@@ -37,9 +37,10 @@ native compilation pipeline are still being developed.
 | --- | --- | --- |
 | Assembler | AMD64 assembly, sections, symbols, and relocations emitted as ELF64 object files | Available |
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
-| Object library | Object model and ELF64 relocatable object serialization | Available |
+| Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
-| Linker | Initial library infrastructure; `whale link` remains a placeholder | In development |
+| Reverse | ELF inspection plus opt-in Wave AMD64 disassembly and CFG/xrefs | Experimental |
+| Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
 
 The IR target selector accepts only `x86_64-whale-linux`; unknown targets fail
 with the supported choice, including with `--no-verify`. Its output data layout
@@ -54,7 +55,13 @@ sections require zero `zero_fill`. ELF output uses checked field conversions and
 layout arithmetic and rejects extended section numbering. Its default output
 budget is 256 MiB; library clients can override it with `write_with_limit`.
 The linker layout API returns `Result` and records separate file/memory positions
-and sizes for every input section. It does not yet emit executable segments.
+and sizes for every input section. The executable layout additionally accounts for
+ELF headers and page-congruent RX/R/RW load segments with sparse BSS.
+
+The [object input API](object/README.md) reads the supported bounded AMD64 ELF64
+relocatable subset and preserves section, symbol and relocation semantics.
+[Shared diagnostic conversions](diagnostic/README.md) retain machine-readable
+phase/category and available source/object context alongside typed component errors.
 
 The current emitted object target is AMD64 ELF64. Object metadata records the machine,
 format, byte order, and address width; writers and linker inputs reject unsupported
@@ -639,7 +646,7 @@ references resolve before layout. Unreferenced undefined declarations impose no
 requirement; a referenced undefined weak symbol has the defined value zero.
 Unresolved strong references report their input object, section and offset.
 `SymbolTable::references` records each selected target and whether it is weak
-undefined. This API does not implement executable linking.
+undefined. The static executable path uses this selection before patching relocations.
 
 Normal ELF regression tests independently decode symbols and RELA records without
 external programs. An additional GNU binutils oracle is opt-in:
@@ -664,7 +671,7 @@ draft creation is opt-in and runs only after all checks pass.
 | [assembler/](assembler/) | Assembly parsing and instruction encoding |
 | [ir/](ir/) | IR types, builders, lowering, verification, and printing |
 | [object/](object/) | Sections, symbols, relocations, and ELF serialization |
-| [linker/](linker/) | Symbol resolution and layout infrastructure |
+| [linker/](linker/) | Static symbol/archive selection, relocation application and ELF executable output |
 | [src/](src/) | Command-line interface |
 | [tests/](tests/) | CLI integration tests |
 | [tools/](tools/) | CI helpers and standalone CLI smoke checks |
@@ -723,3 +730,69 @@ or [GitHub Sponsors](https://github.com/sponsors/LunaStev).
 
 Whale is licensed under the [Mozilla Public License 2.0](LICENSE).
 See [COPYRIGHT](COPYRIGHT) and [NOTICE](NOTICE) for attribution and notices.
+
+## Static Linux AMD64 linking
+
+```sh
+whale asm --amd64 start.asm -o start.o
+whale asm --amd64 helper.asm -o helper.o
+whale link start.o helper.o -o app --entry _start
+./app
+```
+
+Inputs are the supported ELF64 little-endian AMD64 relocatable subset or ordinary
+Unix archives. The entry defaults to `_start` and must be a defined global symbol
+inside file-backed executable code. No libc, startup object, main wrapper, dynamic
+loader, GOT or dynamic PLT is added. A statically resolved PLT32 is a direct PC32
+reference. Thin archives, shared libraries and unsupported relocation kinds fail.
+
+Archives are searched left to right and rescanned to a fixed point internally.
+Only unresolved strong references and the entry demand extract members; undefined
+weak references do not. Later inputs do not rescan earlier archives. GNU and BSD
+long names are supported. Unused members do not introduce duplicate definitions.
+
+`--max-input` caps the sum of input bytes and `--max-output` caps the complete
+executable, both defaulting to 256 MiB. Decoded inputs share additional cumulative
+limits: 256 MiB of copied payloads, 16 MiB of inspected/copied names, 65,279 raw
+sections, one million raw symbols and relocations each, and 536,870,912 reader
+work units. Auxiliary ELF records and unused archive members consume these limits;
+physical archive bytes are counted once. Archive parsing also limits each archive
+to 4096 members and 1 MiB of member names, checking names before copying them.
+Selection has 10 million work units and a 4096-object cap.
+
+Library clients can choose reader limits with `Linker::with_read_limits` and load
+objects through `add_object_bytes`; all archives and byte-loaded objects share the
+same remaining budget. `ObjectFile::read_with_usage` exposes successful reader
+charges for other streaming consumers. Failed additions leave both the input list
+and remaining budget unchanged. Already-owned objects passed to `add_object`
+remain caller allocations and still undergo structural and output validation.
+
+Loadable ranges must fit the lower 48-bit user address space, excluding its final
+4 KiB guard page; optional five-level paging is not assumed. BSS remains sparse:
+a 1 TiB zero-filled region can still produce a small executable when its addresses
+fit this range. Alignment and logical BSS extent cannot bypass the address check.
+Outputs publish atomically after validation and protect every input alias. Unix
+executables receive mode 0755 without copying setuid/setgid bits. The produced
+artifact targets Linux AMD64 regardless of the machine running Whale.
+
+## Wave reverse tools
+
+The reusable [reverse module](reverse/README.md) uses a Wave decoding/analysis core
+with Rust file/ELF/CLI adapters. The initial linked core supports Linux AMD64
+hosts and decodes AMD64 bytes; these are separate host and decoded-ISA contracts.
+Normal Cargo builds need no Wave compiler and retain ELF inspection; disassembly
+reports an explicit unavailable capability until the core is built and linked.
+
+```sh
+python3 tools/build_wave_reverse.py --wave-source /path/to/Wave --out-dir /tmp/whale-wave-reverse
+WHALE_WAVE_REVERSE_DIR=/tmp/whale-wave-reverse cargo build --locked --features wave-reverse
+whale disasm --amd64 app.o --json
+whale reverse inspect app --json
+```
+
+The explicit bootstrap uses pinned official Wave sources, matching standard
+library, Rust 1.89.0 and LLVM 21. It reads committed sources without modifying the
+Wave checkout; ordinary Cargo never downloads or bootstraps a compiler. See the
+module guide for byte, encoding, unsupported-instruction and build contracts.
+The supported decoding scope is integer/scalar-SSE AMD64 long mode, not complete
+x86 coverage or recovery of original source code.
