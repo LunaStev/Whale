@@ -5,6 +5,7 @@ use std::{
 };
 
 pub(super) const ASM_INPUT_BYTES: u64 = 8 * 1024 * 1024;
+
 pub(super) const OBJECT_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
 pub(super) fn byte_limit(value: &str) -> Result<u64, &'static str> {
@@ -40,8 +41,11 @@ fn read_from(reader: impl Read, limit: u64) -> io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::cell::Cell;
+
     struct Growing<'a>(&'a Cell<usize>);
+
     impl Read for Growing<'_> {
         fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
             buffer.fill(b'x');
@@ -49,6 +53,7 @@ mod tests {
             Ok(buffer.len())
         }
     }
+
     #[test]
     fn growing_stream_is_consumed_only_to_limit_plus_one() {
         let consumed = Cell::new(0);

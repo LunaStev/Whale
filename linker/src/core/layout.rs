@@ -38,23 +38,20 @@ impl Layout {
             file_size: 0,
             memory_size: 0,
         };
+
         let mut memory_end = base_address;
         for (object_index, obj) in objects.iter().enumerate() {
-            obj.target
-                .validate()
-                .map_err(|e| format!("link input {object_index}: {e}"))?;
+            obj.target.validate().map_err(|e| format!("link input {object_index}: {e}"))?;
             let mut offsets = Vec::new();
             for (section_index, sec) in obj.sections.iter().enumerate() {
-                let context = format!(
-                    "input {object_index} section {section_index} {:?}",
-                    sec.name
-                );
+                let context =
+                    format!("input {object_index} section {section_index} {:?}", sec.name);
+
                 let align = sec.align.max(1);
                 if !align.is_power_of_two() {
-                    return Err(format!(
-                        "{context}: alignment must be zero or a power of two"
-                    ));
+                    return Err(format!("{context}: alignment must be zero or a power of two"));
                 }
+
                 let memory_size = sec.memory_size()?;
                 let file_size = sec.file_size();
                 let memory_address = align_up(memory_end, align)
@@ -64,6 +61,7 @@ impl Layout {
                     .ok_or_else(|| format!("{context}: memory size overflow"))?;
                 let file_offset = align_up(layout.file_size, align)
                     .ok_or_else(|| format!("{context}: file alignment overflow"))?;
+
                 if sec.kind != SectionKind::Bss {
                     layout.file_size = file_offset
                         .checked_add(file_size)
@@ -84,6 +82,7 @@ impl Layout {
             }
             layout.section_offsets.push(offsets);
         }
+
         layout.memory_size = memory_end - base_address;
         Ok(layout)
     }

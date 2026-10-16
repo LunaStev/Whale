@@ -1,5 +1,7 @@
 use crate::{interpreter::InterpreterError, verifier::VerifyError};
+
 use whale_diagnostic::{Context, Diagnostic, SourceLocation, ToDiagnostic};
+
 impl ToDiagnostic for VerifyError {
     fn diagnostic(&self) -> Diagnostic {
         let code = match self {
@@ -47,7 +49,7 @@ impl ToDiagnostic for VerifyError {
             | Self::InvalidGlobalInitializer { name, .. }
             | Self::InvalidGlobalAlignment { name, .. }
             | Self::GlobalStorage { name, .. } => d.contexts.push(Context::Symbol(name.clone())),
-            _ => {}
+            _ => {},
         }
         match self {
             Self::ForbiddenUndef { func, .. }
@@ -78,8 +80,8 @@ impl ToDiagnostic for VerifyError {
             | Self::RetTypeMismatch { func, .. }
             | Self::UseOfUndefinedValue { func, .. } => {
                 d.contexts.push(Context::Symbol(func.clone()))
-            }
-            _ => {}
+            },
+            _ => {},
         }
         match self {
             Self::NonDominatingValue { block, .. }
@@ -90,12 +92,13 @@ impl ToDiagnostic for VerifyError {
             | Self::InvalidBranchTarget { block, .. } => d.contexts.push(Context::Block(block.0)),
             Self::InvalidEntryBlock { entry, .. } | Self::EntryHasPredecessor { entry, .. } => {
                 d.contexts.push(Context::Block(entry.0))
-            }
-            _ => {}
+            },
+            _ => {},
         }
         d
     }
 }
+
 impl ToDiagnostic for InterpreterError {
     fn diagnostic(&self) -> Diagnostic {
         let code = match self.root_cause() {
@@ -148,6 +151,7 @@ impl ToDiagnostic for InterpreterError {
         d
     }
 }
+
 #[cfg(feature = "socket")]
 impl ToDiagnostic for crate::lower_ast::LowerError {
     fn diagnostic(&self) -> Diagnostic {
@@ -199,10 +203,10 @@ impl ToDiagnostic for crate::ParseError {
         let mut d = match &self.kind {
             crate::ParseErrorKind::Syntax(message) => {
                 Diagnostic::new("ir", "parse", "ir.parse.syntax", message.clone())
-            }
+            },
             crate::ParseErrorKind::ResourceLimit(error) => {
                 Diagnostic::new("ir", "parse", "ir.parse.resource-limit", error.to_string())
-            }
+            },
             crate::ParseErrorKind::Verification(error) => error.diagnostic(),
         };
         d.contexts.push(Context::Source(SourceLocation {

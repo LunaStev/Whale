@@ -1,14 +1,17 @@
 //! Bytes follow the architectural opcode/prefix/ModRM tables, independent of
 //! an external assembler or Whale's instruction tables.
 use assembler::{assemble, isa::AMD64, RelocKind};
+
 fn bytes(src: &str) -> Vec<u8> {
     let out = assemble(src, &AMD64).unwrap_or_else(|e| panic!("{src}: {e}"));
     assert!(out.sections.iter().all(|s| s.relocs.is_empty()));
     out.sections.into_iter().flat_map(|s| s.data).collect()
 }
+
 fn reject(src: &str) {
     assert!(assemble(src, &AMD64).is_err(), "accepted {src}");
 }
+
 #[test]
 fn register_and_memory_extensions_select_source_and_destination_widths() {
     for (src, expected) in [
@@ -25,10 +28,7 @@ fn register_and_memory_extensions_select_source_and_destination_widths() {
         ("movsxd rax,ebx", vec![0x48, 0x63, 0xc3]),
         ("movsxd r8,r9d", vec![0x4d, 0x63, 0xc1]),
         ("movzx ax,byte [rsp]", vec![0x66, 0x0f, 0xb6, 0x04, 0x24]),
-        (
-            "movzx r8,word [r9+r12*2-128]",
-            vec![0x4f, 0x0f, 0xb7, 0x44, 0x61, 0x80],
-        ),
+        ("movzx r8,word [r9+r12*2-128]", vec![0x4f, 0x0f, 0xb7, 0x44, 0x61, 0x80]),
         ("movsx eax,byte [rbp]", vec![0x0f, 0xbe, 0x45, 0]),
         ("movsxd rax,dword [r13]", vec![0x49, 0x63, 0x45, 0]),
     ] {
@@ -56,6 +56,7 @@ fn register_and_memory_extensions_select_source_and_destination_widths() {
         reject(src);
     }
 }
+
 const CONDITIONS: &[(&str, u8)] = &[
     ("o", 0),
     ("no", 1),
@@ -88,6 +89,7 @@ const CONDITIONS: &[(&str, u8)] = &[
     ("g", 15),
     ("nle", 15),
 ];
+
 #[test]
 fn every_setcc_alias_encodes_byte_register_and_memory_results() {
     for (suffix, cc) in CONDITIONS {
@@ -107,24 +109,13 @@ fn every_setcc_alias_encodes_byte_register_and_memory_results() {
             bytes(&format!("set{suffix} byte [r12+r9*4+128]")),
             [0x43, 0x0f, 0x90 + cc, 0x84, 0x8c, 0x80, 0, 0, 0]
         );
-        assert_eq!(
-            bytes(&format!("set{suffix} [rbp]")),
-            [0x0f, 0x90 + cc, 0x45, 0]
-        );
-        for operand in [
-            "ax",
-            "eax",
-            "rax",
-            "word [rax]",
-            "qword [rax]",
-            "[r8+ah]",
-            "al,bl",
-            "",
-        ] {
+        assert_eq!(bytes(&format!("set{suffix} [rbp]")), [0x0f, 0x90 + cc, 0x45, 0]);
+        for operand in ["ax", "eax", "rax", "word [rax]", "qword [rax]", "[r8+ah]", "al,bl", ""] {
             reject(&format!("set{suffix} {operand}"));
         }
     }
 }
+
 #[test]
 fn every_cmovcc_alias_encodes_matching_wide_registers_only() {
     for (suffix, cc) in CONDITIONS {
@@ -155,15 +146,13 @@ fn every_cmovcc_alias_encodes_matching_wide_registers_only() {
         }
     }
 }
+
 #[test]
 fn indirect_calls_and_jumps_use_long_mode_default_width_and_shared_addresses() {
     for (mnemonic, ext) in [("call", 2), ("jmp", 4)] {
-        for (reg, rex, code) in [
-            ("rax", None, 0),
-            ("rbp", None, 5),
-            ("r8", Some(0x41), 0),
-            ("r15", Some(0x41), 7),
-        ] {
+        for (reg, rex, code) in
+            [("rax", None, 0), ("rbp", None, 5), ("r8", Some(0x41), 0), ("r15", Some(0x41), 7)]
+        {
             let mut expected = Vec::new();
             if let Some(rex) = rex {
                 expected.push(rex);
@@ -171,10 +160,7 @@ fn indirect_calls_and_jumps_use_long_mode_default_width_and_shared_addresses() {
             expected.extend([0xff, 0xc0 + (ext << 3) + code]);
             assert_eq!(bytes(&format!("{mnemonic} {reg}")), expected);
         }
-        assert_eq!(
-            bytes(&format!("{mnemonic} qword [r12]")),
-            [0x41, 0xff, (ext << 3) + 4, 0x24]
-        );
+        assert_eq!(bytes(&format!("{mnemonic} qword [r12]")), [0x41, 0xff, (ext << 3) + 4, 0x24]);
         assert_eq!(
             bytes(&format!("{mnemonic} [r9+r12*8-1]")),
             [0x43, 0xff, 0x40 + (ext << 3) + 4, 0xe1, 0xff]
@@ -198,33 +184,22 @@ fn indirect_calls_and_jumps_use_long_mode_default_width_and_shared_addresses() {
         [0xe8, 2, 0, 0, 0, 0xeb, 1, 0xc3, 0xc3]
     );
 }
+
 #[test]
 fn new_symbol_memory_forms_keep_data_reference_relocation_intent() {
     let out=assemble("extern x\nmovzx eax,byte [x+2]\nmovsx r8,word [x]\nmovsxd rax,dword [x]\nsete byte [x]\ncall qword [x]\njmp [x]\ncall x",&AMD64).unwrap();
     let relocs = &out.sections[0].relocs;
     assert_eq!(
-        relocs
-            .iter()
-            .map(|r| (r.offset, r.addend))
-            .collect::<Vec<_>>(),
-        [
-            (3, -2),
-            (11, -4),
-            (18, -4),
-            (25, -4),
-            (31, -4),
-            (37, -4),
-            (42, -4)
-        ]
+        relocs.iter().map(|r| (r.offset, r.addend)).collect::<Vec<_>>(),
+        [(3, -2), (11, -4), (18, -4), (25, -4), (31, -4), (37, -4), (42, -4)]
     );
-    assert!(relocs[..6]
-        .iter()
-        .all(|r| matches!(r.kind, RelocKind::Relative32)));
+    assert!(relocs[..6].iter().all(|r| matches!(r.kind, RelocKind::Relative32)));
     assert!(matches!(relocs[6].kind, RelocKind::Branch32));
     for src in ["extern x\ncall [x+rax]", "extern x\nmovzx eax,byte [x+rax]"] {
         reject(src);
     }
 }
+
 #[test]
 fn immediate_push_boundaries_sign_extend_without_truncating_or_changing_register_forms() {
     for (imm, expected) in [
@@ -237,10 +212,7 @@ fn immediate_push_boundaries_sign_extend_without_truncating_or_changing_register
     ] {
         assert_eq!(bytes(&format!("push {imm}")), expected);
     }
-    assert_eq!(
-        bytes("push ax\npush r8\npop r8"),
-        [0x66, 0x50, 0x41, 0x50, 0x41, 0x58]
-    );
+    assert_eq!(bytes("push ax\npush r8\npop r8"), [0x66, 0x50, 0x41, 0x50, 0x41, 0x58]);
     for src in [
         "push -2147483649",
         "push 2147483648",
@@ -254,6 +226,7 @@ fn immediate_push_boundaries_sign_extend_without_truncating_or_changing_register
         reject(src);
     }
 }
+
 #[test]
 fn adc_and_sbb_use_carry_input_opcodes_for_all_scalar_widths() {
     for (mnemonic, byte, wide) in [("adc", 0x10, 0x11), ("sbb", 0x18, 0x19)] {

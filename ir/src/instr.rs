@@ -310,27 +310,11 @@ pub enum Instruction {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Terminator {
-    Br {
-        target: BlockId,
-    },
-    CBr {
-        cond: ValueId,
-        then_bb: BlockId,
-        else_bb: BlockId,
-    },
-    Switch {
-        ty: Type,
-        value: ValueId,
-        default_bb: BlockId,
-        cases: Vec<(ConstValue, BlockId)>,
-    },
-    Ret {
-        ty: Type,
-        value: Option<ValueId>,
-    },
-    Trap {
-        reason: String,
-    },
+    Br { target: BlockId },
+    CBr { cond: ValueId, then_bb: BlockId, else_bb: BlockId },
+    Switch { ty: Type, value: ValueId, default_bb: BlockId, cases: Vec<(ConstValue, BlockId)> },
+    Ret { ty: Type, value: Option<ValueId> },
+    Trap { reason: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

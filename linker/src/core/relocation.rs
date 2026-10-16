@@ -1,6 +1,8 @@
 //! Checked, transactional application of the static AMD64 relocation subset.
 use super::{layout::Layout, symbol_table::SymbolTable};
+
 use object::{ObjectFile, RelocKind};
+
 use std::{collections::BTreeMap, fmt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub enum RelocationErrorKind {
     Overlap,
     Limit,
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelocationError {
     pub kind: RelocationErrorKind,
@@ -21,6 +24,7 @@ pub struct RelocationError {
     pub offset: Option<usize>,
     pub message: String,
 }
+
 impl fmt::Display for RelocationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "relocation {:?}", self.kind)?;
@@ -36,15 +40,11 @@ impl fmt::Display for RelocationError {
         write!(f, ": {}", self.message)
     }
 }
+
 impl std::error::Error for RelocationError {}
+
 fn error(kind: RelocationErrorKind, message: impl Into<String>) -> RelocationError {
-    RelocationError {
-        kind,
-        object: None,
-        section: None,
-        offset: None,
-        message: message.into(),
-    }
+    RelocationError { kind, object: None, section: None, offset: None, message: message.into() }
 }
 
 /// Return patched, independently owned section payloads. No caller input is mutated,
@@ -56,17 +56,15 @@ pub fn apply_relocations(
     max_bytes: u64,
 ) -> Result<Vec<Vec<Vec<u8>>>, RelocationError> {
     let mut symbols = SymbolTable::new();
-    symbols
-        .resolve(objects)
-        .map_err(|e| error(RelocationErrorKind::Resolution, e))?;
+    symbols.resolve(objects).map_err(|e| error(RelocationErrorKind::Resolution, e))?;
+
     let mut total = 0u64;
     for (oi, object) in objects.iter().enumerate() {
         for (si, section) in object.sections.iter().enumerate() {
-            let address = layout
-                .section_offsets
-                .get(oi)
-                .and_then(|x| x.get(si))
-                .ok_or_else(|| error(RelocationErrorKind::Layout, "missing section placement"))?;
+            let address =
+                layout.section_offsets.get(oi).and_then(|x| x.get(si)).ok_or_else(|| {
+                    error(RelocationErrorKind::Layout, "missing section placement")
+                })?;
             address
                 .checked_add(
                     section
@@ -78,19 +76,15 @@ pub fn apply_relocations(
                 .checked_add(section.data.len() as u64)
                 .filter(|n| *n <= max_bytes)
                 .ok_or_else(|| {
-                    error(
-                        RelocationErrorKind::Limit,
-                        "section payload budget exceeded",
-                    )
+                    error(RelocationErrorKind::Limit, "section payload budget exceeded")
                 })?;
         }
     }
+
     let mut patches = Vec::new();
     let mut occupied: BTreeMap<(usize, usize, usize), usize> = BTreeMap::new();
-    for (relocation, reference) in objects
-        .iter()
-        .flat_map(|o| o.relocations.iter())
-        .zip(&symbols.references)
+    for (relocation, reference) in
+        objects.iter().flat_map(|o| o.relocations.iter()).zip(&symbols.references)
     {
         let oi = reference.object_index;
         let si = reference.section_index;
@@ -115,11 +109,12 @@ pub fn apply_relocations(
                         RelocationErrorKind::Unsupported,
                         "unsupported symbol address class",
                     ))
-                }
+                },
             };
             let place = layout.section_offsets[oi][si]
                 .checked_add(relocation.offset as u64)
                 .ok_or_else(|| error(RelocationErrorKind::Layout, "relocation place overflow"))?;
+
             let absolute = i128::from(target) + i128::from(relocation.addend);
             let (value, width) = match relocation.kind {
                 RelocKind::Absolute64 => (absolute, 8),
@@ -131,23 +126,26 @@ pub fn apply_relocations(
                         RelocationErrorKind::Unsupported,
                         "GOTPCREL requires unsupported dynamic/GOT structures",
                     ))
-                }
+                },
             };
+
             let fits = match relocation.kind {
                 RelocKind::Absolute64 => u64::try_from(value).is_ok(),
                 RelocKind::Absolute32 => u32::try_from(value).is_ok(),
                 RelocKind::SignedAbsolute32 | RelocKind::Relative32 | RelocKind::PLT32 => {
                     i32::try_from(value).is_ok()
-                }
+                },
                 RelocKind::Relative8 => i8::try_from(value).is_ok(),
                 RelocKind::GOTPCREL => false,
             };
+
             if !fits {
                 return Err(error(
                     RelocationErrorKind::Range,
                     format!("{:?} value {value} is out of range", relocation.kind),
                 ));
             }
+
             let end = relocation
                 .offset
                 .checked_add(width)
@@ -155,6 +153,7 @@ pub fn apply_relocations(
                 .ok_or_else(|| {
                     error(RelocationErrorKind::Range, "patch exceeds section payload")
                 })?;
+
             let key = (oi, si, relocation.offset);
             if occupied
                 .range(..=key)
@@ -165,20 +164,12 @@ pub fn apply_relocations(
                     .next()
                     .is_some_and(|(&(o, s, start), _)| o == oi && s == si && start < end)
             {
-                return Err(error(
-                    RelocationErrorKind::Overlap,
-                    "overlapping relocation patches",
-                ));
+                return Err(error(RelocationErrorKind::Overlap, "overlapping relocation patches"));
             }
             occupied.insert(key, end);
-            Ok((
-                oi,
-                si,
-                relocation.offset,
-                width,
-                (value as u64).to_le_bytes(),
-            ))
+            Ok((oi, si, relocation.offset, width, (value as u64).to_le_bytes()))
         })();
+
         patches.push(result.map_err(|mut e: RelocationError| {
             e.object = Some(oi);
             e.section = Some(si);
@@ -186,13 +177,13 @@ pub fn apply_relocations(
             e
         })?);
     }
-    let mut payloads: Vec<Vec<Vec<u8>>> = objects
-        .iter()
-        .map(|o| o.sections.iter().map(|s| s.data.clone()).collect())
-        .collect();
+
+    let mut payloads: Vec<Vec<Vec<u8>>> =
+        objects.iter().map(|o| o.sections.iter().map(|s| s.data.clone()).collect()).collect();
     for (oi, si, offset, width, bytes) in patches {
         payloads[oi][si][offset..offset + width].copy_from_slice(&bytes[..width]);
     }
+
     Ok(payloads)
 }
 
@@ -213,10 +204,7 @@ impl whale_diagnostic::ToDiagnostic for RelocationError {
             d.contexts.push(Context::Input(o));
         }
         if let Some(s) = self.section {
-            d.contexts.push(Context::Section {
-                index: s,
-                name: None,
-            });
+            d.contexts.push(Context::Section { index: s, name: None });
         }
         if let Some(at) = self.offset {
             d.contexts.push(Context::SectionOffset(at as u64));

@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: MPL-2.0
 use super::reverse_render::{stream_structured, BoundedOutput, InstructionView, Stream};
+
 use reverse::{
     image::{CodeRegion, Image},
     CfgTarget, ControlFlowGraph, EdgeKind,
 };
+
 use serde::{ser::SerializeMap, Serialize, Serializer};
+
 use std::fmt::Write;
+
 #[derive(Serialize)]
 struct Block<'a> {
     offset: usize,
     end: usize,
     instruction_indices: &'a [usize],
 }
+
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum Target<'a> {
@@ -19,18 +24,21 @@ enum Target<'a> {
     Symbol { id: u64, name: &'a str },
     Unresolved,
 }
+
 #[derive(Serialize)]
 struct Edge<'a> {
     from: usize,
     kind: String,
     target: Target<'a>,
 }
+
 #[derive(Serialize)]
 struct Stop {
     offset: usize,
     kind: String,
     conflict: Option<usize>,
 }
+
 #[derive(Serialize)]
 struct Relocation<'a> {
     offset: usize,
@@ -38,6 +46,7 @@ struct Relocation<'a> {
     addend: i64,
     kind: String,
 }
+
 struct Report<'a, 'b> {
     image: &'a Image<'b>,
     region: &'a CodeRegion<'b>,
@@ -46,6 +55,7 @@ struct Report<'a, 'b> {
     mode: &'a str,
     entry: usize,
 }
+
 fn retained(kind: EdgeKind, mode: &str) -> bool {
     mode != "xrefs"
         || !matches!(
@@ -53,6 +63,7 @@ fn retained(kind: EdgeKind, mode: &str) -> bool {
             EdgeKind::FallThrough | EdgeKind::ConditionalFallThrough | EdgeKind::LoopFallThrough
         )
 }
+
 impl Serialize for Report<'_, '_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(12))?;
@@ -74,38 +85,24 @@ impl Serialize for Report<'_, '_> {
         )?;
         map.serialize_entry(
             "instructions",
-            &Stream(
-                graph
-                    .instructions
-                    .iter()
-                    .map(|instruction| InstructionView {
-                        instruction,
-                        image: self.image,
-                        region: self.region.id,
-                        base: self.region.address,
-                    }),
-            ),
+            &Stream(graph.instructions.iter().map(|instruction| InstructionView {
+                instruction,
+                image: self.image,
+                region: self.region.id,
+                base: self.region.address,
+            })),
         )?;
         map.serialize_entry(
             "edges",
-            &Stream(
-                graph
-                    .edges
-                    .iter()
-                    .filter(|e| retained(e.kind, self.mode))
-                    .map(|e| Edge {
-                        from: e.from,
-                        kind: format!("{:?}", e.kind),
-                        target: match e.target {
-                            CfgTarget::Address(address) => Target::Address { address },
-                            CfgTarget::Symbol(id) => Target::Symbol {
-                                id,
-                                name: self.names[id as usize],
-                            },
-                            CfgTarget::Unresolved => Target::Unresolved,
-                        },
-                    }),
-            ),
+            &Stream(graph.edges.iter().filter(|e| retained(e.kind, self.mode)).map(|e| Edge {
+                from: e.from,
+                kind: format!("{:?}", e.kind),
+                target: match e.target {
+                    CfgTarget::Address(address) => Target::Address { address },
+                    CfgTarget::Symbol(id) => Target::Symbol { id, name: self.names[id as usize] },
+                    CfgTarget::Unresolved => Target::Unresolved,
+                },
+            })),
         )?;
         map.serialize_entry(
             "stops",
@@ -117,28 +114,26 @@ impl Serialize for Report<'_, '_> {
         )?;
         map.serialize_entry(
             "relocations",
-            &Stream(
-                self.image
-                    .relocations
-                    .iter()
-                    .filter(|r| r.region == self.region.id)
-                    .map(|r| Relocation {
-                        offset: r.offset,
-                        symbol: &r.symbol,
-                        addend: r.addend,
-                        kind: format!("{:?}", r.kind),
-                    }),
-            ),
+            &Stream(self.image.relocations.iter().filter(|r| r.region == self.region.id).map(
+                |r| Relocation {
+                    offset: r.offset,
+                    symbol: &r.symbol,
+                    addend: r.addend,
+                    kind: format!("{:?}", r.kind),
+                },
+            )),
         )?;
         map.end()
     }
 }
+
 pub(super) struct RenderOptions<'a> {
     pub mode: &'a str,
     pub entry: usize,
     pub structured: bool,
     pub limit: usize,
 }
+
 pub(super) fn render(
     image: &Image<'_>,
     region: &CodeRegion<'_>,
@@ -146,12 +141,7 @@ pub(super) fn render(
     names: &[&str],
     options: RenderOptions<'_>,
 ) -> Result<String, String> {
-    let RenderOptions {
-        mode,
-        entry,
-        structured,
-        limit,
-    } = options;
+    let RenderOptions { mode, entry, structured, limit } = options;
     if result
         .edges
         .iter()
@@ -160,17 +150,7 @@ pub(super) fn render(
         return Err("Wave graph returned an unknown symbol identity".into());
     }
     if structured {
-        return stream_structured(
-            &Report {
-                image,
-                region,
-                result,
-                names,
-                mode,
-                entry,
-            },
-            limit,
-        );
+        return stream_structured(&Report { image, region, result, names, mode, entry }, limit);
     }
     let mut output = BoundedOutput::new(limit);
     let write = (|| -> std::fmt::Result {

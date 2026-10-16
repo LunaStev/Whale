@@ -4,11 +4,7 @@ fn probe(params: Vec<Type>, result: Type, ins: impl FnOnce(ValueId) -> Instructi
     let mut b = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = b.begin_function(
         "probe",
-        params
-            .into_iter()
-            .enumerate()
-            .map(|(i, t)| (format!("p{i}"), t))
-            .collect(),
+        params.into_iter().enumerate().map(|(i, t)| (format!("p{i}"), t)).collect(),
         Type::Void,
     );
     f.ret(None);
@@ -18,15 +14,14 @@ fn probe(params: Vec<Type>, result: Type, ins: impl FnOnce(ValueId) -> Instructi
     m.functions[0].blocks[0].instructions.push(ins(ValueId(99)));
     m
 }
+
 fn cast(op: CastOp, source: Type, destination: Type) -> Module {
-    probe(vec![source.clone()], destination.clone(), |dst| {
-        Instruction::Cast {
-            dst,
-            op,
-            src_ty: source,
-            src: ValueId(0),
-            dst_ty: destination,
-        }
+    probe(vec![source.clone()], destination.clone(), |dst| Instruction::Cast {
+        dst,
+        op,
+        src_ty: source,
+        src: ValueId(0),
+        dst_ty: destination,
     })
 }
 
@@ -50,11 +45,7 @@ fn legal_casts_cover_every_opcode_and_scalar_width() {
         (CastOp::Bitcast, Type::F16, Type::U16),
         (CastOp::Bitcast, Type::I32, Type::F32),
         (CastOp::Bitcast, Type::F64, Type::U64),
-        (
-            CastOp::Bitcast,
-            Type::ptr_to(Type::I32),
-            Type::ptr_to(Type::Void),
-        ),
+        (CastOp::Bitcast, Type::ptr_to(Type::I32), Type::ptr_to(Type::Void)),
         (CastOp::PtrToInt, Type::ptr_to(Type::I32), Type::U64),
         (CastOp::IntToPtr, Type::U64, Type::ptr_to(Type::I32)),
     ] {
@@ -109,10 +100,7 @@ fn casts_reject_wrong_width_direction_category_and_signedness() {
         (CastOp::Trunc, Type::I32, Type::Void),
     ] {
         let m = cast(op, source, destination);
-        assert!(
-            matches!(verify_module(&m), Err(VerifyError::InvalidCast { .. })),
-            "{m:?}"
-        );
+        assert!(matches!(verify_module(&m), Err(VerifyError::InvalidCast { .. })), "{m:?}");
     }
 }
 
@@ -136,10 +124,7 @@ fn cast_annotation_cannot_override_the_actual_operand_type() {
     ));
     let mut m = cast(CastOp::ZExt, Type::I8, Type::I32);
     m.functions[0].value_types.last_mut().unwrap().1 = Type::I64;
-    assert!(matches!(
-        verify_module(&m),
-        Err(VerifyError::ValueTypeMismatch { .. })
-    ));
+    assert!(matches!(verify_module(&m), Err(VerifyError::ValueTypeMismatch { .. })));
 }
 
 #[test]
@@ -162,12 +147,7 @@ fn checked_arithmetic_checks_operands_signedness_and_result_tuple() {
             })
         };
         let result = Type::Tuple(vec![ty.clone(), Type::Bool]);
-        verify_module(&make(
-            vec![ty.clone(), ty.clone()],
-            result.clone(),
-            ty.clone(),
-        ))
-        .unwrap();
+        verify_module(&make(vec![ty.clone(), ty.clone()], result.clone(), ty.clone())).unwrap();
         for params in [vec![Type::Bool, ty.clone()], vec![ty.clone(), Type::Bool]] {
             assert!(matches!(
                 verify_module(&make(params, result.clone(), ty.clone())),
@@ -189,11 +169,7 @@ fn checked_arithmetic_checks_operands_signedness_and_result_tuple() {
             Type::Bool,
             Type::F32,
             Type::ptr_to(Type::I32),
-            if matches!(ty, Type::I1 | Type::I32 | Type::I128) {
-                Type::U32
-            } else {
-                Type::I32
-            },
+            if matches!(ty, Type::I1 | Type::I32 | Type::I128) { Type::U32 } else { Type::I32 },
         ] {
             assert!(matches!(
                 verify_module(&make(
@@ -211,35 +187,18 @@ fn checked_arithmetic_checks_operands_signedness_and_result_tuple() {
 fn tuple_extraction_checks_tuple_index_and_exact_field_type() {
     for (source, index, destination, valid) in [
         (Type::Tuple(vec![Type::I32, Type::Bool]), 0, Type::I32, true),
-        (
-            Type::Tuple(vec![Type::I32, Type::Bool]),
-            1,
-            Type::Bool,
-            true,
-        ),
+        (Type::Tuple(vec![Type::I32, Type::Bool]), 1, Type::Bool, true),
         (Type::Tuple(vec![Type::I32, Type::Bool]), 1, Type::I1, false),
-        (
-            Type::Tuple(vec![Type::I32, Type::Bool]),
-            0,
-            Type::U32,
-            false,
-        ),
-        (
-            Type::Tuple(vec![Type::I32, Type::Bool]),
-            2,
-            Type::I32,
-            false,
-        ),
+        (Type::Tuple(vec![Type::I32, Type::Bool]), 0, Type::U32, false),
+        (Type::Tuple(vec![Type::I32, Type::Bool]), 2, Type::I32, false),
         (Type::Tuple(vec![]), 0, Type::I32, false),
         (Type::I32, 0, Type::I32, false),
     ] {
-        let m = probe(vec![source], destination.clone(), |dst| {
-            Instruction::Extract {
-                dst,
-                dst_ty: destination,
-                tuple: ValueId(0),
-                index,
-            }
+        let m = probe(vec![source], destination.clone(), |dst| Instruction::Extract {
+            dst,
+            dst_ty: destination,
+            tuple: ValueId(0),
+            index,
         });
         assert_eq!(verify_module(&m).is_ok(), valid, "{m:?}");
     }

@@ -16,23 +16,25 @@ pub enum BuilderError {
     TerminatedBlock(BlockId),
     PhiAfterInstruction(BlockId),
 }
+
 impl std::fmt::Display for BuilderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnknownBlock(id) => write!(f, "unknown builder block {id:?}"),
             Self::UnknownParameter { index, count } => {
                 write!(f, "parameter {index} is outside 0..{count}")
-            }
+            },
             Self::UnknownValue(id) => write!(f, "unknown builder value {id:?}"),
             Self::UnknownGlobal(id) => write!(f, "unknown addressable global {id:?}"),
             Self::InvalidPointerOperands => f.write_str("matching data-pointer operands required"),
             Self::TerminatedBlock(id) => write!(f, "builder block {id:?} is already terminated"),
             Self::PhiAfterInstruction(id) => {
                 write!(f, "phi must precede other instructions in {id:?}")
-            }
+            },
         }
     }
 }
+
 impl std::error::Error for BuilderError {}
 
 pub struct ModuleBuilder {
@@ -59,22 +61,20 @@ impl<'a> FunctionBuilder<'a> {
             .ty
             .clone();
         let dst = self.define_value(Type::ptr_to(ty.clone()));
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::GlobalAddr { dst, global, ty });
+        self.cur_block_mut().instructions.push(Instruction::GlobalAddr { dst, global, ty });
         Ok(dst)
     }
+
     pub fn try_lifetime_end(&mut self, ptr: ValueId) -> Result<(), BuilderError> {
         self.ensure_insertable()?;
         self.ensure_values(&[ptr])?;
         if !matches!(self.func.value_type(ptr), Some(Type::Ptr(_))) {
             return Err(BuilderError::InvalidPointerOperands);
         }
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::LifetimeEnd { ptr });
+        self.cur_block_mut().instructions.push(Instruction::LifetimeEnd { ptr });
         Ok(())
     }
+
     pub fn try_ptrdiff(&mut self, lhs: ValueId, rhs: ValueId) -> Result<ValueId, BuilderError> {
         self.ensure_insertable()?;
         self.ensure_values(&[lhs, rhs])?;
@@ -83,11 +83,10 @@ impl<'a> FunctionBuilder<'a> {
             return Err(BuilderError::InvalidPointerOperands);
         }
         let dst = self.define_value(Type::I128);
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::PtrDiff { dst, lhs, rhs });
+        self.cur_block_mut().instructions.push(Instruction::PtrDiff { dst, lhs, rhs });
         Ok(dst)
     }
+
     pub fn current_block_id(&self) -> BlockId {
         self.insert_block
     }
@@ -100,9 +99,7 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn not(&mut self, ty: Type, src: ValueId) -> ValueId {
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Not { dst, ty, src });
+        self.cur_block_mut().instructions.push(Instruction::Not { dst, ty, src });
         dst
     }
 
@@ -118,18 +115,11 @@ impl<'a> FunctionBuilder<'a> {
             self.ensure_values(&[*value])?;
             self.ensure_block(*block)?;
         }
-        if self
-            ._cur_block()
-            .instructions
-            .iter()
-            .any(|i| !matches!(i, Instruction::Phi { .. }))
-        {
+        if self._cur_block().instructions.iter().any(|i| !matches!(i, Instruction::Phi { .. })) {
             return Err(BuilderError::PhiAfterInstruction(self.insert_block));
         }
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Phi { dst, ty, incomings });
+        self.cur_block_mut().instructions.push(Instruction::Phi { dst, ty, incomings });
         Ok(dst)
     }
 
@@ -140,18 +130,12 @@ impl<'a> FunctionBuilder<'a> {
     /// Legacy diagnostic construction; verification rejects this instruction.
     pub fn undef(&mut self, ty: Type) -> ValueId {
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Undef { dst, ty });
+        self.cur_block_mut().instructions.push(Instruction::Undef { dst, ty });
         dst
     }
 
     fn _cur_block(&self) -> &BasicBlock {
-        self.func
-            .blocks
-            .iter()
-            .find(|b| b.id == self.insert_block)
-            .expect("insert block not found")
+        self.func.blocks.iter().find(|b| b.id == self.insert_block).expect("insert block not found")
     }
 
     pub fn is_current_block_terminated(&self) -> bool {
@@ -167,12 +151,8 @@ impl<'a> FunctionBuilder<'a> {
         let dst = self.define_value(Type::Ptr(Box::new(ty.clone())));
         let entry = self.func.entry;
 
-        let entry_block = self
-            .func
-            .blocks
-            .iter_mut()
-            .find(|b| b.id == entry)
-            .expect("entry block not found");
+        let entry_block =
+            self.func.blocks.iter_mut().find(|b| b.id == entry).expect("entry block not found");
 
         let pos = entry_block
             .instructions
@@ -180,9 +160,7 @@ impl<'a> FunctionBuilder<'a> {
             .position(|ins| !matches!(ins, Instruction::Alloca { .. }))
             .unwrap_or(entry_block.instructions.len());
 
-        entry_block
-            .instructions
-            .insert(pos, Instruction::Alloca { dst, ty, align });
+        entry_block.instructions.insert(pos, Instruction::Alloca { dst, ty, align });
 
         if self.mb.source_mapped_functions.contains(&self.func.id) {
             self.mb
@@ -217,12 +195,7 @@ impl ModuleBuilder {
         init: ConstValue,
         align: u32,
     ) -> crate::GlobalId {
-        self.add_global_const(
-            name,
-            crate::ConstExpr::literal(ty, init.clone()),
-            init,
-            align,
-        )
+        self.add_global_const(name, crate::ConstExpr::literal(ty, init.clone()), init, align)
     }
 
     pub fn add_global_const(
@@ -256,36 +229,24 @@ impl ModuleBuilder {
             return Err(error);
         }
         if self.module.globals.iter().any(|g| g.name == storage.name)
-            || self
-                .module
-                .global_storage
-                .iter()
-                .any(|g| g.name == storage.name)
+            || self.module.global_storage.iter().any(|g| g.name == storage.name)
         {
             return Err(crate::GlobalStorageError::DuplicateName);
         }
         if storage.link_name.as_ref().is_some_and(|link| {
-            self.module
-                .declarations
-                .iter()
-                .any(|d| d.link_name.as_ref() == Some(link))
-                || self
-                    .module
-                    .global_storage
-                    .iter()
-                    .any(|g| g.link_name.as_ref() == Some(link))
+            self.module.declarations.iter().any(|d| d.link_name.as_ref() == Some(link))
+                || self.module.global_storage.iter().any(|g| g.link_name.as_ref() == Some(link))
         }) {
             return Err(crate::GlobalStorageError::LinkNameCollision);
         }
         let id = crate::GlobalId(self.next_global);
-        self.next_global = self
-            .next_global
-            .checked_add(1)
-            .ok_or(crate::GlobalStorageError::DuplicateIdentity)?;
+        self.next_global =
+            self.next_global.checked_add(1).ok_or(crate::GlobalStorageError::DuplicateIdentity)?;
         storage.id = id;
         self.module.global_storage.push(storage);
         Ok(id)
     }
+
     pub fn declare_function(
         &mut self,
         name: impl Into<String>,
@@ -322,12 +283,7 @@ impl ModuleBuilder {
             crate::limits::discard_signature(candidate.signature);
             return Err(error);
         }
-        if let Some(existing) = self
-            .module
-            .declarations
-            .iter()
-            .find(|d| d.name == candidate.name)
-        {
+        if let Some(existing) = self.module.declarations.iter().find(|d| d.name == candidate.name) {
             let mut same = candidate.clone();
             same.id = existing.id;
             return if &same == existing {
@@ -337,12 +293,7 @@ impl ModuleBuilder {
             };
         }
         if let Some(link) = &candidate.link_name {
-            if self
-                .module
-                .declarations
-                .iter()
-                .any(|d| d.link_name.as_ref() == Some(link))
-            {
+            if self.module.declarations.iter().any(|d| d.link_name.as_ref() == Some(link)) {
                 return Err(crate::CallError::LinkNameCollision(link.clone()));
             }
         }
@@ -425,21 +376,10 @@ impl ModuleBuilder {
         let entry = self.fresh_block();
         let entry_block = BasicBlock::new(entry, "entry");
 
-        let func = Function {
-            id,
-            name,
-            params: p,
-            ret_ty,
-            blocks: vec![entry_block],
-            entry,
-            value_types,
-        };
+        let func =
+            Function { id, name, params: p, ret_ty, blocks: vec![entry_block], entry, value_types };
 
-        FunctionBuilder {
-            mb: self,
-            func,
-            insert_block: entry,
-        }
+        FunctionBuilder { mb: self, func, insert_block: entry }
     }
 
     fn fresh_value(&mut self) -> ValueId {
@@ -475,12 +415,14 @@ impl FunctionBuilder<'_> {
     fn charge_source_work(&mut self, amount: usize) -> Result<(), crate::LowerError> {
         self.mb.charge_source_work(amount)
     }
+
     pub(crate) fn retain_const_sources(
         &mut self,
         expression: &crate::lower_ast::frontend::Expr,
     ) -> Result<(), crate::LowerError> {
         self.mb.retain_const_sources(expression)
     }
+
     /// Flush the final hoisting adjustment while resource failures can still be
     /// returned to the frontend. Public finish then has no pending metadata scan.
     pub(crate) fn finish_source_mapping(&mut self) -> Result<(), crate::LowerError> {
@@ -490,14 +432,10 @@ impl FunctionBuilder<'_> {
         }
         Ok(())
     }
+
     pub(crate) fn source_checkpoint(&mut self) -> Result<SourceCheckpoint, crate::LowerError> {
         self.charge_source_work(self.func.blocks.len())?;
-        let work = self
-            .func
-            .blocks
-            .iter()
-            .map(|b| b.instructions.len())
-            .sum::<usize>();
+        let work = self.func.blocks.iter().map(|b| b.instructions.len()).sum::<usize>();
         self.charge_source_work(work + self.mb.module.sources.mappings.len())?;
         self.flush_source_shifts();
         Ok(SourceCheckpoint(
@@ -518,28 +456,17 @@ impl FunctionBuilder<'_> {
                 .collect(),
         ))
     }
+
     pub(crate) fn annotate_source(
         &mut self,
         annotation: &crate::SourceAnnotation,
         before: SourceCheckpoint,
     ) -> Result<(), crate::LowerError> {
         self.charge_source_work(self.func.blocks.len() + self.mb.module.sources.files.len())?;
-        let work = self
-            .func
-            .blocks
-            .iter()
-            .map(|b| b.instructions.len())
-            .sum::<usize>()
+        let work = self.func.blocks.iter().map(|b| b.instructions.len()).sum::<usize>()
             + self.mb.module.sources.mappings.len()
             + self.mb.module.sources.originals.len()
-            + self
-                .mb
-                .module
-                .sources
-                .files
-                .iter()
-                .map(|f| f.name.len())
-                .sum::<usize>()
+            + self.mb.module.sources.files.iter().map(|f| f.name.len()).sum::<usize>()
             + annotation.source.as_ref().map_or(0, |s| s.file.len());
         self.charge_source_work(work)?;
         self.flush_source_shifts();
@@ -567,27 +494,15 @@ impl FunctionBuilder<'_> {
                 } else {
                     index >= old_len
                 };
-                let target = crate::SourceTarget::Instruction {
-                    function: self.func.id,
-                    block: b.id,
-                    index,
-                };
+                let target =
+                    crate::SourceTarget::Instruction { function: self.func.id, block: b.id, index };
                 if new && !existing.contains(&target) {
-                    sources.mappings.push(crate::SourceMapping {
-                        target,
-                        original: annotation.id,
-                    });
+                    sources.mappings.push(crate::SourceMapping { target, original: annotation.id });
                 }
             }
-            let target = crate::SourceTarget::Terminator {
-                function: self.func.id,
-                block: b.id,
-            };
+            let target = crate::SourceTarget::Terminator { function: self.func.id, block: b.id };
             if b.terminator.is_some() && !old_term && !existing.contains(&target) {
-                sources.mappings.push(crate::SourceMapping {
-                    target,
-                    original: annotation.id,
-                });
+                sources.mappings.push(crate::SourceMapping { target, original: annotation.id });
             }
         }
         self.mb.source_mapped_functions.insert(self.func.id);
@@ -599,11 +514,8 @@ impl FunctionBuilder<'_> {
     fn flush_source_shifts(&mut self) {
         if let Some((position, count)) = self.mb.source_shifts.remove(&self.func.id) {
             for mapping in &mut self.mb.module.sources.mappings {
-                if let crate::SourceTarget::Instruction {
-                    function,
-                    block,
-                    index,
-                } = &mut mapping.target
+                if let crate::SourceTarget::Instruction { function, block, index } =
+                    &mut mapping.target
                 {
                     if *function == self.func.id && *block == self.func.entry && *index >= position
                     {
@@ -620,15 +532,15 @@ impl ModuleBuilder {
     pub(crate) fn set_source_work_limit(&mut self, work: usize) {
         self.source_work = work;
     }
+
     fn charge_source_work(&mut self, amount: usize) -> Result<(), crate::LowerError> {
-        self.source_work =
-            self.source_work
-                .checked_sub(amount)
-                .ok_or(crate::LowerError::ResourceLimit(
-                    crate::AstLimitError::SourceWork,
-                ))?;
+        self.source_work = self
+            .source_work
+            .checked_sub(amount)
+            .ok_or(crate::LowerError::ResourceLimit(crate::AstLimitError::SourceWork))?;
         Ok(())
     }
+
     fn retain_source(
         &mut self,
         annotation: &crate::SourceAnnotation,
@@ -636,18 +548,13 @@ impl ModuleBuilder {
         let work = 1
             + self.module.sources.originals.len()
             + self.module.sources.files.len()
-            + self
-                .module
-                .sources
-                .files
-                .iter()
-                .map(|f| f.name.len())
-                .sum::<usize>()
+            + self.module.sources.files.iter().map(|f| f.name.len()).sum::<usize>()
             + annotation.source.as_ref().map_or(0, |s| s.file.len());
         self.charge_source_work(work)?;
         self.module.sources.add_frontend_original(annotation);
         Ok(())
     }
+
     pub(crate) fn retain_const_sources(
         &mut self,
         expression: &crate::lower_ast::frontend::Expr,
@@ -657,23 +564,21 @@ impl ModuleBuilder {
         while let Some(expression) = pending.pop() {
             self.charge_source_work(1)?;
             match expression {
-                Expr::Located {
-                    annotation,
-                    expression,
-                } => {
+                Expr::Located { annotation, expression } => {
                     self.retain_source(annotation)?;
                     pending.push(expression);
-                }
+                },
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
                     pending.push(right);
                     pending.push(left);
-                }
+                },
                 Expr::BitNot(value) => pending.push(value),
-                _ => {}
+                _ => {},
             }
         }
         Ok(())
     }
+
     pub(crate) fn annotate_global_source(
         &mut self,
         id: crate::GlobalId,
@@ -725,10 +630,7 @@ impl<'a> FunctionBuilder<'a> {
             .params
             .get(index)
             .map(|p| p.id)
-            .ok_or(BuilderError::UnknownParameter {
-                index,
-                count: self.func.params.len(),
-            })
+            .ok_or(BuilderError::UnknownParameter { index, count: self.func.params.len() })
     }
 
     pub fn try_set_insert_point(&mut self, bb: BlockId) -> Result<(), BuilderError> {
@@ -903,15 +805,7 @@ impl<'a> FunctionBuilder<'a> {
     pub fn try_alloca_in_entry(&mut self, ty: Type, align: u32) -> Result<ValueId, BuilderError> {
         self.ensure_insertable()?;
         self.ensure_block(self.func.entry)?;
-        if self
-            .func
-            .blocks
-            .iter()
-            .find(|b| b.id == self.func.entry)
-            .unwrap()
-            .terminator
-            .is_some()
-        {
+        if self.func.blocks.iter().find(|b| b.id == self.func.entry).unwrap().terminator.is_some() {
             return Err(BuilderError::TerminatedBlock(self.func.entry));
         }
         Ok(self.alloca_in_entry(ty, align))
@@ -958,8 +852,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn param_value(&self, index: usize) -> ValueId {
-        self.try_param_value(index)
-            .expect("invalid builder parameter")
+        self.try_param_value(index).expect("invalid builder parameter")
     }
 
     pub fn const_decl(
@@ -969,14 +862,12 @@ impl<'a> FunctionBuilder<'a> {
         value: ConstValue,
     ) -> ValueId {
         let dst = self.define_value(expression.ty.clone());
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::ConstDecl {
-                dst,
-                name: name.into(),
-                expression,
-                value,
-            });
+        self.cur_block_mut().instructions.push(Instruction::ConstDecl {
+            dst,
+            name: name.into(),
+            expression,
+            value,
+        });
         dst
     }
 
@@ -987,8 +878,7 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn set_insert_point(&mut self, bb: BlockId) {
-        self.try_set_insert_point(bb)
-            .expect("invalid builder block");
+        self.try_set_insert_point(bb).expect("invalid builder block");
     }
 
     fn cur_block_mut(&mut self) -> &mut BasicBlock {
@@ -1041,74 +931,38 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn bin(&mut self, op: BinOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut().instructions.push(Instruction::Bin {
-            dst,
-            op,
-            ty,
-            lhs,
-            rhs,
-        });
+        self.cur_block_mut().instructions.push(Instruction::Bin { dst, op, ty, lhs, rhs });
         dst
     }
 
     pub fn icmp(&mut self, pred: ICmpPred, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst = self.define_value(Type::Bool);
-        self.cur_block_mut().instructions.push(Instruction::ICmp {
-            dst,
-            pred,
-            ty,
-            lhs,
-            rhs,
-        });
+        self.cur_block_mut().instructions.push(Instruction::ICmp { dst, pred, ty, lhs, rhs });
         dst
     }
 
     pub fn cmp(&mut self, op: CmpOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst = self.define_value(Type::Bool);
-        self.cur_block_mut().instructions.push(Instruction::Cmp {
-            dst,
-            op,
-            ty,
-            lhs,
-            rhs,
-        });
+        self.cur_block_mut().instructions.push(Instruction::Cmp { dst, op, ty, lhs, rhs });
         dst
     }
 
     pub fn checked(&mut self, op: CheckedOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst_ty = Type::Tuple(vec![ty.clone(), Type::Bool]);
         let dst = self.define_value(dst_ty);
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Checked {
-                dst,
-                op,
-                ty,
-                lhs,
-                rhs,
-            });
+        self.cur_block_mut().instructions.push(Instruction::Checked { dst, op, ty, lhs, rhs });
         dst
     }
 
     pub fn extract(&mut self, tuple_ty: Type, dst_ty: Type, tuple: ValueId, index: u32) -> ValueId {
         let dst = self.define_value(dst_ty.clone());
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Extract {
-                dst,
-                dst_ty,
-                tuple,
-                index,
-            });
+        self.cur_block_mut().instructions.push(Instruction::Extract { dst, dst_ty, tuple, index });
         let _ = tuple_ty;
         dst
     }
 
     pub fn trap_if(&mut self, cond: ValueId, reason: impl Into<String>) {
-        self.cur_block_mut().instructions.push(Instruction::TrapIf {
-            cond,
-            reason: reason.into(),
-        });
+        self.cur_block_mut().instructions.push(Instruction::TrapIf { cond, reason: reason.into() });
     }
 
     pub fn br(&mut self, target: BlockId) {
@@ -1118,11 +972,7 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn cbr(&mut self, cond: ValueId, then_bb: BlockId, else_bb: BlockId) {
         let blk = self.cur_block_mut();
-        blk.terminator = Some(Terminator::CBr {
-            cond,
-            then_bb,
-            else_bb,
-        });
+        blk.terminator = Some(Terminator::CBr { cond, then_bb, else_bb });
     }
 
     pub fn ret(&mut self, value: Option<ValueId>) {
@@ -1133,9 +983,7 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn trap(&mut self, reason: impl Into<String>) {
         let blk = self.cur_block_mut();
-        blk.terminator = Some(Terminator::Trap {
-            reason: reason.into(),
-        });
+        blk.terminator = Some(Terminator::Trap { reason: reason.into() });
     }
 
     pub fn function_id(&self, name: &str) -> Result<crate::FunctionId, crate::CallError> {
@@ -1150,12 +998,9 @@ impl<'a> FunctionBuilder<'a> {
             crate::limits::discard_signature(signature);
             return Err(error);
         }
-        self.ensure_insertable()
-            .map_err(crate::CallError::Builder)?;
+        self.ensure_insertable().map_err(crate::CallError::Builder)?;
         let dst = self.define_value(Type::FnPtr(Box::new(signature.clone())));
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::NullFunction { dst, signature });
+        self.cur_block_mut().instructions.push(Instruction::NullFunction { dst, signature });
         Ok(dst)
     }
 
@@ -1165,16 +1010,13 @@ impl<'a> FunctionBuilder<'a> {
     ) -> Result<ValueId, crate::CallError> {
         let signature = self.callee_signature(&Callee::Direct(function))?;
         crate::function::validate_signature(&signature)?;
-        self.ensure_insertable()
-            .map_err(crate::CallError::Builder)?;
+        self.ensure_insertable().map_err(crate::CallError::Builder)?;
         let dst = self.define_value(Type::FnPtr(Box::new(signature.clone())));
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::FunctionAddr {
-                dst,
-                function,
-                signature,
-            });
+        self.cur_block_mut().instructions.push(Instruction::FunctionAddr {
+            dst,
+            function,
+            signature,
+        });
         Ok(dst)
     }
 
@@ -1192,7 +1034,7 @@ impl<'a> FunctionBuilder<'a> {
                     .find(|d| d.id == *id)
                     .ok_or(crate::CallError::UnknownFunction(*id))?
                     .signature
-            }
+            },
             Callee::Indirect(value) => match self.func.value_type(*value) {
                 Some(Type::FnPtr(sig)) => sig,
                 Some(_) => return Err(crate::CallError::NotFunctionPointer(*value)),
@@ -1208,8 +1050,7 @@ impl<'a> FunctionBuilder<'a> {
         callee: Callee,
         args: Vec<ValueId>,
     ) -> Result<Option<ValueId>, crate::CallError> {
-        self.ensure_insertable()
-            .map_err(crate::CallError::Builder)?;
+        self.ensure_insertable().map_err(crate::CallError::Builder)?;
         let signature = self.callee_signature(&callee)?;
         crate::function::validate_signature(&signature)?;
         if args.len() != signature.params.len() {
@@ -1219,10 +1060,7 @@ impl<'a> FunctionBuilder<'a> {
             });
         }
         for (index, (arg, expected)) in args.iter().zip(&signature.params).enumerate() {
-            let got = self
-                .func
-                .value_type(*arg)
-                .ok_or(crate::CallError::UnknownValue(*arg))?;
+            let got = self.func.value_type(*arg).ok_or(crate::CallError::UnknownValue(*arg))?;
             if got != expected {
                 return Err(crate::CallError::ArgumentType {
                     index,
@@ -1233,11 +1071,7 @@ impl<'a> FunctionBuilder<'a> {
         }
         let ret_ty = signature.ret;
 
-        let dst = if ret_ty == Type::Void {
-            None
-        } else {
-            Some(self.define_value(ret_ty.clone()))
-        };
+        let dst = if ret_ty == Type::Void { None } else { Some(self.define_value(ret_ty.clone())) };
         self.cur_block_mut().instructions.push(Instruction::Call {
             convention: signature.convention,
             dst,
@@ -1297,36 +1131,22 @@ impl<'a> FunctionBuilder<'a> {
 
     pub fn alloca(&mut self, ty: Type, align: u32) -> ValueId {
         let dst = self.define_value(Type::Ptr(Box::new(ty.clone())));
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Alloca { dst, ty, align });
+        self.cur_block_mut().instructions.push(Instruction::Alloca { dst, ty, align });
         dst
     }
 
     pub fn load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {
         let dst = self.define_value(ty.clone());
-        self.cur_block_mut().instructions.push(Instruction::Load {
-            dst,
-            ty,
-            ptr,
-            align,
-        });
+        self.cur_block_mut().instructions.push(Instruction::Load { dst, ty, ptr, align });
         dst
     }
 
     /// Revoke initialization at this program point without zeroing storage.
     pub fn uninit(&mut self, ty: Type, ptr: ValueId, align: u32) {
-        self.cur_block_mut()
-            .instructions
-            .push(Instruction::Uninit { ty, ptr, align });
+        self.cur_block_mut().instructions.push(Instruction::Uninit { ty, ptr, align });
     }
 
     pub fn store(&mut self, ty: Type, value: ValueId, ptr: ValueId, align: u32) {
-        self.cur_block_mut().instructions.push(Instruction::Store {
-            ty,
-            value,
-            ptr,
-            align,
-        });
+        self.cur_block_mut().instructions.push(Instruction::Store { ty, value, ptr, align });
     }
 }

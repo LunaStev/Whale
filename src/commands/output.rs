@@ -23,10 +23,7 @@ fn check_distinct(input: &Path, output: &Path) -> io::Result<Option<fs::Permissi
         ));
     }
     if !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "output must be a regular file",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "output must be a regular file"));
     }
     Ok(Some(metadata.permissions()))
 }
@@ -37,13 +34,8 @@ fn publish_with(
     write: impl FnOnce(&mut fs::File) -> io::Result<()>,
 ) -> io::Result<()> {
     let permissions = check_distinct(input, output)?;
-    let directory = output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temporary = tempfile::Builder::new()
-        .prefix(".whale-output-")
-        .tempfile_in(directory)?;
+    let directory = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut temporary = tempfile::Builder::new().prefix(".whale-output-").tempfile_in(directory)?;
     write(temporary.as_file_mut())?;
     if let Some(permissions) = permissions {
         temporary.as_file().set_permissions(permissions)?;
@@ -67,20 +59,13 @@ pub(super) fn publish_many(
     for input in inputs {
         check_distinct(input, output)?;
     }
-    let directory = output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let mut temporary = tempfile::Builder::new()
-        .prefix(".whale-output-")
-        .tempfile_in(directory)?;
+    let directory = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut temporary = tempfile::Builder::new().prefix(".whale-output-").tempfile_in(directory)?;
     temporary.write_all(bytes)?;
     #[cfg(unix)]
     if executable {
         use std::os::unix::fs::PermissionsExt;
-        temporary
-            .as_file()
-            .set_permissions(fs::Permissions::from_mode(0o755))?;
+        temporary.as_file().set_permissions(fs::Permissions::from_mode(0o755))?;
     }
     #[cfg(not(unix))]
     let _ = executable;

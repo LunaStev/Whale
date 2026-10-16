@@ -3,13 +3,15 @@ use ir::*;
 fn builder() -> ModuleBuilder {
     ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le())
 }
+
 fn external(m: &mut ModuleBuilder, name: &str, sig: FunctionSignature) -> FunctionId {
-    m.declare_function(name, sig, Linkage::External, Some(name.into()))
-        .unwrap()
+    m.declare_function(name, sig, Linkage::External, Some(name.into())).unwrap()
 }
+
 fn signature() -> FunctionSignature {
     FunctionSignature::whale(vec![Type::I32], Type::I32)
 }
+
 fn module(indirect: bool) -> Module {
     let mut m = builder();
     let target = external(&mut m, "target", signature());
@@ -25,6 +27,7 @@ fn module(indirect: bool) -> Module {
     f.finish();
     m.finish()
 }
+
 fn call(m: &mut Module) -> &mut Instruction {
     m.functions[0].blocks[0]
         .instructions
@@ -32,6 +35,7 @@ fn call(m: &mut Module) -> &mut Instruction {
         .find(|i| matches!(i, Instruction::Call { .. }))
         .unwrap()
 }
+
 fn reason(m: &Module) -> CallError {
     match verify_module(m).unwrap_err() {
         VerifyError::Call { reason, .. } => reason,
@@ -63,31 +67,18 @@ fn verifier_rejects_unknown_callee_arity_type_return_and_convention() {
         if let Instruction::Call { args, .. } = call(&mut m) {
             args.clear();
         }
-        assert_eq!(
-            reason(&m),
-            CallError::ArgumentCount {
-                expected: 1,
-                got: 0
-            }
-        );
+        assert_eq!(reason(&m), CallError::ArgumentCount { expected: 1, got: 0 });
         let mut m = module(indirect);
         let wrong = ValueId(99);
         m.functions[0].value_types.push((wrong, Type::Bool));
         m.functions[0].blocks[0].instructions.insert(
             0,
-            Instruction::Const {
-                dst: wrong,
-                ty: Type::Bool,
-                value: ConstValue::Bool(true),
-            },
+            Instruction::Const { dst: wrong, ty: Type::Bool, value: ConstValue::Bool(true) },
         );
         if let Instruction::Call { args, .. } = call(&mut m) {
             args[0] = wrong;
         }
-        assert!(matches!(
-            reason(&m),
-            CallError::ArgumentType { index: 0, .. }
-        ));
+        assert!(matches!(reason(&m), CallError::ArgumentType { index: 0, .. }));
         let mut m = module(indirect);
         let result = if let Instruction::Call { ret_ty, dst, .. } = call(&mut m) {
             *ret_ty = Type::Bool;
@@ -95,12 +86,7 @@ fn verifier_rejects_unknown_callee_arity_type_return_and_convention() {
         } else {
             unreachable!()
         };
-        m.functions[0]
-            .value_types
-            .iter_mut()
-            .find(|(v, _)| *v == result)
-            .unwrap()
-            .1 = Type::Bool;
+        m.functions[0].value_types.iter_mut().find(|(v, _)| *v == result).unwrap().1 = Type::Bool;
         assert!(matches!(reason(&m), CallError::ReturnType { .. }));
         let mut m = module(indirect);
         if let Instruction::Call { convention, .. } = call(&mut m) {
@@ -151,22 +137,10 @@ fn checked_builders_do_not_emit_partial_instructions_on_error() {
     let id = external(&mut b, "callee", signature());
     let mut f = b.begin_function("caller", vec![], Type::Void);
     let x = f.const_bool(true);
-    assert!(matches!(
-        f.call(Callee::Direct(id), vec![x]),
-        Err(CallError::ArgumentType { .. })
-    ));
-    assert!(matches!(
-        f.call(Callee::Direct(id), vec![]),
-        Err(CallError::ArgumentCount { .. })
-    ));
-    assert!(matches!(
-        f.call(Callee::Indirect(x), vec![]),
-        Err(CallError::NotFunctionPointer(_))
-    ));
-    assert!(matches!(
-        f.function_addr(FunctionId(99)),
-        Err(CallError::UnknownFunction(_))
-    ));
+    assert!(matches!(f.call(Callee::Direct(id), vec![x]), Err(CallError::ArgumentType { .. })));
+    assert!(matches!(f.call(Callee::Direct(id), vec![]), Err(CallError::ArgumentCount { .. })));
+    assert!(matches!(f.call(Callee::Indirect(x), vec![]), Err(CallError::NotFunctionPointer(_))));
+    assert!(matches!(f.function_addr(FunctionId(99)), Err(CallError::UnknownFunction(_))));
     f.ret(None);
     f.finish();
     let m = b.finish();
@@ -177,14 +151,8 @@ fn checked_builders_do_not_emit_partial_instructions_on_error() {
 #[test]
 fn declaration_definition_identity_and_explicit_link_names_are_checked() {
     let mut b = builder();
-    let id = b
-        .declare_function("same", signature(), Linkage::Internal, None)
-        .unwrap();
-    assert_eq!(
-        id,
-        b.declare_function("same", signature(), Linkage::Internal, None)
-            .unwrap()
-    );
+    let id = b.declare_function("same", signature(), Linkage::Internal, None).unwrap();
+    assert_eq!(id, b.declare_function("same", signature(), Linkage::Internal, None).unwrap());
     assert!(matches!(
         b.declare_function(
             "same",
@@ -194,20 +162,13 @@ fn declaration_definition_identity_and_explicit_link_names_are_checked() {
         ),
         Err(CallError::ConflictingDeclaration(_))
     ));
-    assert!(b
-        .declare_function("foreign", signature(), Linkage::External, None)
-        .is_err());
+    assert!(b.declare_function("foreign", signature(), Linkage::External, None).is_err());
     assert!(b
         .declare_function("foreign", signature(), Linkage::External, Some("".into()))
         .is_err());
     external(&mut b, "symbol", signature());
     assert!(matches!(
-        b.declare_function(
-            "another",
-            signature(),
-            Linkage::External,
-            Some("symbol".into())
-        ),
+        b.declare_function("another", signature(), Linkage::External, Some("symbol".into())),
         Err(CallError::LinkNameCollision(_))
     ));
     assert!(b.begin_declared_function(id, vec![]).is_err());
@@ -245,10 +206,7 @@ fn declaration_definition_identity_and_explicit_link_names_are_checked() {
 #[test]
 fn variadic_void_parameters_and_foreign_aggregates_are_explicit_errors() {
     for sig in [
-        FunctionSignature {
-            variadic: true,
-            ..signature()
-        },
+        FunctionSignature { variadic: true, ..signature() },
         FunctionSignature::whale(vec![Type::Void], Type::Void),
         FunctionSignature {
             convention: CallingConvention::SysV64,
@@ -278,10 +236,7 @@ fn function_pointer_storage_parameters_returns_select_and_null_preserve_types() 
     let pass = b.function_id("pass").unwrap();
     let mut f = b.begin_function("caller", vec![], Type::Void);
     let pointer = f.function_addr(target).unwrap();
-    let pointer = f
-        .call(Callee::Direct(pass), vec![pointer])
-        .unwrap()
-        .unwrap();
+    let pointer = f.call(Callee::Direct(pass), vec![pointer]).unwrap().unwrap();
     let slot = f.alloca(ty.clone(), 8);
     f.store(ty.clone(), pointer, slot, 8);
     let loaded = f.load(ty, slot, 8);
@@ -309,18 +264,12 @@ fn function_pointer_storage_parameters_returns_select_and_null_preserve_types() 
 fn pointer_signature_and_indirect_callee_dominance_cannot_be_forged() {
     let mut m = module(true);
     m.functions[0].blocks[0].instructions.swap(1, 2);
-    assert!(matches!(
-        verify_module(&m),
-        Err(VerifyError::NonDominatingValue { .. })
-    ));
+    assert!(matches!(verify_module(&m), Err(VerifyError::NonDominatingValue { .. })));
     let mut m = module(true);
     if let Instruction::Call { callee, .. } = call(&mut m) {
         *callee = Callee::Indirect(ValueId(99));
     }
-    assert!(matches!(
-        verify_module(&m),
-        Err(VerifyError::UseOfUndefinedValue { .. })
-    ));
+    assert!(matches!(verify_module(&m), Err(VerifyError::UseOfUndefinedValue { .. })));
     let mut m = module(true);
     let altered = FunctionSignature::whale(vec![Type::Bool], Type::I32);
     if let Instruction::FunctionAddr { signature, .. } =
@@ -334,15 +283,13 @@ fn pointer_signature_and_indirect_callee_dominance_cannot_be_forged() {
         let mut m = module(true);
         let pointer_ty = m.functions[0].value_types[1].1.clone();
         m.functions[0].value_types.push((ValueId(99), Type::U64));
-        m.functions[0].blocks[0]
-            .instructions
-            .push(Instruction::Cast {
-                dst: ValueId(99),
-                op: CastOp::PtrToInt,
-                src_ty: if lies { Type::I64 } else { pointer_ty },
-                src: ValueId(1),
-                dst_ty: Type::U64,
-            });
+        m.functions[0].blocks[0].instructions.push(Instruction::Cast {
+            dst: ValueId(99),
+            op: CastOp::PtrToInt,
+            src_ty: if lies { Type::I64 } else { pointer_ty },
+            src: ValueId(1),
+            dst_ty: Type::U64,
+        });
         assert_eq!(reason(&m), CallError::ForbiddenFunctionPointerCast);
     }
 }
@@ -387,11 +334,7 @@ fn phi_select_and_aggregate_extract_preserve_full_pointer_signature() {
     verify_module(&m).unwrap();
     let mut b = builder();
     let tuple_ty = Type::Tuple(vec![ty.clone()]);
-    let mut f = b.begin_function(
-        "unpack",
-        vec![("tuple".into(), tuple_ty.clone())],
-        Type::Void,
-    );
+    let mut f = b.begin_function("unpack", vec![("tuple".into(), tuple_ty.clone())], Type::Void);
     let tuple = f.param_value(0);
     let pointer = f.extract(tuple_ty, ty.clone(), tuple, 0);
     let x = f.const_i32(1);
@@ -413,10 +356,7 @@ fn phi_select_and_aggregate_extract_preserve_full_pointer_signature() {
     m.functions[0].value_types[1].1 = Type::U64;
     assert!(matches!(
         verify_module(&m),
-        Err(VerifyError::InvalidInstructionType {
-            operation: "extract",
-            ..
-        })
+        Err(VerifyError::InvalidInstructionType { operation: "extract", .. })
     ));
 }
 
@@ -424,19 +364,10 @@ fn phi_select_and_aggregate_extract_preserve_full_pointer_signature() {
 fn unused_malformed_pointer_signature_is_rejected() {
     let mut b = builder();
     let mut f = b.begin_function("bad", vec![], Type::Void);
-    f.alloca(
-        Type::FnPtr(Box::new(FunctionSignature {
-            variadic: true,
-            ..signature()
-        })),
-        8,
-    );
+    f.alloca(Type::FnPtr(Box::new(FunctionSignature { variadic: true, ..signature() })), 8);
     f.ret(None);
     f.finish();
-    assert!(matches!(
-        reason(&b.finish()),
-        CallError::InvalidSignature(_)
-    ));
+    assert!(matches!(reason(&b.finish()), CallError::InvalidSignature(_)));
 }
 
 #[test]
@@ -447,8 +378,5 @@ fn checked_address_builder_rejects_an_invalid_legacy_signature() {
     invalid.finish();
     let id = b.function_id("bad").unwrap();
     let mut caller = b.begin_function("caller", vec![], Type::Void);
-    assert!(matches!(
-        caller.function_addr(id),
-        Err(CallError::InvalidSignature(_))
-    ));
+    assert!(matches!(caller.function_addr(id), Err(CallError::InvalidSignature(_))));
 }

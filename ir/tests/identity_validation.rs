@@ -20,13 +20,11 @@ fn duplicate_blocks_and_definitions_are_rejected() {
     m.functions[0].blocks[0].instructions.push(ins);
     assert!(ir::verify_module(&m).is_err());
     let mut m = module();
-    m.functions[0].blocks[0]
-        .instructions
-        .push(Instruction::Const {
-            dst: ValueId(0),
-            ty: Type::I32,
-            value: ir::ConstValue::I(0),
-        });
+    m.functions[0].blocks[0].instructions.push(Instruction::Const {
+        dst: ValueId(0),
+        ty: Type::I32,
+        value: ir::ConstValue::I(0),
+    });
     assert!(ir::verify_module(&m).is_err());
     let mut m = module();
     let p = m.functions[0].params[0].clone();
@@ -41,12 +39,7 @@ fn every_definition_needs_exactly_one_matching_type_entry() {
         m.functions[0].value_types.retain(|(v, _)| *v != id);
         assert!(ir::verify_module(&m).is_err());
         let mut m = module();
-        m.functions[0]
-            .value_types
-            .iter_mut()
-            .find(|(v, _)| *v == id)
-            .unwrap()
-            .1 = Type::I64;
+        m.functions[0].value_types.iter_mut().find(|(v, _)| *v == id).unwrap().1 = Type::I64;
         assert!(ir::verify_module(&m).is_err());
         for ty in [Type::I32, Type::I64] {
             let mut m = module();
@@ -94,10 +87,7 @@ fn derived_result_types_match_builder_metadata() {
     let ptr = f.alloca(Type::I32, 4);
     f.store(Type::I32, value, ptr, 4);
     let loaded = f.load(Type::I32, ptr, 4);
-    let called = f
-        .call(ir::Callee::Direct(external), vec![])
-        .unwrap()
-        .unwrap();
+    let called = f.call(ir::Callee::Direct(external), vec![]).unwrap().unwrap();
     f.ret(None);
     f.finish();
     let module = builder.finish();
@@ -111,12 +101,7 @@ fn derived_result_types_match_builder_metadata() {
         (called, Type::I32),
     ] {
         let mut malformed = module.clone();
-        malformed.functions[0]
-            .value_types
-            .iter_mut()
-            .find(|(v, _)| *v == id)
-            .unwrap()
-            .1 = Type::I8;
+        malformed.functions[0].value_types.iter_mut().find(|(v, _)| *v == id).unwrap().1 = Type::I8;
         assert!(
             matches!(ir::verify_module(&malformed), Err(ir::VerifyError::ValueTypeMismatch { value, expected: got, .. }) if value == id && got == expected)
         );

@@ -1,7 +1,9 @@
 use std::{fs, process::Command};
+
 fn whale() -> Command {
     Command::new(env!("CARGO_BIN_EXE_whale"))
 }
+
 fn object() -> Vec<u8> {
     use object::*;
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
@@ -25,17 +27,13 @@ fn object() -> Vec<u8> {
     });
     o.write().unwrap()
 }
+
 #[test]
 fn inspection_is_available_in_ordinary_builds_and_arguments_are_strict() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("sample.o");
     fs::write(&input, object()).unwrap();
-    let result = whale()
-        .args(["reverse", "inspect"])
-        .arg(&input)
-        .arg("--json")
-        .output()
-        .unwrap();
+    let result = whale().args(["reverse", "inspect"]).arg(&input).arg("--json").output().unwrap();
     assert!(result.status.success());
     let v: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(v["kind"], "elf64-amd64-relocatable");
@@ -49,14 +47,13 @@ fn inspection_is_available_in_ordinary_builds_and_arguments_are_strict() {
     ] {
         assert!(!whale().args(args).output().unwrap().status.success());
     }
-    for args in [
-        vec!["disasm", "--help"],
-        vec!["reverse", "--help"],
-        vec!["reverse", "cfg", "--help"],
-    ] {
+    for args in
+        [vec!["disasm", "--help"], vec!["reverse", "--help"], vec!["reverse", "cfg", "--help"]]
+    {
         assert!(whale().args(args).output().unwrap().status.success());
     }
 }
+
 #[test]
 fn disassembly_is_wave_backed_and_preserves_input_and_failed_output() {
     let dir = tempfile::tempdir().unwrap();
@@ -65,18 +62,9 @@ fn disassembly_is_wave_backed_and_preserves_input_and_failed_output() {
     fs::write(&input, &bytes).unwrap();
     let output = dir.path().join("listing");
     fs::write(&output, b"old").unwrap();
-    let result = whale()
-        .arg("disasm")
-        .arg(&input)
-        .arg("--json")
-        .output()
-        .unwrap();
+    let result = whale().arg("disasm").arg(&input).arg("--json").output().unwrap();
     if reverse::backend_available() {
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
         let v: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
         let inst = &v["records"][0]["instruction"];
         assert_eq!(inst["mnemonic"], "call");
@@ -109,6 +97,7 @@ fn disassembly_is_wave_backed_and_preserves_input_and_failed_output() {
         .success());
     assert_eq!(fs::read(&output).unwrap(), b"old");
 }
+
 #[test]
 fn raw_listing_keeps_unknown_bytes_and_enforces_decode_budget() {
     if !reverse::backend_available() {
@@ -129,15 +118,7 @@ fn raw_listing_keeps_unknown_bytes_and_enforces_decode_budget() {
     assert_eq!(v["records"][1]["byte"], 15);
     assert_eq!(v["records"][1]["code"], false);
     assert!(!whale()
-        .args([
-            "disasm",
-            "--raw",
-            "--amd64",
-            "--base",
-            "0x1000",
-            "--max-instructions",
-            "1"
-        ])
+        .args(["disasm", "--raw", "--amd64", "--base", "0x1000", "--max-instructions", "1"])
         .arg(input)
         .output()
         .unwrap()
@@ -147,11 +128,7 @@ fn raw_listing_keeps_unknown_bytes_and_enforces_decode_budget() {
 
 fn graph_json(command: &mut Command) -> serde_json::Value {
     let result = command.arg("--json").output().unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
     serde_json::from_slice(&result.stdout).unwrap()
 }
 
@@ -222,10 +199,8 @@ fn sectionless_executable_graph_starts_at_elf_entry_and_follows_backward_helpers
     let input = dir.path().join("sectionless");
     // The entry follows an unsupported gap; only the entry, its backward callee,
     // and its continuation are reachable. The mapped ELF headers are not code.
-    let bytes = sectionless_executable(
-        &[0xc3, 0x0f, 0x0b, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0xc3],
-        4,
-    );
+    let bytes =
+        sectionless_executable(&[0xc3, 0x0f, 0x0b, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0xc3], 4);
     fs::write(&input, &bytes).unwrap();
     for mode in ["cfg", "xrefs"] {
         let graph = graph_json(whale().args(["reverse", mode]).arg(&input));
@@ -258,16 +233,10 @@ fn raw_graph_accepts_explicit_entry_and_follows_backward_helpers() {
     }
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("raw");
-    fs::write(
-        &input,
-        [0xc3, 0x0f, 0x0b, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0xc3],
-    )
-    .unwrap();
+    fs::write(&input, [0xc3, 0x0f, 0x0b, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0xc3]).unwrap();
     let graph = graph_json(
         whale()
-            .args([
-                "reverse", "cfg", "--raw", "--amd64", "--base", "0x1000", "--entry", "0x1004",
-            ])
+            .args(["reverse", "cfg", "--raw", "--amd64", "--base", "0x1000", "--entry", "0x1004"])
             .arg(&input),
     );
     assert_eq!(graph["entry_offset"], 4);
@@ -286,11 +255,7 @@ fn relocatable_graph_requires_entry_and_preserves_symbolic_external_calls() {
     let input = dir.path().join("external.o");
     fs::write(&input, object()).unwrap();
     for mode in ["cfg", "xrefs"] {
-        let missing = whale()
-            .args(["reverse", mode])
-            .arg(&input)
-            .output()
-            .unwrap();
+        let missing = whale().args(["reverse", mode]).arg(&input).output().unwrap();
         assert!(!missing.status.success());
         assert!(String::from_utf8_lossy(&missing.stderr).contains("entry"));
         let graph = graph_json(whale().args(["reverse", mode, "--entry", "0"]).arg(&input));
@@ -307,11 +272,7 @@ fn relocatable_graph_requires_entry_and_preserves_symbolic_external_calls() {
         assert!(calls[0]["target"]["address"].is_null());
         assert!(graph["instructions"][0]["target"].is_null());
         assert_eq!(graph["relocations"][0]["symbol"], "external");
-        let text = whale()
-            .args(["reverse", mode, "--entry", "0"])
-            .arg(&input)
-            .output()
-            .unwrap();
+        let text = whale().args(["reverse", mode, "--entry", "0"]).arg(&input).output().unwrap();
         assert!(text.status.success());
         assert!(String::from_utf8_lossy(&text.stdout).contains("symbol \"external\""));
         assert!(!String::from_utf8_lossy(&text.stdout).contains("Call -> 0x5"));
@@ -346,11 +307,8 @@ fn relocatable_graph_defaults_to_start_and_keeps_one_code_region_scope() {
         assert_eq!(graph["region"], 0);
         assert_eq!(graph_offsets(&graph), [0]);
         assert!(graph["stops"].as_array().unwrap().is_empty());
-        let ambiguous = whale()
-            .args(["reverse", mode, "--entry", "0"])
-            .arg(&input)
-            .output()
-            .unwrap();
+        let ambiguous =
+            whale().args(["reverse", mode, "--entry", "0"]).arg(&input).output().unwrap();
         assert!(!ambiguous.status.success());
         assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("ambiguous"));
     }
@@ -366,9 +324,7 @@ fn graph_distinguishes_indirect_targets_overlap_and_unknown_stops() {
     fs::write(&input, [0xff, 0xd0, 0xff, 0xe0, 0xc3]).unwrap();
     for mode in ["cfg", "xrefs"] {
         let graph = graph_json(
-            whale()
-                .args(["reverse", mode, "--raw", "--amd64", "--base", "0x1000"])
-                .arg(&input),
+            whale().args(["reverse", mode, "--raw", "--amd64", "--base", "0x1000"]).arg(&input),
         );
         assert_eq!(graph_offsets(&graph), [0, 2]);
         for kind in ["IndirectCall", "IndirectJump"] {
@@ -391,9 +347,7 @@ fn graph_distinguishes_indirect_targets_overlap_and_unknown_stops() {
     ] {
         fs::write(&input, bytes).unwrap();
         let graph = graph_json(
-            whale()
-                .args(["reverse", "cfg", "--raw", "--amd64", "--base", "0x1000"])
-                .arg(&input),
+            whale().args(["reverse", "cfg", "--raw", "--amd64", "--base", "0x1000"]).arg(&input),
         );
         assert!(graph["stops"].as_array().unwrap().iter().any(|stop| {
             stop["kind"] == stop_kind
@@ -417,9 +371,7 @@ fn graph_output_limit_is_exact_and_failed_publication_preserves_files() {
         for structured in [false, true] {
             let command = || {
                 let mut command = whale();
-                command
-                    .args(["reverse", mode, "--raw", "--amd64", "--base", "0x1000"])
-                    .arg(&input);
+                command.args(["reverse", mode, "--raw", "--amd64", "--base", "0x1000"]).arg(&input);
                 if structured {
                     command.arg("--json");
                 }
@@ -444,13 +396,7 @@ fn graph_output_limit_is_exact_and_failed_publication_preserves_files() {
             assert!(String::from_utf8_lossy(&short.stderr).contains("output byte limit"));
             assert!(short.stdout.is_empty());
             assert_eq!(fs::read(&output).unwrap(), b"old");
-            assert!(!command()
-                .arg("-o")
-                .arg(&input)
-                .output()
-                .unwrap()
-                .status
-                .success());
+            assert!(!command().arg("-o").arg(&input).output().unwrap().status.success());
             assert_eq!(fs::read(&input).unwrap(), bytes);
         }
     }

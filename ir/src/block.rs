@@ -12,12 +12,7 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     pub fn new(id: BlockId, name: impl Into<String>) -> Self {
-        Self {
-            id,
-            name: name.into(),
-            instructions: Vec::new(),
-            terminator: None,
-        }
+        Self { id, name: name.into(), instructions: Vec::new(), terminator: None }
     }
 
     pub fn is_terminated(&self) -> bool {

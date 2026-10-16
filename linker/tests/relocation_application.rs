@@ -2,7 +2,9 @@ use linker::core::{
     layout::Layout,
     relocation::{apply_relocations, RelocationErrorKind},
 };
+
 use object::*;
+
 fn input(kind: RelocKind, addend: i64) -> ObjectFile {
     let mut object = ObjectFile::new(ObjectFormat::ELF64);
     object.add_section(".data", SectionKind::Data, 1);
@@ -25,27 +27,18 @@ fn input(kind: RelocKind, addend: i64) -> ObjectFile {
     });
     object
 }
+
 fn apply(kind: RelocKind, addend: i64, base: u64) -> Result<Vec<u8>, RelocationErrorKind> {
     let objects = [input(kind, addend)];
     let layout = Layout::compute(&objects, base).unwrap();
-    apply_relocations(&objects, &layout, 32)
-        .map(|x| x[0][0].clone())
-        .map_err(|e| e.kind)
+    apply_relocations(&objects, &layout, 32).map(|x| x[0][0].clone()).map_err(|e| e.kind)
 }
+
 #[test]
 fn absolute_signed_and_unsigned_widths_are_distinct() {
-    assert_eq!(
-        &apply(RelocKind::SignedAbsolute32, -1, 0).unwrap()[..4],
-        &[255; 4]
-    );
-    assert_eq!(
-        apply(RelocKind::Absolute32, -1, 0),
-        Err(RelocationErrorKind::Range)
-    );
-    assert_eq!(
-        &apply(RelocKind::Absolute32, 0, u32::MAX as u64).unwrap()[..4],
-        &[255; 4]
-    );
+    assert_eq!(&apply(RelocKind::SignedAbsolute32, -1, 0).unwrap()[..4], &[255; 4]);
+    assert_eq!(apply(RelocKind::Absolute32, -1, 0), Err(RelocationErrorKind::Range));
+    assert_eq!(&apply(RelocKind::Absolute32, 0, u32::MAX as u64).unwrap()[..4], &[255; 4]);
     assert_eq!(
         apply(RelocKind::SignedAbsolute32, 0, u32::MAX as u64),
         Err(RelocationErrorKind::Range)
@@ -62,34 +55,24 @@ fn absolute_signed_and_unsigned_widths_are_distinct() {
         assert!(apply(RelocKind::SignedAbsolute32, v, 0).is_err());
     }
 }
+
 #[test]
 fn pc_relative_uses_place_and_signed_ranges() {
     for kind in [RelocKind::Relative32, RelocKind::PLT32] {
-        assert_eq!(
-            &apply(kind, -4, 0x400000).unwrap()[..4],
-            &(-4i32).to_le_bytes()
-        );
+        assert_eq!(&apply(kind, -4, 0x400000).unwrap()[..4], &(-4i32).to_le_bytes());
         for v in [i32::MIN as i64, i32::MAX as i64] {
             assert!(apply(kind, v, 0x400000).is_ok());
         }
-        assert_eq!(
-            apply(kind, i32::MAX as i64 + 1, 0x400000),
-            Err(RelocationErrorKind::Range)
-        );
+        assert_eq!(apply(kind, i32::MAX as i64 + 1, 0x400000), Err(RelocationErrorKind::Range));
     }
     assert_eq!(apply(RelocKind::Relative8, -128, 1000).unwrap()[0], 128);
     assert_eq!(apply(RelocKind::Relative8, 127, 1000).unwrap()[0], 127);
     for v in [-129, 128] {
-        assert_eq!(
-            apply(RelocKind::Relative8, v, 1000),
-            Err(RelocationErrorKind::Range)
-        );
+        assert_eq!(apply(RelocKind::Relative8, v, 1000), Err(RelocationErrorKind::Range));
     }
-    assert_eq!(
-        apply(RelocKind::GOTPCREL, 0, 0),
-        Err(RelocationErrorKind::Unsupported)
-    );
+    assert_eq!(apply(RelocKind::GOTPCREL, 0, 0), Err(RelocationErrorKind::Unsupported));
 }
+
 #[test]
 fn owner_qualified_cross_object_references_and_failures_are_atomic() {
     let mut source = input(RelocKind::Absolute64, -2);

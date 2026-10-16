@@ -1,4 +1,5 @@
 use assembler::{assemble, isa::AMD64, SymbolKind, SymbolVisibility};
+
 #[test]
 fn metadata_supports_forward_declarations_equ_sizes_and_local_labels() {
     let source="LEN equ 3\nsymbol entry, function, LEN, hidden\nglobal entry\nentry: nop\n.local: nop\nret\nsymbol .local, notype, 1, default\nsection .data\npayload: dd 1\nsymbol payload, object, 4, hidden\nextern imported\nsymbol imported, function, 0, default\n";
@@ -8,26 +9,17 @@ fn metadata_supports_forward_declarations_equ_sizes_and_local_labels() {
         (entry.kind, entry.size, entry.visibility, entry.is_global),
         (SymbolKind::Function, 3, SymbolVisibility::Hidden, true)
     );
-    let local = out
-        .symbols
-        .iter()
-        .find(|s| s.name == "entry.local")
-        .unwrap();
-    assert_eq!(
-        (local.kind, local.offset, local.size),
-        (SymbolKind::NoType, 1, 1)
-    );
+    let local = out.symbols.iter().find(|s| s.name == "entry.local").unwrap();
+    assert_eq!((local.kind, local.offset, local.size), (SymbolKind::NoType, 1, 1));
     let payload = out.symbols.iter().find(|s| s.name == "payload").unwrap();
     assert_eq!(
         (payload.kind, payload.size, payload.visibility),
         (SymbolKind::Object, 4, SymbolVisibility::Hidden)
     );
     let imported = out.symbols.iter().find(|s| s.name == "imported").unwrap();
-    assert_eq!(
-        (imported.kind, imported.section_index),
-        (SymbolKind::Function, None)
-    );
+    assert_eq!((imported.kind, imported.section_index), (SymbolKind::Function, None));
 }
+
 #[test]
 fn invalid_metadata_cannot_silently_change_symbols() {
     for declaration in [
@@ -41,18 +33,11 @@ fn invalid_metadata_cannot_silently_change_symbols() {
         "symbol x, function, 1, default extra",
         "symbol x, function, 1, default\nsymbol x, function, 1, default",
     ] {
-        assert!(
-            assemble(&format!("x: ret\n{declaration}\n"), &AMD64).is_err(),
-            "{declaration}"
-        );
+        assert!(assemble(&format!("x: ret\n{declaration}\n"), &AMD64).is_err(), "{declaration}");
     }
     let out = assemble("plain: ret\n", &AMD64).unwrap();
     assert_eq!(
-        (
-            out.symbols[0].kind,
-            out.symbols[0].size,
-            out.symbols[0].visibility
-        ),
+        (out.symbols[0].kind, out.symbols[0].size, out.symbols[0].visibility),
         (SymbolKind::NoType, 0, SymbolVisibility::Default)
     );
 }

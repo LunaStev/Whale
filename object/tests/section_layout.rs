@@ -1,7 +1,9 @@
 use object::{ObjectFile, ObjectFormat, SectionKind};
+
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
+
 fn u64_at(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
@@ -20,14 +22,10 @@ fn section_types_flags_payloads_and_boundaries_are_independent_expectations() {
     }
     let elf = object.write().unwrap();
     let table = u64_at(&elf, 40) as usize;
-    for (i, (kind, flags, align, size, offset)) in [
-        (1, 6, 16, 1, 64),
-        (1, 2, 8, 3, 72),
-        (1, 3, 4, 4, 76),
-        (8, 3, 32, 33, 96),
-    ]
-    .into_iter()
-    .enumerate()
+    for (i, (kind, flags, align, size, offset)) in
+        [(1, 6, 16, 1, 64), (1, 2, 8, 3, 72), (1, 3, 4, 4, 76), (8, 3, 32, 33, 96)]
+            .into_iter()
+            .enumerate()
     {
         let section = table + (i + 1) * 64;
         assert_eq!(u32_at(&elf, section + 4), kind);
@@ -90,23 +88,14 @@ fn section_storage_invariants_reject_mixed_data_and_overflow() {
 #[test]
 fn writer_rejects_oversized_output_and_reserved_section_counts_before_allocation() {
     let mut object = ObjectFile::new(ObjectFormat::ELF64);
-    assert!(object
-        .write_with_limit(63)
-        .unwrap_err()
-        .contains("size limit"));
+    assert!(object.write_with_limit(63).unwrap_err().contains("size limit"));
     let index = object.add_section(".data", SectionKind::Data, 1 << 63);
     object.sections[index].data = vec![1];
     assert!(object.write().unwrap_err().contains("size limit"));
-    assert!(object
-        .write_with_limit(u64::MAX)
-        .unwrap_err()
-        .contains("host capacity"));
+    assert!(object.write_with_limit(u64::MAX).unwrap_err().contains("host capacity"));
     let mut object = ObjectFile::new(ObjectFormat::ELF64);
     for _ in 0..(0xff00 - 4) {
         object.add_section("", SectionKind::Bss, 1);
     }
-    assert!(object
-        .write()
-        .unwrap_err()
-        .contains("extended section numbering"));
+    assert!(object.write().unwrap_err().contains("extended section numbering"));
 }

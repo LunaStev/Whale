@@ -4,21 +4,17 @@ use ir::lower_ast::{
     interchange::{decode, encode},
     lower_o0, LowerError,
 };
+
 use ir::*;
+
 fn ty() -> a::TypeRef {
-    a::TypeRef::Int {
-        bits: 32,
-        signed: true,
-    }
+    a::TypeRef::Int { bits: 32, signed: true }
 }
+
 fn sig(params: Vec<a::TypeRef>, ret: a::TypeRef) -> a::SignatureRef {
-    a::SignatureRef {
-        params,
-        ret,
-        convention: CallingConvention::Whale,
-        variadic: false,
-    }
+    a::SignatureRef { params, ret, convention: CallingConvention::Whale, variadic: false }
 }
+
 fn decl(name: &str, params: Vec<a::TypeRef>, ret: a::TypeRef) -> a::FunctionDeclaration {
     a::FunctionDeclaration {
         name: name.into(),
@@ -27,19 +23,15 @@ fn decl(name: &str, params: Vec<a::TypeRef>, ret: a::TypeRef) -> a::FunctionDecl
         link_name: Some(name.into()),
     }
 }
+
 fn call(name: &str, args: Vec<a::Expr>) -> a::Expr {
-    a::Expr::Call {
-        callee: a::CalleeRef::Direct(name.into()),
-        args,
-    }
+    a::Expr::Call { callee: a::CalleeRef::Direct(name.into()), args }
 }
+
 fn lit() -> a::Expr {
-    a::Expr::Lit(a::Lit::Int {
-        bits: 32,
-        signed: true,
-        value: "7".into(),
-    })
+    a::Expr::Lit(a::Lit::Int { bits: 32, signed: true, value: "7".into() })
 }
+
 fn function(name: &str, ret: a::TypeRef, body: Vec<a::Stmt>) -> a::Function {
     a::Function {
         name: name.into(),
@@ -51,6 +43,7 @@ fn function(name: &str, ret: a::TypeRef, body: Vec<a::Stmt>) -> a::Function {
         link_name: None,
     }
 }
+
 fn program(body: Vec<a::Stmt>) -> a::Program {
     a::Program {
         declarations: vec![],
@@ -58,6 +51,7 @@ fn program(body: Vec<a::Stmt>) -> a::Program {
         functions: vec![function("entry", a::TypeRef::Void, body)],
     }
 }
+
 fn lower(p: &a::Program) -> Result<Module, LowerError> {
     lower_o0(p, "x86_64-whale-linux", DataLayout::default_64bit_le())
 }
@@ -65,11 +59,7 @@ fn lower(p: &a::Program) -> Result<Module, LowerError> {
 #[test]
 fn forward_recursive_and_external_names_resolve_in_the_function_namespace() {
     let mut p = program(vec![
-        a::Stmt::VarDecl {
-            name: "later".into(),
-            ty: ty(),
-            init: Some(lit()),
-        },
+        a::Stmt::VarDecl { name: "later".into(), ty: ty(), init: Some(lit()) },
         a::Stmt::ExprStmt(call("later", vec![])),
     ]);
     p.functions.push(function(
@@ -87,24 +77,12 @@ fn forward_recursive_and_external_names_resolve_in_the_function_namespace() {
     assert!(m.functions[0].blocks[0]
         .instructions
         .iter()
-        .any(|i| matches!(
-            i,
-            Instruction::Call {
-                callee: Callee::Direct(FunctionId(0)),
-                ..
-            }
-        )));
+        .any(|i| matches!(i, Instruction::Call { callee: Callee::Direct(FunctionId(0)), .. })));
     p.declarations[0].signature.ret = ty();
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::ConflictingDeclaration(_)))
-    ));
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::ConflictingDeclaration(_)))));
     p.functions.pop();
     p.declarations[0].signature.ret = a::TypeRef::Void;
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::MissingDefinition(_)))
-    ));
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::MissingDefinition(_)))));
 }
 
 #[test]
@@ -151,23 +129,12 @@ fn callee_then_arguments_are_evaluated_left_to_right_and_unused_results_survive_
 #[test]
 fn unknown_callees_arity_types_void_values_and_nonfunction_values_fail_lowering() {
     let mut p = program(vec![a::Stmt::ExprStmt(call("missing", vec![]))]);
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::UnknownFunctionName(_)))
-    ));
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::UnknownFunctionName(_)))));
     p.declarations.push(decl("missing", vec![ty()], ty()));
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::ArgumentCount { .. }))
-    ));
-    p.functions[0].body = vec![a::Stmt::ExprStmt(call(
-        "missing",
-        vec![a::Expr::Lit(a::Lit::Bool(true))],
-    ))];
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::ArgumentType { .. }))
-    ));
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::ArgumentCount { .. }))));
+    p.functions[0].body =
+        vec![a::Stmt::ExprStmt(call("missing", vec![a::Expr::Lit(a::Lit::Bool(true))]))];
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::ArgumentType { .. }))));
     p.declarations[0].signature = sig(vec![], a::TypeRef::Void);
     p.functions[0].body = vec![a::Stmt::VarDecl {
         name: "value".into(),
@@ -181,10 +148,7 @@ fn unknown_callees_arity_types_void_values_and_nonfunction_values_fail_lowering(
         callee: a::CalleeRef::Indirect(Box::new(lit())),
         args: vec![],
     })];
-    assert!(matches!(
-        lower(&p),
-        Err(LowerError::Call(CallError::NotFunctionPointer(_)))
-    ));
+    assert!(matches!(lower(&p), Err(LowerError::Call(CallError::NotFunctionPointer(_)))));
 }
 
 #[test]
@@ -236,10 +200,7 @@ fn ast_version_two_calls_fixture_roundtrips_and_prints_current_ir_and_reads_vers
         ("\"Whale\"", "\"UnknownConvention\""),
         ("\"Internal\"", "\"Weak\""),
         ("\"format_version\": 2", "\"format_version\": 1"),
-        (
-            "\"convention\": \"Whale\"",
-            "\"convention\": \"Whale\", \"convention\": \"Whale\"",
-        ),
+        ("\"convention\": \"Whale\"", "\"convention\": \"Whale\", \"convention\": \"Whale\""),
         ("\"Direct\": \"emit\"", "\"Direct\": \"emit\", \"extra\": 0"),
     ] {
         assert!(decode(&source.replace(from, to)).is_err(), "{from}");

@@ -1,6 +1,7 @@
 use std::{fs, path::PathBuf, process::Command};
 
 struct Scratch(PathBuf);
+
 impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -41,11 +42,7 @@ fn rejected_assembly_never_publishes_or_overwrites_an_object() {
                 .output()
                 .unwrap();
             assert!(!result.status.success(), "accepted {input}");
-            assert!(
-                String::from_utf8_lossy(&result.stderr).contains(diagnostic),
-                "{:?}",
-                result
-            );
+            assert!(String::from_utf8_lossy(&result.stderr).contains(diagnostic), "{:?}", result);
             if prior_output {
                 assert_eq!(fs::read(&output).unwrap(), b"existing artifact");
                 fs::remove_file(&output).unwrap();

@@ -50,6 +50,7 @@ pub enum Opcode {
     Divss,
     Divsd,
 }
+
 impl Opcode {
     pub fn mnemonic(self) -> &'static str {
         match self {
@@ -102,6 +103,7 @@ impl Opcode {
             Self::Divsd => "divsd",
         }
     }
+
     #[cfg(whale_wave_reverse)]
     pub(crate) fn from_code(code: u64) -> Option<Self> {
         Some(match code {
@@ -156,6 +158,7 @@ impl Opcode {
         })
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Condition {
@@ -176,12 +179,13 @@ pub enum Condition {
     Le,
     G,
 }
+
 impl Condition {
     pub fn suffix(self) -> &'static str {
-        [
-            "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g",
-        ][self as usize]
+        ["o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g"]
+            [self as usize]
     }
+
     #[cfg(whale_wave_reverse)]
     pub(crate) fn from_code(code: u64) -> Option<Self> {
         Some(match code {
@@ -205,11 +209,13 @@ impl Condition {
         })
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegisterClass {
     General,
     Xmm,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Register {
     pub class: RegisterClass,
@@ -218,6 +224,7 @@ pub struct Register {
     /// AH/CH/DH/BH use indices 0..3 and are impossible with an effective REX.
     pub high8: bool,
 }
+
 impl Register {
     pub fn name(self) -> String {
         if self.class == RegisterClass::Xmm {
@@ -251,6 +258,7 @@ impl Register {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryOperand {
     pub width: u16,
@@ -260,6 +268,7 @@ pub struct MemoryOperand {
     pub displacement: i64,
     pub rip_relative: bool,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Immediate {
     /// Raw encoded bits; sign extension is explicit rather than inferred from value.
@@ -268,6 +277,7 @@ pub struct Immediate {
     pub encoded_width: u8,
     pub sign_extended: bool,
 }
+
 impl Immediate {
     pub fn signed_value(self) -> i64 {
         let bits = u32::from(self.encoded_width);
@@ -278,11 +288,13 @@ impl Immediate {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Relative {
     pub displacement: i64,
     pub encoded_width: u8,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operand {
     Register(Register),
@@ -290,11 +302,13 @@ pub enum Operand {
     Immediate(Immediate),
     Relative(Relative),
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncodingByte {
     pub offset: u8,
     pub value: u8,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncodingField {
     pub offset: u8,
@@ -302,6 +316,7 @@ pub struct EncodingField {
     pub width: u8,
     pub bits: u64,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Encoding {
     pub prefixes: Vec<u8>,
@@ -313,6 +328,7 @@ pub struct Encoding {
     pub displacement: Option<EncodingField>,
     pub immediate: Option<EncodingField>,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
     FallThrough,
@@ -324,6 +340,7 @@ pub enum Flow {
     Trap,
     Syscall,
 }
+
 impl Flow {
     pub fn relative(self) -> Option<i64> {
         match self {
@@ -333,6 +350,7 @@ impl Flow {
         }
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Instruction {
     pub offset: usize,
@@ -344,10 +362,12 @@ pub struct Instruction {
     pub encoding: Encoding,
     pub flow: Flow,
 }
+
 impl Instruction {
     pub fn original_bytes(&self) -> &[u8] {
         &self.bytes[..self.length as usize]
     }
+
     pub fn mnemonic(&self) -> String {
         let suffix = self.condition.map(Condition::suffix).unwrap_or("");
         match self.opcode {
@@ -357,6 +377,7 @@ impl Instruction {
             opcode => opcode.mnemonic().into(),
         }
     }
+
     /// Address arithmetic is checked; relocation overlays belong to the host.
     pub fn relative_target(&self, base: u64) -> Option<u64> {
         let displacement = self.flow.relative()?;

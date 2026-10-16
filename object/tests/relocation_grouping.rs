@@ -23,6 +23,7 @@ fn fixture(sections: usize) -> ObjectFile {
 fn u64_at(data: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
 }
+
 fn u32_at(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
 }
@@ -49,10 +50,7 @@ fn interleaved_relocations_keep_section_order_offsets_and_signed_addends() {
         for (n, offset) in [24u64, 0, 16, 8].into_iter().enumerate() {
             assert_eq!(u64_at(&bytes, data + n * 24), offset);
             assert_eq!(u64_at(&bytes, data + n * 24 + 8) & 0xffff_ffff, 1);
-            assert_eq!(
-                u64_at(&bytes, data + n * 24 + 16) as i64,
-                offset as i64 - 32
-            );
+            assert_eq!(u64_at(&bytes, data + n * 24 + 16) as i64, offset as i64 - 32);
         }
     }
     obj.relocations[0].section_index = 999;

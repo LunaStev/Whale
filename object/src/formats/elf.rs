@@ -1,37 +1,51 @@
 use crate::{ObjectError, ObjectErrorKind as ErrorKind, ObjectResource};
+
 use std::collections::{HashMap, HashSet};
+
 fn write_error(kind: ErrorKind, message: impl Into<String>) -> ObjectError {
     ObjectError::new("write", kind, message)
 }
+
 fn output_limit() -> ObjectError {
-    let mut e = write_error(
-        ErrorKind::ResourceLimit,
-        "ELF output exceeds configured size limit",
-    );
+    let mut e = write_error(ErrorKind::ResourceLimit, "ELF output exceeds configured size limit");
     e.resource = Some(ObjectResource::OutputBytes);
     e
 }
 
 use crate::core::object::ObjectFile;
+
 use crate::core::reloc::RelocKind;
+
 use crate::core::section::SectionKind;
+
 use crate::core::symbol::{SymbolBinding, SymbolKind, SymbolVisibility};
 
 const ELF_HDR_SIZE: u64 = 64;
+
 const ELF_SHDR_SIZE: u16 = 64;
+
 const ELF_SYM_SIZE: u64 = 24;
+
 const ELF_RELA_SIZE: u64 = 24;
 
 const SHT_NULL: u32 = 0;
+
 const SHT_PROGBITS: u32 = 1;
+
 const SHT_SYMTAB: u32 = 2;
+
 const SHT_STRTAB: u32 = 3;
+
 const SHT_RELA: u32 = 4;
+
 const SHT_NOBITS: u32 = 8;
 
 const SHF_WRITE: u64 = 0x1;
+
 const SHF_ALLOC: u64 = 0x2;
+
 const SHF_EXECINSTR: u64 = 0x4;
+
 const SHF_INFO_LINK: u64 = 0x40;
 
 #[repr(C)]
@@ -228,6 +242,7 @@ pub fn write_elf(obj: &ObjectFile) -> Result<Vec<u8>, String> {
 pub fn write_elf_with_limit(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u8>, String> {
     write_elf_checked(obj, max_output_size).map_err(|e| e.to_string())
 }
+
 /// Serialize using typed validation, budget and allocation causes.
 pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u8>, ObjectError> {
     let machine = obj
@@ -243,11 +258,7 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
     let mut shstrtab = vec![0u8];
     let mut strtab = vec![0u8];
 
-    let mut shdrs = vec![Elf64Shdr {
-        name: 0,
-        type_: SHT_NULL,
-        ..Default::default()
-    }];
+    let mut shdrs = vec![Elf64Shdr { name: 0, type_: SHT_NULL, ..Default::default() }];
     let mut payloads: Vec<Option<Vec<u8>>> = vec![None];
 
     let mut section_to_shdr_idx = vec![0usize; obj.sections.len()];
@@ -313,10 +324,8 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
     local_syms.extend(non_local_syms);
     let ordered_syms = local_syms;
 
-    let first_global_index = 1 + ordered_syms
-        .iter()
-        .take_while(|s| s.binding == SymbolBinding::Local)
-        .count();
+    let first_global_index =
+        1 + ordered_syms.iter().take_while(|s| s.binding == SymbolBinding::Local).count();
 
     let symbol_count = ordered_syms
         .len()
@@ -332,16 +341,10 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
 
     let mut symbol_index_by_name: HashMap<&str, usize> = HashMap::new();
     for sym in ordered_syms {
-        let name_idx = if sym.name.is_empty() {
-            0
-        } else {
-            push_name(&mut strtab, sym.name)?
-        };
+        let name_idx = if sym.name.is_empty() { 0 } else { push_name(&mut strtab, sym.name)? };
 
         let shndx = u16::try_from(
-            sym.section_index
-                .and_then(|idx| section_to_shdr_idx.get(idx).copied())
-                .unwrap_or(0),
+            sym.section_index.and_then(|idx| section_to_shdr_idx.get(idx).copied()).unwrap_or(0),
         )
         .map_err(|_| write_error(ErrorKind::Overflow, "ELF symbol section index overflow"))?;
 
@@ -382,21 +385,13 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
         let capacity = checked_table_bytes(relocs.len(), ELF_RELA_SIZE as usize, max_output_size)?;
         let mut rela_data = Vec::new();
         rela_data.try_reserve_exact(capacity).map_err(|_| {
-            write_error(
-                ErrorKind::HostAllocation,
-                "ELF relocation allocation failed",
-            )
+            write_error(ErrorKind::HostAllocation, "ELF relocation allocation failed")
         })?;
         for reloc in relocs {
             let sym_idx = u64::from(checked_u32(
-                *symbol_index_by_name
-                    .get(reloc.symbol.as_str())
-                    .ok_or_else(|| {
-                        write_error(
-                            ErrorKind::InvalidRelocation,
-                            "ELF relocation symbol missing",
-                        )
-                    })?,
+                *symbol_index_by_name.get(reloc.symbol.as_str()).ok_or_else(|| {
+                    write_error(ErrorKind::InvalidRelocation, "ELF relocation symbol missing")
+                })?,
                 "relocation symbol index",
             )?);
             let rtype = reloc_type(reloc.kind) as u64;
@@ -430,10 +425,7 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
     let capacity = checked_table_bytes(elf_syms.len(), ELF_SYM_SIZE as usize, max_output_size)?;
     let mut symtab_data = Vec::new();
     symtab_data.try_reserve_exact(capacity).map_err(|_| {
-        write_error(
-            ErrorKind::HostAllocation,
-            "ELF symbol table allocation failed",
-        )
+        write_error(ErrorKind::HostAllocation, "ELF symbol table allocation failed")
     })?;
     for sym in &elf_syms {
         symtab_data.extend_from_slice(&sym.to_bytes());
@@ -531,12 +523,8 @@ pub fn write_elf_checked(obj: &ObjectFile, max_output_size: u64) -> Result<Vec<u
         }
     }
 
-    let shoff = usize::try_from(shoff).map_err(|_| {
-        write_error(
-            ErrorKind::Overflow,
-            "ELF header offset exceeds host capacity",
-        )
-    })?;
+    let shoff = usize::try_from(shoff)
+        .map_err(|_| write_error(ErrorKind::Overflow, "ELF header offset exceeds host capacity"))?;
     if out.len() < shoff {
         out.resize(shoff, 0);
     }
@@ -556,10 +544,7 @@ fn preflight(obj: &ObjectFile, limit: u64) -> Result<(), ObjectError> {
         if reloc.section_index >= obj.sections.len() {
             return Err(write_error(
                 ErrorKind::InvalidSection,
-                format!(
-                    "relocation references invalid section {}",
-                    reloc.section_index
-                ),
+                format!("relocation references invalid section {}", reloc.section_index),
             )
             .section(reloc.section_index));
         }
@@ -671,12 +656,8 @@ fn align_up(value: u64, align: u64) -> Result<u64, ObjectError> {
 }
 
 fn checked_u32(value: usize, field: &str) -> Result<u32, ObjectError> {
-    u32::try_from(value).map_err(|_| {
-        write_error(
-            ErrorKind::Overflow,
-            format!("ELF {field} exceeds 32-bit range"),
-        )
-    })
+    u32::try_from(value)
+        .map_err(|_| write_error(ErrorKind::Overflow, format!("ELF {field} exceeds 32-bit range")))
 }
 
 fn checked_section_count(input: usize, relocation_sections: usize) -> Result<u16, ObjectError> {
@@ -701,10 +682,7 @@ fn checked_output_size(size: u64, limit: u64) -> Result<usize, ObjectError> {
     let size = usize::try_from(size)
         .map_err(|_| write_error(ErrorKind::Overflow, "ELF output exceeds host capacity"))?;
     if size > isize::MAX as usize {
-        return Err(write_error(
-            ErrorKind::Overflow,
-            "ELF output exceeds host capacity",
-        ));
+        return Err(write_error(ErrorKind::Overflow, "ELF output exceeds host capacity"));
     }
     Ok(size)
 }
@@ -775,18 +753,18 @@ fn reloc_type(kind: RelocKind) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::core::object::{ObjectFile, ObjectFormat};
+
     use crate::core::reloc::{ObjectRelocation, RelocKind};
+
     use crate::core::section::{Section, SectionKind};
+
     use crate::core::symbol::{ObjectSymbol, SymbolBinding, SymbolVisibility};
 
     #[test]
     fn test_reject_section_name_embedded_nul() {
-        let fixtures = [
-            ("\0text", "beginning"),
-            (".te\0xt", "middle"),
-            (".text\0", "end"),
-        ];
+        let fixtures = [("\0text", "beginning"), (".te\0xt", "middle"), (".text\0", "end")];
 
         for (bad_name, position) in fixtures {
             let mut obj = ObjectFile::new(ObjectFormat::ELF64);
@@ -799,29 +777,16 @@ mod tests {
             });
 
             let err = write_elf(&obj).expect_err(&format!("expected error for NUL at {position}"));
-            assert!(
-                err.contains("section name"),
-                "expected context 'section name', got: {err}"
-            );
-            assert!(
-                err.contains("embedded NUL"),
-                "expected 'embedded NUL' in error, got: {err}"
-            );
+            assert!(err.contains("section name"), "expected context 'section name', got: {err}");
+            assert!(err.contains("embedded NUL"), "expected 'embedded NUL' in error, got: {err}");
             let escaped = format!("{:?}", bad_name);
-            assert!(
-                err.contains(&escaped),
-                "expected escaped name {escaped} in error, got: {err}"
-            );
+            assert!(err.contains(&escaped), "expected escaped name {escaped} in error, got: {err}");
         }
     }
 
     #[test]
     fn test_reject_symbol_name_embedded_nul() {
-        let fixtures = [
-            ("\0sym", "beginning"),
-            ("my\0sym", "middle"),
-            ("sym\0", "end"),
-        ];
+        let fixtures = [("\0sym", "beginning"), ("my\0sym", "middle"), ("sym\0", "end")];
 
         for (bad_name, position) in fixtures {
             let mut obj = ObjectFile::new(ObjectFormat::ELF64);
@@ -843,29 +808,16 @@ mod tests {
             });
 
             let err = write_elf(&obj).expect_err(&format!("expected error for NUL at {position}"));
-            assert!(
-                err.contains("symbol name"),
-                "expected context 'symbol name', got: {err}"
-            );
-            assert!(
-                err.contains("embedded NUL"),
-                "expected 'embedded NUL' in error, got: {err}"
-            );
+            assert!(err.contains("symbol name"), "expected context 'symbol name', got: {err}");
+            assert!(err.contains("embedded NUL"), "expected 'embedded NUL' in error, got: {err}");
             let escaped = format!("{:?}", bad_name);
-            assert!(
-                err.contains(&escaped),
-                "expected escaped name {escaped} in error, got: {err}"
-            );
+            assert!(err.contains(&escaped), "expected escaped name {escaped} in error, got: {err}");
         }
     }
 
     #[test]
     fn test_reject_relocation_reference_embedded_nul() {
-        let fixtures = [
-            ("\0reloc", "beginning"),
-            ("rel\0oc", "middle"),
-            ("reloc\0", "end"),
-        ];
+        let fixtures = [("\0reloc", "beginning"), ("rel\0oc", "middle"), ("reloc\0", "end")];
 
         for (bad_name, position) in fixtures {
             let mut obj = ObjectFile::new(ObjectFormat::ELF64);
@@ -889,15 +841,9 @@ mod tests {
                 err.contains("relocation reference"),
                 "expected context 'relocation reference', got: {err}"
             );
-            assert!(
-                err.contains("embedded NUL"),
-                "expected 'embedded NUL' in error, got: {err}"
-            );
+            assert!(err.contains("embedded NUL"), "expected 'embedded NUL' in error, got: {err}");
             let escaped = format!("{:?}", bad_name);
-            assert!(
-                err.contains(&escaped),
-                "expected escaped name {escaped} in error, got: {err}"
-            );
+            assert!(err.contains(&escaped), "expected escaped name {escaped} in error, got: {err}");
         }
     }
 
@@ -947,9 +893,7 @@ mod tests {
         let contains_nul_terminated = |bytes: &[u8], name: &str| {
             let mut pattern = name.as_bytes().to_vec();
             pattern.push(0);
-            bytes
-                .windows(pattern.len())
-                .any(|w| w == pattern.as_slice())
+            bytes.windows(pattern.len()).any(|w| w == pattern.as_slice())
         };
 
         assert!(contains_nul_terminated(&elf_bytes, ".текст_café_日本語"));
@@ -961,6 +905,7 @@ mod tests {
 #[cfg(test)]
 mod layout_boundary_tests {
     use super::*;
+
     #[test]
     fn synthetic_metadata_checks_reserved_indices_and_integer_widths() {
         assert_eq!(checked_section_count(0xff00 - 5, 0).unwrap(), 0xfeff);
@@ -975,6 +920,7 @@ mod layout_boundary_tests {
         assert!(checked_name_end(usize::MAX, 1).is_err());
         assert!(checked_table_bytes(usize::MAX, 24, u64::MAX).is_err());
     }
+
     #[test]
     fn checked_alignment_handles_aligned_maximum_and_overflow() {
         assert_eq!(align_up(u64::MAX, 1).unwrap(), u64::MAX);
@@ -1035,6 +981,7 @@ fn wave_record<const N: usize>(kind: u32, fields: &[u64]) -> [u8; N] {
 #[cfg(all(test, whale_wave_elf))]
 mod wave_tests {
     use super::*;
+
     #[test]
     fn whole_objects_match_rust_with_bss_symbols_and_signed_relocations() {
         for seed in [0u64, 1, 127, 65535, u32::MAX as u64] {
@@ -1069,14 +1016,12 @@ mod wave_tests {
             for enabled in [true, false] {
                 USE_WAVE.with(|v| v.set(enabled));
                 assert_eq!(object.write_with_limit(exact).unwrap(), wave);
-                assert!(object
-                    .write_with_limit(exact - 1)
-                    .unwrap_err()
-                    .contains("size limit"));
+                assert!(object.write_with_limit(exact - 1).unwrap_err().contains("size limit"));
             }
             USE_WAVE.with(|v| v.set(true));
         }
     }
+
     #[test]
     fn bad_ffi_arguments_do_not_publish_partial_records() {
         let mut buffer = [0xa5; 64];

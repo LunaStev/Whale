@@ -3,7 +3,9 @@ use super::{
     lexer::{Kind, Token},
     ParseError, ParseErrorKind,
 };
+
 use crate::*;
+
 pub(super) struct Parser<'a> {
     tokens: Vec<Token<'a>>,
     at: usize,
@@ -12,6 +14,7 @@ pub(super) struct Parser<'a> {
     pub(super) format_version: u32,
     locations: std::collections::HashMap<String, super::SourceLocation>,
 }
+
 impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<Token<'a>>, limits: IrLimits) -> Self {
         Self {
@@ -23,6 +26,7 @@ impl<'a> Parser<'a> {
             locations: std::collections::HashMap::new(),
         }
     }
+
     pub fn verification_location(&self, e: &VerifyError) -> super::SourceLocation {
         use VerifyError::*;
         let name = match e {
@@ -61,31 +65,34 @@ impl<'a> Parser<'a> {
             InvalidConstExpression { scope, .. } => Some(scope),
             _ => None,
         };
-        name.and_then(|n| self.locations.get(n))
-            .copied()
-            .unwrap_or(self.tokens[0].location)
+        name.and_then(|n| self.locations.get(n)).copied().unwrap_or(self.tokens[0].location)
     }
+
     pub fn error(&self, s: &str) -> ParseError {
         ParseError {
             location: self.tokens[self.at].location,
             kind: ParseErrorKind::Syntax(s.into()),
         }
     }
+
     pub fn previous_error(&self, message: &str) -> ParseError {
         ParseError {
             location: self.tokens[self.at.saturating_sub(1)].location,
             kind: ParseErrorKind::Syntax(message.into()),
         }
     }
+
     pub fn location(&self) -> super::SourceLocation {
         self.tokens[self.at].location
     }
+
     pub fn limit(&self, resource: Resource, limit: usize) -> ParseError {
         ParseError {
             location: self.tokens[self.at].location,
             kind: ParseErrorKind::ResourceLimit(LimitError { resource, limit }),
         }
     }
+
     pub fn node(&mut self) -> Result<(), ParseError> {
         if self.nodes >= self.limits.max_nodes {
             return Err(self.limit(Resource::Nodes, self.limits.max_nodes));
@@ -93,15 +100,18 @@ impl<'a> Parser<'a> {
         self.nodes += 1;
         Ok(())
     }
+
     pub fn peek(&self) -> &str {
         match &self.tokens[self.at].kind {
             Kind::Word(s) | Kind::Mark(s) => s,
             Kind::String(_) => "<string>",
         }
     }
+
     pub fn done(&self) -> bool {
         self.peek() == "<eof>"
     }
+
     pub fn eat(&mut self, s: &str) -> bool {
         if self.peek() == s {
             self.at += 1;
@@ -110,6 +120,7 @@ impl<'a> Parser<'a> {
             false
         }
     }
+
     pub fn expect(&mut self, s: &str) -> Result<(), ParseError> {
         if self.eat(s) {
             Ok(())
@@ -117,25 +128,28 @@ impl<'a> Parser<'a> {
             Err(self.error(&format!("expected '{s}', found '{}'", self.peek())))
         }
     }
+
     pub fn word(&mut self) -> Result<&'a str, ParseError> {
         match self.tokens[self.at].kind {
             Kind::Word(s) => {
                 self.at += 1;
                 Ok(s)
-            }
+            },
             _ => Err(self.error("expected word")),
         }
     }
+
     pub fn string(&mut self) -> Result<String, ParseError> {
         match &mut self.tokens[self.at].kind {
             Kind::String(s) => {
                 let s = std::mem::take(s);
                 self.at += 1;
                 Ok(s)
-            }
+            },
             _ => Err(self.error("expected quoted string")),
         }
     }
+
     pub fn number<T: std::str::FromStr>(&mut self) -> Result<T, ParseError> {
         let s = self.peek();
         if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
@@ -145,6 +159,7 @@ impl<'a> Parser<'a> {
         self.at += 1;
         Ok(value)
     }
+
     pub fn id(&mut self, prefix: &str) -> Result<u32, ParseError> {
         let s = self
             .peek()
@@ -157,20 +172,25 @@ impl<'a> Parser<'a> {
         self.at += 1;
         Ok(id)
     }
+
     pub fn value(&mut self) -> Result<ValueId, ParseError> {
         self.id("%v").map(ValueId)
     }
+
     pub fn block_id(&mut self) -> Result<BlockId, ParseError> {
         self.id("%b").map(BlockId)
     }
+
     pub fn comma(&mut self) -> Result<(), ParseError> {
         self.expect(",")
     }
+
     pub fn align(&mut self) -> Result<u32, ParseError> {
         self.comma()?;
         self.expect("align")?;
         self.number()
     }
+
     pub fn convention(&mut self) -> Result<CallingConvention, ParseError> {
         match self.word()? {
             "whale" => Ok(CallingConvention::Whale),
@@ -178,19 +198,16 @@ impl<'a> Parser<'a> {
             _ => Err(self.previous_error("unknown calling convention")),
         }
     }
+
     pub fn signature(&mut self, depth: usize) -> Result<FunctionSignature, ParseError> {
         let convention = self.convention()?;
         self.expect("(")?;
         let params = self.types(")", depth)?;
         self.expect("->")?;
         let ret = self.ty(depth)?;
-        Ok(FunctionSignature {
-            params,
-            ret,
-            convention,
-            variadic: false,
-        })
+        Ok(FunctionSignature { params, ret, convention, variadic: false })
     }
+
     fn types(&mut self, end: &str, depth: usize) -> Result<Vec<Type>, ParseError> {
         let mut types = Vec::new();
         if !self.eat(end) {
@@ -204,6 +221,7 @@ impl<'a> Parser<'a> {
         }
         Ok(types)
     }
+
     pub fn ty(&mut self, depth: usize) -> Result<Type, ParseError> {
         if depth > self.limits.max_type_depth {
             return Err(self.limit(Resource::TypeDepth, self.limits.max_type_depth));
@@ -232,13 +250,13 @@ impl<'a> Parser<'a> {
                 let inner = self.ty(depth + 1)?;
                 self.expect(">")?;
                 Type::ptr_to(inner)
-            }
+            },
             "fnptr" => {
                 self.expect("<")?;
                 let sig = self.signature(depth + 1)?;
                 self.expect(">")?;
                 Type::FnPtr(Box::new(sig))
-            }
+            },
             "array" => {
                 self.expect("<")?;
                 let inner = self.ty(depth + 1)?;
@@ -246,18 +264,19 @@ impl<'a> Parser<'a> {
                 let n = self.number()?;
                 self.expect(">")?;
                 Type::Array(Box::new(inner), n)
-            }
+            },
             "struct" => {
                 self.expect("{")?;
                 Type::Struct(self.types("}", depth + 1)?)
-            }
+            },
             "tuple" => {
                 self.expect("<")?;
                 Type::Tuple(self.types(">", depth + 1)?)
-            }
+            },
             _ => return Err(self.previous_error("unknown type")),
         })
     }
+
     pub fn literal(&mut self, ty: &Type) -> Result<ConstValue, ParseError> {
         let s = self.peek();
         let value = match ty {
@@ -271,20 +290,14 @@ impl<'a> Parser<'a> {
                 if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(self.error("expected signed decimal literal"));
                 }
-                ConstValue::I(
-                    s.parse()
-                        .map_err(|_| self.error("signed literal out of range"))?,
-                )
-            }
+                ConstValue::I(s.parse().map_err(|_| self.error("signed literal out of range"))?)
+            },
             Type::U1 | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 => {
                 if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
                     return Err(self.error("expected unsigned decimal literal"));
                 }
-                ConstValue::U(
-                    s.parse()
-                        .map_err(|_| self.error("unsigned literal out of range"))?,
-                )
-            }
+                ConstValue::U(s.parse().map_err(|_| self.error("unsigned literal out of range"))?)
+            },
             Type::F16 | Type::F32 | Type::F64 => ConstValue::F(
                 FloatBits::parse(
                     match ty {
@@ -304,6 +317,7 @@ impl<'a> Parser<'a> {
         self.at += 1;
         Ok(value)
     }
+
     pub fn equal_type(&self, left: &Type, right: &Type) -> Result<(), ParseError> {
         if left == right {
             Ok(())
@@ -311,6 +325,7 @@ impl<'a> Parser<'a> {
             Err(self.error("conflicting type annotations"))
         }
     }
+
     pub fn expression(&mut self, depth: usize) -> Result<ConstExpr, ParseError> {
         if depth > self.limits.max_const_depth {
             return Err(self.limit(Resource::ConstantDepth, self.limits.max_const_depth));
@@ -338,10 +353,7 @@ impl<'a> Parser<'a> {
             self.expect("(")?;
             let value = Box::new(self.expression(depth + 1)?);
             self.expect(")")?;
-            Ok(ConstExpr {
-                ty: value.ty.clone(),
-                kind: ConstExprKind::Not(value),
-            })
+            Ok(ConstExpr { ty: value.ty.clone(), kind: ConstExprKind::Not(value) })
         } else if matches!(
             op,
             "add"
@@ -420,6 +432,7 @@ impl<'a> Parser<'a> {
             Ok(ConstExpr { ty, kind })
         }
     }
+
     pub fn module(&mut self) -> Result<Module, ParseError> {
         self.expect("module")?;
         self.expect("{")?;
@@ -461,7 +474,7 @@ impl<'a> Parser<'a> {
                     let id = self.id("@s")?;
                     let name = self.string()?;
                     module.sources.files.push(SourceFile { id, name });
-                }
+                },
                 "original" => {
                     if self.format_version < 7 {
                         return Err(self.error("source metadata requires IR format 7"));
@@ -479,7 +492,7 @@ impl<'a> Parser<'a> {
                         })
                     };
                     module.sources.originals.push(OriginalNode { id, span });
-                }
+                },
                 "source_map" => {
                     if self.format_version < 7 {
                         return Err(self.error("source metadata requires IR format 7"));
@@ -498,11 +511,8 @@ impl<'a> Parser<'a> {
                         _ => return Err(self.previous_error("unknown source mapping target")),
                     };
                     let original = self.number()?;
-                    module
-                        .sources
-                        .mappings
-                        .push(SourceMapping { target, original });
-                }
+                    module.sources.mappings.push(SourceMapping { target, original });
+                },
                 "global" => {
                     let id = GlobalId(self.id("@g")?);
                     let location = self.tokens[self.at].location;
@@ -519,15 +529,8 @@ impl<'a> Parser<'a> {
                     self.comma()?;
                     self.expect("init_expr")?;
                     let init_expr = self.expression(0)?;
-                    module.globals.push(Global {
-                        id,
-                        name,
-                        ty,
-                        init,
-                        init_expr,
-                        align,
-                    });
-                }
+                    module.globals.push(Global { id, name, ty, init, init_expr, align });
+                },
                 "storage" => {
                     if self.format_version < 6 {
                         return Err(
@@ -547,11 +550,11 @@ impl<'a> Parser<'a> {
                             let annotation = self.ty(0)?;
                             self.equal_type(&ty, &annotation)?;
                             GlobalStorageInit::Value(self.literal(&ty)?)
-                        }
+                        },
                         _ => {
                             return Err(self
                                 .previous_error("expected value or uninitialized global storage"))
-                        }
+                        },
                     };
                     let align = self.align()?;
                     self.comma()?;
@@ -584,7 +587,7 @@ impl<'a> Parser<'a> {
                         linkage,
                         link_name,
                     });
-                }
+                },
                 "declare" => {
                     let id = FunctionId(self.id("@f")?);
                     let location = self.tokens[self.at].location;
@@ -612,13 +615,14 @@ impl<'a> Parser<'a> {
                         linkage,
                         link_name,
                     });
-                }
+                },
                 "fn" => module.functions.push(self.function()?),
                 _ => return Err(self.previous_error("unknown module field")),
             }
         }
         Ok(module)
     }
+
     fn function(&mut self) -> Result<Function, ParseError> {
         let id = FunctionId(self.id("@f")?);
         let location = self.tokens[self.at].location;
@@ -672,14 +676,6 @@ impl<'a> Parser<'a> {
             }
             blocks.push(b);
         }
-        Ok(Function {
-            id,
-            name,
-            params,
-            ret_ty,
-            entry,
-            blocks,
-            value_types,
-        })
+        Ok(Function { id, name, params, ret_ty, entry, blocks, value_types })
     }
 }

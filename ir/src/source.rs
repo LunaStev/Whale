@@ -2,6 +2,7 @@
 //! Optional original-node identities. Metadata never reads the filesystem and
 //! does not infer a source location from SSA values, names or canonical text.
 use crate::{BlockId, FunctionId, GlobalId, Module};
+
 use std::collections::{HashMap, HashSet};
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
@@ -14,6 +15,7 @@ pub struct FrontendSource {
     pub end_line: u32,
     pub end_column: u32,
 }
+
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +39,7 @@ pub struct SourceSpan {
     pub end_line: u32,
     pub end_column: u32,
 }
+
 impl SourceSpan {
     pub fn valid(&self) -> bool {
         self.line > 0
@@ -57,15 +60,8 @@ pub struct OriginalNode {
 /// declarations. Terminators have an explicit identity separate from ordinals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SourceTarget {
-    Instruction {
-        function: FunctionId,
-        block: BlockId,
-        index: usize,
-    },
-    Terminator {
-        function: FunctionId,
-        block: BlockId,
-    },
+    Instruction { function: FunctionId, block: BlockId, index: usize },
+    Terminator { function: FunctionId, block: BlockId },
     Global(GlobalId),
 }
 
@@ -84,11 +80,13 @@ pub struct SourceMetadata {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceMetadataError(pub &'static str);
+
 impl std::fmt::Display for SourceMetadataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.0)
     }
 }
+
 impl std::error::Error for SourceMetadataError {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,6 +94,7 @@ pub struct OriginalLocation {
     pub original: u64,
     pub source: Option<(String, SourceSpan)>,
 }
+
 impl std::fmt::Display for OriginalLocation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((file, span)) = &self.source {
@@ -121,10 +120,7 @@ impl SourceMetadata {
                 .map(|file| file.id)
                 .unwrap_or_else(|| {
                     let id = self.files.len() as u32;
-                    self.files.push(SourceFile {
-                        id,
-                        name: s.file.clone(),
-                    });
+                    self.files.push(SourceFile { id, name: s.file.clone() });
                     id
                 });
             SourceSpan {
@@ -135,11 +131,9 @@ impl SourceMetadata {
                 end_column: s.end_column,
             }
         });
-        self.originals.push(OriginalNode {
-            id: annotation.id,
-            span,
-        });
+        self.originals.push(OriginalNode { id: annotation.id, span });
     }
+
     pub fn validate(&self, module: &Module) -> Result<(), SourceMetadataError> {
         if self.files.is_empty() && self.originals.is_empty() && self.mappings.is_empty() {
             return Ok(());
@@ -179,16 +173,12 @@ impl SourceMetadata {
                 return Err(invalid("unknown original node or duplicate source mapping"));
             }
             let exists = match mapping.target {
-                SourceTarget::Instruction {
-                    function,
-                    block,
-                    index,
-                } => blocks
-                    .get(&(function, block))
-                    .is_some_and(|b| index < b.instructions.len()),
-                SourceTarget::Terminator { function, block } => blocks
-                    .get(&(function, block))
-                    .is_some_and(|b| b.terminator.is_some()),
+                SourceTarget::Instruction { function, block, index } => {
+                    blocks.get(&(function, block)).is_some_and(|b| index < b.instructions.len())
+                },
+                SourceTarget::Terminator { function, block } => {
+                    blocks.get(&(function, block)).is_some_and(|b| b.terminator.is_some())
+                },
                 SourceTarget::Global(id) => globals.contains(&id),
             };
             if !exists {
@@ -206,15 +196,9 @@ impl SourceMetadata {
     pub fn location(&self, target: SourceTarget) -> Option<OriginalLocation> {
         let original = self.original(target)?;
         let source = original.span.as_ref().and_then(|span| {
-            self.files
-                .iter()
-                .find(|f| f.id == span.file)
-                .map(|f| (f.name.clone(), span.clone()))
+            self.files.iter().find(|f| f.id == span.file).map(|f| (f.name.clone(), span.clone()))
         });
-        Some(OriginalLocation {
-            original: original.id,
-            source,
-        })
+        Some(OriginalLocation { original: original.id, source })
     }
 
     /// Required lowering/splitting passes propagate the original ID to every
@@ -231,14 +215,9 @@ impl SourceMetadata {
             .map(|m| m.original)
             .ok_or(SourceMetadataError("missing source mapping to propagate"))?;
         if self.mappings.iter().any(|m| m.target == to) {
-            return Err(SourceMetadataError(
-                "destination already has a source mapping",
-            ));
+            return Err(SourceMetadataError("destination already has a source mapping"));
         }
-        self.mappings.push(SourceMapping {
-            target: to,
-            original: id,
-        });
+        self.mappings.push(SourceMapping { target: to, original: id });
         Ok(())
     }
 }

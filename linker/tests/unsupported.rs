@@ -1,4 +1,5 @@
 use linker::{core::linker::OutputFormat, Linker};
+
 use object::{ObjectFile, ObjectFormat};
 
 #[test]

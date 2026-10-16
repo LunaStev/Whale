@@ -21,26 +21,12 @@ fn signed_and_unsigned_boundaries_include_real_one_bit_integers() {
         (Type::I64, 64),
         (Type::I128, 128),
     ] {
-        let min = if bits == 128 {
-            i128::MIN
-        } else {
-            -(1i128 << (bits - 1))
-        };
-        let max = if bits == 128 {
-            i128::MAX
-        } else {
-            (1i128 << (bits - 1)) - 1
-        };
+        let min = if bits == 128 { i128::MIN } else { -(1i128 << (bits - 1)) };
+        let max = if bits == 128 { i128::MAX } else { (1i128 << (bits - 1)) - 1 };
         for v in [min, 0, max] {
-            assert!(
-                ir::verify_module(&constant(ty.clone(), ConstValue::I(v))).is_ok(),
-                "{ty} {v}"
-            );
+            assert!(ir::verify_module(&constant(ty.clone(), ConstValue::I(v))).is_ok(), "{ty} {v}");
         }
-        for v in [min.checked_sub(1), max.checked_add(1)]
-            .into_iter()
-            .flatten()
-        {
+        for v in [min.checked_sub(1), max.checked_add(1)].into_iter().flatten() {
             assert!(
                 matches!(ir::verify_module(&constant(ty.clone(), ConstValue::I(v))), Err(VerifyError::InvalidConstant { func, ty: got, .. }) if func == "constant" && got == ty)
             );
@@ -54,11 +40,7 @@ fn signed_and_unsigned_boundaries_include_real_one_bit_integers() {
         (Type::U64, 64),
         (Type::U128, 128),
     ] {
-        let max = if bits == 128 {
-            u128::MAX
-        } else {
-            (1u128 << bits) - 1
-        };
+        let max = if bits == 128 { u128::MAX } else { (1u128 << bits) - 1 };
         for v in [0, max] {
             assert!(ir::verify_module(&constant(ty.clone(), ConstValue::U(v))).is_ok());
         }
@@ -74,10 +56,7 @@ fn signed_and_unsigned_boundaries_include_real_one_bit_integers() {
 #[test]
 fn constant_categories_do_not_implicitly_convert() {
     for (ty, value) in [
-        (
-            Type::I32,
-            ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits())),
-        ),
+        (Type::I32, ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits()))),
         (Type::F32, ConstValue::I(1)),
         (Type::Bool, ConstValue::I(1)),
         (Type::Bool, ConstValue::U(0)),
@@ -133,10 +112,7 @@ fn globals_are_checked_even_without_functions() {
         assert!(ir::verify_module(&m.finish()).is_ok());
     }
     for (ty, value) in [
-        (
-            Type::I32,
-            ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits())),
-        ),
+        (Type::I32, ConstValue::F(ir::FloatBits::F64(1.5f64.to_bits()))),
         (Type::U8, ConstValue::U(256)),
         (Type::Bool, ConstValue::I(1)),
     ] {
@@ -192,16 +168,12 @@ fn integers_cannot_implicitly_become_branch_select_or_trap_conditions() {
                         instructions: vec![],
                         terminator: f.blocks[0].terminator.clone(),
                     });
-                    f.blocks[0].terminator = Some(ir::Terminator::CBr {
-                        cond: value,
-                        then_bb: exit,
-                        else_bb: exit,
-                    })
-                }
-                1 => f.blocks[0].instructions.push(Instruction::TrapIf {
-                    cond: value,
-                    reason: "test".into(),
-                }),
+                    f.blocks[0].terminator =
+                        Some(ir::Terminator::CBr { cond: value, then_bb: exit, else_bb: exit })
+                },
+                1 => f.blocks[0]
+                    .instructions
+                    .push(Instruction::TrapIf { cond: value, reason: "test".into() }),
                 _ => {
                     let dst = ir::ValueId(99);
                     f.value_types.push((dst, ty.clone()));
@@ -212,7 +184,7 @@ fn integers_cannot_implicitly_become_branch_select_or_trap_conditions() {
                         on_true: value,
                         on_false: value,
                     });
-                }
+                },
             }
             let result = ir::verify_module(&m);
             if ty == Type::Bool {

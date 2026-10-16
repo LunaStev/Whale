@@ -1,4 +1,5 @@
 use assembler::{assemble, isa::AMD64, RelocKind};
+
 fn bytes(source: &str) -> Vec<u8> {
     assemble(source, &AMD64)
         .unwrap_or_else(|e| panic!("{source}: {e}"))
@@ -7,11 +8,9 @@ fn bytes(source: &str) -> Vec<u8> {
         .flat_map(|s| s.data)
         .collect()
 }
+
 fn error(source: &str) -> String {
-    assemble(source, &AMD64)
-        .err()
-        .unwrap_or_else(|| panic!("accepted {source}"))
-        .to_string()
+    assemble(source, &AMD64).err().unwrap_or_else(|| panic!("accepted {source}")).to_string()
 }
 
 #[test]
@@ -28,15 +27,9 @@ fn all_64_bit_literal_patterns_and_signed_minimum_are_lossless() {
             [vec![0x48, 0xb8], u64::MAX.to_le_bytes().to_vec()].concat()
         );
         assert_eq!(
-            bytes(&format!(
-                "N equ 0\nM equ N + {literal}\ndq M\nmov rax, N + {literal}"
-            )),
-            [
-                u64::MAX.to_le_bytes().to_vec(),
-                vec![0x48, 0xb8],
-                u64::MAX.to_le_bytes().to_vec()
-            ]
-            .concat()
+            bytes(&format!("N equ 0\nM equ N + {literal}\ndq M\nmov rax, N + {literal}")),
+            [u64::MAX.to_le_bytes().to_vec(), vec![0x48, 0xb8], u64::MAX.to_le_bytes().to_vec()]
+                .concat()
         );
     }
     assert_eq!(
@@ -63,14 +56,8 @@ fn all_64_bit_literal_patterns_and_signed_minimum_are_lossless() {
 fn scaled_first_register_becomes_index_and_displacements_remain_signed() {
     for (src, expected) in [
         ("mov rax, [rcx*4]", vec![0x48, 0x8b, 0x04, 0x8d, 0, 0, 0, 0]),
-        (
-            "mov rax, [r9*8+16]",
-            vec![0x4a, 0x8b, 0x04, 0xcd, 16, 0, 0, 0],
-        ),
-        (
-            "mov rax, [r12*2-128]",
-            vec![0x4a, 0x8b, 0x04, 0x65, 0x80, 0xff, 0xff, 0xff],
-        ),
+        ("mov rax, [r9*8+16]", vec![0x4a, 0x8b, 0x04, 0xcd, 16, 0, 0, 0]),
+        ("mov rax, [r12*2-128]", vec![0x4a, 0x8b, 0x04, 0x65, 0x80, 0xff, 0xff, 0xff]),
         ("mov rax, [rcx*4 + rbx]", vec![0x48, 0x8b, 0x04, 0x8b]),
         ("mov rax, [rbx+rcx*4]", vec![0x48, 0x8b, 0x04, 0x8b]),
     ] {
@@ -94,32 +81,14 @@ fn scaled_first_register_becomes_index_and_displacements_remain_signed() {
 fn explicit_width_stores_and_memory_arithmetic_use_exact_prefix_and_immediate_sizes() {
     for (src, expected) in [
         ("mov byte [rax], 18", vec![0xc6, 0x00, 0x12]),
-        (
-            "mov word [r8], 4660",
-            vec![0x66, 0x41, 0xc7, 0x00, 0x34, 0x12],
-        ),
-        (
-            "mov dword [rsp+8], 4294967295",
-            vec![0xc7, 0x44, 0x24, 8, 0xff, 0xff, 0xff, 0xff],
-        ),
-        (
-            "mov qword [r13], -2147483648",
-            vec![0x49, 0xc7, 0x45, 0, 0, 0, 0, 0x80],
-        ),
-        (
-            "add byte [r9+rcx*4-1], 255",
-            vec![0x41, 0x80, 0x44, 0x89, 0xff, 0xff],
-        ),
+        ("mov word [r8], 4660", vec![0x66, 0x41, 0xc7, 0x00, 0x34, 0x12]),
+        ("mov dword [rsp+8], 4294967295", vec![0xc7, 0x44, 0x24, 8, 0xff, 0xff, 0xff, 0xff]),
+        ("mov qword [r13], -2147483648", vec![0x49, 0xc7, 0x45, 0, 0, 0, 0, 0x80]),
+        ("add byte [r9+rcx*4-1], 255", vec![0x41, 0x80, 0x44, 0x89, 0xff, 0xff]),
         ("add qword [r12], 127", vec![0x49, 0x83, 0x04, 0x24, 0x7f]),
         ("sub word [rsp], 128", vec![0x66, 0x81, 0x2c, 0x24, 0x80, 0]),
-        (
-            "xor dword [rbp], -129",
-            vec![0x81, 0x75, 0, 0x7f, 0xff, 0xff, 0xff],
-        ),
-        (
-            "cmp qword [r15+127], -128",
-            vec![0x49, 0x83, 0x7f, 0x7f, 0x80],
-        ),
+        ("xor dword [rbp], -129", vec![0x81, 0x75, 0, 0x7f, 0xff, 0xff, 0xff]),
+        ("cmp qword [r15+127], -128", vec![0x49, 0x83, 0x7f, 0x7f, 0x80]),
         ("mov eax, dword [rbx]", vec![0x8b, 0x03]),
         ("mov byte [r8], spl", vec![0x41, 0x88, 0x20]),
     ] {
@@ -160,15 +129,10 @@ fn rip_relative_immediate_memory_relocations_include_trailing_immediate_bytes() 
     );
     let relocs = &out.sections[0].relocs;
     assert_eq!(
-        relocs
-            .iter()
-            .map(|r| (r.offset, r.addend))
-            .collect::<Vec<_>>(),
+        relocs.iter().map(|r| (r.offset, r.addend)).collect::<Vec<_>>(),
         [(2, -3), (10, -6), (19, -5), (27, -8)]
     );
-    assert!(relocs
-        .iter()
-        .all(|r| r.symbol == "x" && matches!(r.kind, RelocKind::Relative32)));
+    assert!(relocs.iter().all(|r| r.symbol == "x" && matches!(r.kind, RelocKind::Relative32)));
 }
 
 #[test]
@@ -178,13 +142,7 @@ fn db_escapes_are_bytes_while_source_text_is_utf8() {
         [0xc3, 0xa9, 10, 13, 9, 0, b'"', b'\\', 0, 255]
     );
     assert_eq!(bytes(r#"db "a", "", "\\n", 255"#), [b'a', b'\\', b'n', 255]);
-    for src in [
-        r#"db "\q""#,
-        r#"db "\x""#,
-        r#"db "\x0""#,
-        r#"db "\xGG""#,
-        "db \"unfinished\\",
-    ] {
+    for src in [r#"db "\q""#, r#"db "\x""#, r#"db "\x0""#, r#"db "\xGG""#, "db \"unfinished\\"] {
         let e = error(src);
         assert!(e.contains("escape") && e.contains("column"), "{e}");
     }
@@ -202,27 +160,16 @@ fn full_width_intermediates_narrow_only_after_the_expression() {
             format!("{max} + {max} - {max} - {max}"),
             "-9223372036854775808 - -9223372036854775808".into(),
         ] {
-            assert_eq!(
-                bytes(&format!("dq {expression}")),
-                0u64.to_le_bytes(),
-                "{expression}"
-            );
+            assert_eq!(bytes(&format!("dq {expression}")), 0u64.to_le_bytes(), "{expression}");
         }
         assert_eq!(bytes(&format!("dq {max} + 1 - 1")), u64::MAX.to_le_bytes());
+        assert_eq!(bytes(&format!("N equ {max}\nM equ N - {max}\ndq M")), 0u64.to_le_bytes());
         assert_eq!(
-            bytes(&format!("N equ {max}\nM equ N - {max}\ndq M")),
+            bytes(&format!("N equ {max}\nM equ N - {max} - {max} + {max}\ndq M")),
             0u64.to_le_bytes()
         );
         assert_eq!(
-            bytes(&format!(
-                "N equ {max}\nM equ N - {max} - {max} + {max}\ndq M"
-            )),
-            0u64.to_le_bytes()
-        );
-        assert_eq!(
-            bytes(&format!(
-                "N equ -9223372036854775808\nM equ N + {max}\ndq M"
-            )),
+            bytes(&format!("N equ -9223372036854775808\nM equ N + {max}\ndq M")),
             i64::MAX.to_le_bytes()
         );
         assert_eq!(
@@ -248,10 +195,9 @@ fn wider_expression_intermediates_do_not_relax_final_or_address_ranges() {
     ] {
         error(source);
     }
-    for (addend, expected) in [
-        ("9223372036854775807", i64::MAX),
-        ("-9223372036854775808", i64::MIN),
-    ] {
+    for (addend, expected) in
+        [("9223372036854775807", i64::MAX), ("-9223372036854775808", i64::MIN)]
+    {
         let source =
             format!("extern x\ndq x + 18446744073709551615 - 18446744073709551615 + {addend}");
         let output = assemble(&source, &AMD64).unwrap();

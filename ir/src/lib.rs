@@ -1,22 +1,39 @@
 // SPDX-License-Identifier: MPL-2.0
 
 pub mod block;
+
 pub mod builder;
+
 pub mod const_expr;
+
 mod constant;
+
 pub mod float;
+
 pub mod function;
+
 pub mod global_storage;
+
 pub mod instr;
+
 mod interpreter;
+
 pub mod layout;
+
 pub mod limits;
+
 pub mod module;
+
 pub mod printer;
+
 pub mod source;
+
 pub mod types;
+
 pub mod value;
+
 pub mod verifier;
+
 pub mod zero;
 
 #[cfg(feature = "socket")]
@@ -27,24 +44,40 @@ pub mod lower_ast;
 pub use lower_ast::*;
 
 pub use block::*;
+
 pub use builder::*;
+
 pub use const_expr::*;
+
 pub use float::*;
+
 pub use function::*;
+
 pub use global_storage::*;
 
 /// Independently versioned printed typed IR and shared execution semantics.
 pub const IR_FORMAT_VERSION: u32 = 7;
+
 pub const SEMANTICS_VERSION: u32 = 1;
+
 pub use instr::*;
+
 pub use interpreter::*;
+
 pub use layout::*;
+
 pub use limits::*;
+
 pub use module::*;
+
 pub use printer::*;
+
 pub use source::*;
+
 pub use types::*;
+
 pub use value::*;
+
 pub use verifier::*;
 
 #[cfg(test)]
@@ -86,10 +119,7 @@ mod tests {
     fn smoke_lower_socket_o0_global_const() {
         use crate::lower_ast::{frontend as s, lower_o0};
 
-        let i32s = s::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        };
+        let i32s = s::TypeRef::Int { bits: 32, signed: true };
 
         let program = s::Program {
             declarations: vec![],
@@ -113,12 +143,8 @@ mod tests {
             }],
         };
 
-        let module = lower_o0(
-            &program,
-            "x86_64-whale-linux",
-            DataLayout::default_64bit_le(),
-        )
-        .unwrap();
+        let module =
+            lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
         crate::verifier::verify_module(&module).unwrap();
 
         let txt = crate::printer::print_module(&module);
@@ -142,23 +168,14 @@ mod tests {
                 parameters: vec![
                     s::Parameter {
                         name: "a".into(),
-                        ty: s::TypeRef::Int {
-                            bits: 32,
-                            signed: true,
-                        },
+                        ty: s::TypeRef::Int { bits: 32, signed: true },
                     },
                     s::Parameter {
                         name: "b".into(),
-                        ty: s::TypeRef::Int {
-                            bits: 32,
-                            signed: true,
-                        },
+                        ty: s::TypeRef::Int { bits: 32, signed: true },
                     },
                 ],
-                return_type: s::TypeRef::Int {
-                    bits: 32,
-                    signed: true,
-                },
+                return_type: s::TypeRef::Int { bits: 32, signed: true },
                 body: vec![s::Stmt::Return(Some(s::Expr::Binary {
                     left: Box::new(s::Expr::Var("a".into())),
                     op: s::BinOpRef::Add,
@@ -167,12 +184,8 @@ mod tests {
             }],
         };
 
-        let module = lower_o0(
-            &program,
-            "x86_64-whale-linux",
-            DataLayout::default_64bit_le(),
-        )
-        .unwrap();
+        let module =
+            lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
         verifier::verify_module(&module).unwrap();
 
         let s = printer::print_module(&module);
@@ -185,10 +198,7 @@ mod tests {
     fn smoke_lower_socket_o0_if_max() {
         use crate::lower_ast::{frontend as s, lower_o0};
 
-        let i32s = s::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        };
+        let i32s = s::TypeRef::Int { bits: 32, signed: true };
 
         let program = s::Program {
             declarations: vec![],
@@ -199,14 +209,8 @@ mod tests {
                 link_name: None,
                 name: "max".into(),
                 parameters: vec![
-                    s::Parameter {
-                        name: "a".into(),
-                        ty: i32s.clone(),
-                    },
-                    s::Parameter {
-                        name: "b".into(),
-                        ty: i32s.clone(),
-                    },
+                    s::Parameter { name: "a".into(), ty: i32s.clone() },
+                    s::Parameter { name: "b".into(), ty: i32s.clone() },
                 ],
                 return_type: i32s.clone(),
                 body: vec![
@@ -239,12 +243,8 @@ mod tests {
             }],
         };
 
-        let module = lower_o0(
-            &program,
-            "x86_64-whale-linux",
-            DataLayout::default_64bit_le(),
-        )
-        .unwrap();
+        let module =
+            lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
         verifier::verify_module(&module).unwrap();
 
         let s = printer::print_module(&module);
@@ -253,21 +253,14 @@ mod tests {
         assert!(s.contains("cbr bool"));
         assert!(s.contains("ret i32"));
     }
+
     #[test]
     fn smoke_lower_socket_o0_while_sum() {
         use crate::lower_ast::{frontend as s, lower_o0};
 
-        let i32s = s::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        };
-        let lit_i32 = |v: i128| {
-            s::Expr::Lit(s::Lit::Int {
-                bits: 32,
-                signed: true,
-                value: (v).to_string(),
-            })
-        };
+        let i32s = s::TypeRef::Int { bits: 32, signed: true };
+        let lit_i32 =
+            |v: i128| s::Expr::Lit(s::Lit::Int { bits: 32, signed: true, value: (v).to_string() });
 
         let program = s::Program {
             declarations: vec![],
@@ -277,17 +270,10 @@ mod tests {
                 linkage: crate::Linkage::Internal,
                 link_name: None,
                 name: "sum_to_n".into(),
-                parameters: vec![s::Parameter {
-                    name: "n".into(),
-                    ty: i32s.clone(),
-                }],
+                parameters: vec![s::Parameter { name: "n".into(), ty: i32s.clone() }],
                 return_type: i32s.clone(),
                 body: vec![
-                    s::Stmt::VarDecl {
-                        name: "i".into(),
-                        ty: i32s.clone(),
-                        init: Some(lit_i32(0)),
-                    },
+                    s::Stmt::VarDecl { name: "i".into(), ty: i32s.clone(), init: Some(lit_i32(0)) },
                     s::Stmt::VarDecl {
                         name: "sum".into(),
                         ty: i32s.clone(),
@@ -323,12 +309,8 @@ mod tests {
             }],
         };
 
-        let module = lower_o0(
-            &program,
-            "x86_64-whale-linux",
-            DataLayout::default_64bit_le(),
-        )
-        .unwrap();
+        let module =
+            lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
         verifier::verify_module(&module).unwrap();
 
         let txt = printer::print_module(&module);
@@ -338,9 +320,11 @@ mod tests {
         assert!(txt.contains("cbr bool"));
         assert!(txt.contains("ret i32"));
     }
+
     #[test]
     fn smoke_lower_socket_o0_while_break() {
         use crate::lower_ast::{frontend as s, lower_o0};
+
         use crate::DataLayout;
 
         let program = s::Program {
@@ -352,17 +336,11 @@ mod tests {
                 link_name: None,
                 name: "main".into(),
                 parameters: vec![],
-                return_type: s::TypeRef::Int {
-                    bits: 32,
-                    signed: true,
-                },
+                return_type: s::TypeRef::Int { bits: 32, signed: true },
                 body: vec![
                     s::Stmt::VarDecl {
                         name: "x".into(),
-                        ty: s::TypeRef::Int {
-                            bits: 32,
-                            signed: true,
-                        },
+                        ty: s::TypeRef::Int { bits: 32, signed: true },
                         init: Some(s::Expr::Lit(s::Lit::Int {
                             bits: 32,
                             signed: true,
@@ -396,12 +374,8 @@ mod tests {
             }],
         };
 
-        let module = lower_o0(
-            &program,
-            "x86_64-whale-linux",
-            DataLayout::default_64bit_le(),
-        )
-        .unwrap();
+        let module =
+            lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
         crate::verifier::verify_module(&module).unwrap();
 
         let s = crate::printer::print_module(&module);
@@ -412,6 +386,7 @@ mod tests {
 }
 
 mod parser;
+
 pub use parser::{
     parse_module, parse_module_with_limits, ParseError, ParseErrorKind, SourceLocation,
 };

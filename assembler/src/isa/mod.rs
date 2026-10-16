@@ -1,4 +1,5 @@
 pub mod amd64;
+
 pub use amd64::AMD64;
 
 /*

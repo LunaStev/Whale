@@ -22,11 +22,7 @@ fn expression_overflow_is_an_error_in_every_resolution_path() {
 
 #[test]
 fn signed_expression_boundaries_keep_their_exact_bytes() {
-    let output = assemble(
-        "dq 9223372036854775806 + 1, -9223372036854775807 - 1",
-        &AMD64,
-    )
-    .unwrap();
+    let output = assemble("dq 9223372036854775806 + 1, -9223372036854775807 - 1", &AMD64).unwrap();
     let expected = [i64::MAX.to_le_bytes(), i64::MIN.to_le_bytes()].concat();
     assert_eq!(output.sections[0].data, expected);
     assert!(output.sections[0].relocs.is_empty());

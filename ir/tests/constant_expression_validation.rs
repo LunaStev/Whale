@@ -3,12 +3,11 @@ use ir::*;
 fn literal(value: i128) -> ConstExpr {
     ConstExpr::literal(Type::I32, ConstValue::I(value))
 }
+
 fn reference(ty: Type, id: ConstRef) -> ConstExpr {
-    ConstExpr {
-        ty,
-        kind: ConstExprKind::Reference(id),
-    }
+    ConstExpr { ty, kind: ConstExprKind::Reference(id) }
 }
+
 fn add(left: ConstExpr, right: ConstExpr) -> ConstExpr {
     ConstExpr {
         ty: left.ty.clone(),
@@ -19,6 +18,7 @@ fn add(left: ConstExpr, right: ConstExpr) -> ConstExpr {
         },
     }
 }
+
 fn module(expression: ConstExpr, result: ConstValue) -> Module {
     let mut mb = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     mb.add_global_const("value", expression, result, 4);
@@ -46,10 +46,7 @@ fn global_expressions_preserve_trees_and_resolve_by_identity_not_storage_order()
     m.globals[0].init = ConstValue::I(9);
     assert!(matches!(
         verify_module(&m),
-        Err(VerifyError::InvalidConstExpression {
-            reason: ConstEvalError::ResultMismatch,
-            ..
-        })
+        Err(VerifyError::InvalidConstExpression { reason: ConstEvalError::ResultMismatch, .. })
     ));
 }
 
@@ -60,10 +57,7 @@ fn cyclic_unknown_and_duplicate_constant_identities_fail() {
     m.globals[0].init_expr = reference(Type::I32, ConstRef::Global(id));
     assert!(matches!(
         verify_module(&m),
-        Err(VerifyError::InvalidConstExpression {
-            reason: ConstEvalError::CyclicReference,
-            ..
-        })
+        Err(VerifyError::InvalidConstExpression { reason: ConstEvalError::CyclicReference, .. })
     ));
     m.globals[0].init_expr = reference(Type::I32, ConstRef::Global(GlobalId(999)));
     assert!(matches!(
@@ -74,10 +68,7 @@ fn cyclic_unknown_and_duplicate_constant_identities_fail() {
         })
     ));
     m.globals[0].init_expr = reference(Type::I32, ConstRef::Local(ValueId(0)));
-    assert!(
-        verify_module(&m).is_err(),
-        "global initializers cannot reference function locals"
-    );
+    assert!(verify_module(&m).is_err(), "global initializers cannot reference function locals");
     m.globals[0].init_expr = literal(1);
     let mut other = m.globals[0].clone();
     other.name = "other".into();
@@ -98,10 +89,7 @@ fn expression_types_literals_operators_and_cached_results_are_validated() {
     for (expression, result) in [
         (add(literal(1), literal(2)), ConstValue::I(99)),
         (wrong_root, ConstValue::I(3)),
-        (
-            add(literal(1), ConstExpr::literal(Type::U32, ConstValue::U(2))),
-            ConstValue::I(3),
-        ),
+        (add(literal(1), ConstExpr::literal(Type::U32, ConstValue::U(2))), ConstValue::I(3)),
         (
             add(
                 ConstExpr::literal(Type::Bool, ConstValue::Bool(true)),
@@ -139,18 +127,11 @@ fn expression_types_literals_operators_and_cached_results_are_validated() {
 
 #[test]
 fn float_literals_compare_payloads_without_nan_or_signed_zero_false_matches() {
-    for value in [
-        0.0,
-        -0.0,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::from_bits(0x7ff8_0000_0000_0042),
-    ] {
+    for value in
+        [0.0, -0.0, f64::INFINITY, f64::NEG_INFINITY, f64::from_bits(0x7ff8_0000_0000_0042)]
+    {
         let mut m = module(
-            ConstExpr::literal(
-                Type::F64,
-                ConstValue::F(ir::FloatBits::F64(value.to_bits())),
-            ),
+            ConstExpr::literal(Type::F64, ConstValue::F(ir::FloatBits::F64(value.to_bits()))),
             ConstValue::F(ir::FloatBits::F64(value.to_bits())),
         );
         verify_module(&m).unwrap();
@@ -186,20 +167,11 @@ fn local_constant_results_types_and_dependency_cycles_are_checked() {
     }
     assert!(matches!(
         verify_module(&bad),
-        Err(VerifyError::InvalidConstExpression {
-            reason: ConstEvalError::CyclicReference,
-            ..
-        })
+        Err(VerifyError::InvalidConstExpression { reason: ConstEvalError::CyclicReference, .. })
     ));
     let mut bad = m.clone();
-    bad.functions[0].blocks[0].instructions[0] = Instruction::Undef {
-        dst: a,
-        ty: Type::I32,
-    };
-    assert!(
-        verify_module(&bad).is_err(),
-        "runtime values are not compile-time constants"
-    );
+    bad.functions[0].blocks[0].instructions[0] = Instruction::Undef { dst: a, ty: Type::I32 };
+    assert!(verify_module(&bad).is_err(), "runtime values are not compile-time constants");
 }
 
 #[test]
@@ -212,16 +184,12 @@ fn named_compile_time_integer_constants_can_select_gep_fields() {
     f.ret(None);
     f.finish();
     let mut m = mb.finish();
-    m.functions[0]
-        .value_types
-        .push((ValueId(99), Type::ptr_to(Type::Bool)));
-    m.functions[0].blocks[0]
-        .instructions
-        .push(Instruction::Gep {
-            dst: ValueId(99),
-            dst_ty: Type::ptr_to(Type::Bool),
-            base_ptr: base,
-            indices: vec![zero, index],
-        });
+    m.functions[0].value_types.push((ValueId(99), Type::ptr_to(Type::Bool)));
+    m.functions[0].blocks[0].instructions.push(Instruction::Gep {
+        dst: ValueId(99),
+        dst_ty: Type::ptr_to(Type::Bool),
+        base_ptr: base,
+        indices: vec![zero, index],
+    });
     verify_module(&m).unwrap();
 }

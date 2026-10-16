@@ -1,9 +1,11 @@
 use ir::*;
 
 const HEADER: &str = "module { format_version 4 semantics_version 1 target \"x86_64-whale-linux\" datalayout { ptr=64, endian=little }";
+
 fn fixture() -> Module {
     parse_module(include_str!("fixtures/interpreted-calls-v4.wir")).unwrap()
 }
+
 fn append(module: &mut Module, id: u32, params: &[&str], ret: &str, blocks: &str) {
     let params_text = params
         .iter()
@@ -16,6 +18,7 @@ fn append(module: &mut Module, id: u32, params: &[&str], ret: &str, blocks: &str
     module.declarations.append(&mut extra.declarations);
     module.functions.append(&mut extra.functions);
 }
+
 fn append_using_fixture(id: u32, params: &[&str], ret: &str, blocks: &str) -> Module {
     // Parse together so forward calls to fixture declarations resolve.
     let source = include_str!("fixtures/interpreted-calls-v4.wir");
@@ -26,17 +29,15 @@ fn append_using_fixture(id: u32, params: &[&str], ret: &str, blocks: &str) -> Mo
         .collect::<Vec<_>>()
         .join(", ");
     let extra = format!("declare @f{id} \"extra{id}\": whale ({}) -> {ret}, linkage internal fn @f{id} \"extra{id}\"({params_text}) -> {ret}, entry %b0 {{ {blocks} }} }}", params.join(", "));
-    parse_module(&format!(
-        "{} {extra}",
-        source.trim().strip_suffix('}').unwrap()
-    ))
-    .unwrap()
+    parse_module(&format!("{} {extra}", source.trim().strip_suffix('}').unwrap())).unwrap()
 }
+
 fn memory_trap(module: &Module, id: u32, reason: MemoryTrap) {
     assert!(
         matches!(interpret(module, FunctionId(id), &[]), Err(InterpreterError::Trap(t)) if t.reason == TrapReason::Memory(reason))
     );
 }
+
 #[test]
 fn direct_nested_void_bool_unused_results_and_multiple_returns_execute_in_o0_order() {
     let m = append_using_fixture(
@@ -54,9 +55,7 @@ fn direct_nested_void_bool_unused_results_and_multiple_returns_execute_in_o0_ord
     );
     for flag in [true, false] {
         assert_eq!(
-            interpret(&m, FunctionId(8), &[ConstValue::Bool(flag)])
-                .unwrap()
-                .value,
+            interpret(&m, FunctionId(8), &[ConstValue::Bool(flag)]).unwrap().value,
             Some(ConstValue::Bool(flag))
         );
     }
@@ -66,30 +65,20 @@ fn direct_nested_void_bool_unused_results_and_multiple_returns_execute_in_o0_ord
         "u32",
         "%b0 \"entry\": %v0: u32 = call whale u32 @f3() ret u32 %v0",
     );
-    assert_eq!(
-        interpret(&m, FunctionId(8), &[]).unwrap().value,
-        Some(ConstValue::U(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(8), &[]).unwrap().value, Some(ConstValue::U(42)));
     let m = append_using_fixture(8, &[], "u32", "%b0 \"entry\": %v0: ptr<u32> = alloca u32, align 4 call whale void @f100(%v0) %v1: u32 = load u32, ptr<u32> %v0, align 4 ret u32 %v1");
-    assert_eq!(
-        interpret(&m, FunctionId(8), &[]).unwrap().value,
-        Some(ConstValue::U(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(8), &[]).unwrap().value, Some(ConstValue::U(42)));
 }
+
 #[test]
 fn caller_owned_pointers_survive_nested_return_storage_select_phi_and_indirect_dispatch() {
     let m = fixture();
-    assert_eq!(
-        interpret(&m, FunctionId(3), &[]).unwrap().value,
-        Some(ConstValue::U(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(3), &[]).unwrap().value, Some(ConstValue::U(42)));
     let body = "%b0 \"entry\": %v0: ptr<u32> = alloca u32, align 4 %v1: bool = const bool false %v2: ptr<u32> = call whale ptr<u32> @f2(%v0, %v1) %v3: fnptr<whale (ptr<u32>) -> ptr<u32>> = function_addr @f1 %v4: ptr<u32> = call whale ptr<u32> indirect %v3(%v2) %v5: u32 = load u32, ptr<u32> %v0, align 4 ret u32 %v5";
     let m = append_using_fixture(8, &[], "u32", body);
-    assert_eq!(
-        interpret(&m, FunctionId(8), &[]).unwrap().value,
-        Some(ConstValue::U(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(8), &[]).unwrap().value, Some(ConstValue::U(42)));
 }
+
 #[test]
 fn returning_a_callee_local_pointer_expires_it_and_integer_addresses_never_gain_authority() {
     let m = append_using_fixture(8, &[], "u32", "%b0 \"entry\": %v0: ptr<u32> = call whale ptr<u32> @f4() %v1: u32 = load u32, ptr<u32> %v0, align 4 ret u32 %v1");
@@ -97,6 +86,7 @@ fn returning_a_callee_local_pointer_expires_it_and_integer_addresses_never_gain_
     let m = append_using_fixture(8, &[], "u32", "%b0 \"entry\": %v0: ptr<u32> = alloca u32, align 4 %v1: u64 = ptrtoint ptr<u32> %v0 to u64 %v2: ptr<u32> = inttoptr u64 %v1 to ptr<u32> %v3: ptr<u32> = call whale ptr<u32> @f1(%v2) %v4: u32 = load u32, ptr<u32> %v3, align 4 ret u32 %v4");
     memory_trap(&m, 8, MemoryTrap::MissingProvenance);
 }
+
 #[test]
 fn direct_and_indirect_recursion_share_fuel_depth_and_total_frame_budgets() {
     let m = fixture();
@@ -104,20 +94,8 @@ fn direct_and_indirect_recursion_share_fuel_depth_and_total_frame_budgets() {
         let result = interpret(&m, FunctionId(id), std::slice::from_ref(&value)).unwrap();
         assert_eq!(result.value, Some(value.clone()));
         for (options, expected) in [
-            (
-                InterpreterOptions {
-                    max_call_depth: 4,
-                    ..Default::default()
-                },
-                CallResource::Depth,
-            ),
-            (
-                InterpreterOptions {
-                    max_frames: 4,
-                    ..Default::default()
-                },
-                CallResource::Frames,
-            ),
+            (InterpreterOptions { max_call_depth: 4, ..Default::default() }, CallResource::Depth),
+            (InterpreterOptions { max_frames: 4, ..Default::default() }, CallResource::Frames),
         ] {
             assert!(
                 matches!(interpret_with_options(&m, FunctionId(id), std::slice::from_ref(&value), options), Err(InterpreterError::CallLimit { site, resource, limit: 4 }) if resource == expected && site.function == FunctionId(id) && site.value.is_some())
@@ -131,19 +109,13 @@ fn direct_and_indirect_recursion_share_fuel_depth_and_total_frame_budgets() {
                 &m,
                 FunctionId(id),
                 &[value],
-                InterpreterOptions {
-                    max_call_depth: 0,
-                    ..Default::default()
-                }
+                InterpreterOptions { max_call_depth: 0, ..Default::default() }
             ),
-            Err(InterpreterError::CallLimit {
-                resource: CallResource::Depth,
-                limit: 0,
-                ..
-            })
+            Err(InterpreterError::CallLimit { resource: CallResource::Depth, limit: 0, .. })
         ));
     }
 }
+
 #[test]
 fn reachable_unsupported_callees_are_preflighted_before_an_earlier_runtime_trap() {
     let source = format!("{HEADER} declare @f0 \"entry\": whale () -> void, linkage internal declare @f1 \"bad\": whale () -> void, linkage internal fn @f0 \"entry\"() -> void, entry %b0 {{ %b0 \"entry\": trap reason=\"must not execute\" %b1 \"dead\": call whale void @f1() ret void }} fn @f1 \"bad\"() -> void, entry %b0 {{ %b0 \"entry\": %v0: f32 = const f32 0x00000000 ret void }} }}");
@@ -160,6 +132,7 @@ fn reachable_unsupported_callees_are_preflighted_before_an_earlier_runtime_trap(
         matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer constant" }) if site.function == FunctionId(1))
     );
 }
+
 #[test]
 fn checked_library_boundary_preserves_signatures_and_rejects_foreign_pointer_resurrection() {
     let mut m = fixture();
@@ -170,10 +143,7 @@ fn checked_library_boundary_preserves_signatures_and_rejects_foreign_pointer_res
         "u32",
         "%b0 \"entry\": %v1: u32 = load u32, ptr<u32> %v0, align 4 ret u32 %v1",
     );
-    let returned = interpret_values(&m, FunctionId(4), &[])
-        .unwrap()
-        .value
-        .unwrap();
+    let returned = interpret_values(&m, FunctionId(4), &[]).unwrap().value.unwrap();
     assert_eq!(returned.ty(), &Type::ptr_to(Type::U32));
     assert!(returned.pointer_address().is_some());
     assert!(
@@ -192,10 +162,7 @@ fn checked_library_boundary_preserves_signatures_and_rejects_foreign_pointer_res
         "i32",
         "%b0 \"entry\": %v2: i32 = call whale i32 indirect %v0(%v1) ret i32 %v2",
     );
-    let target = interpret_values(&m, FunctionId(7), &[])
-        .unwrap()
-        .value
-        .unwrap();
+    let target = interpret_values(&m, FunctionId(7), &[]).unwrap().value.unwrap();
     assert_eq!(target.function_target(), Some(FunctionId(0)));
     let input = RuntimeValue::scalar(Type::I32, ConstValue::I(41)).unwrap();
     assert_eq!(
@@ -215,13 +182,8 @@ fn checked_library_boundary_preserves_signatures_and_rejects_foreign_pointer_res
         Err(InterpreterError::ArgumentType { index: 0, .. })
     ));
     let mut changed = m.clone();
-    changed
-        .declarations
-        .iter_mut()
-        .find(|d| d.id == FunctionId(0))
-        .unwrap()
-        .signature
-        .convention = CallingConvention::SysV64;
+    changed.declarations.iter_mut().find(|d| d.id == FunctionId(0)).unwrap().signature.convention =
+        CallingConvention::SysV64;
     let input = RuntimeValue::scalar(Type::I32, ConstValue::I(41)).unwrap();
     assert!(matches!(
         interpret_values(&changed, FunctionId(9), &[target, input]),
@@ -229,6 +191,7 @@ fn checked_library_boundary_preserves_signatures_and_rejects_foreign_pointer_res
             | Err(InterpreterError::ArgumentType { index: 0, .. })
     ));
 }
+
 #[test]
 fn null_function_storage_and_raw_callable_bits_have_defined_failures() {
     let m = append_using_fixture(8, &[], "i32", "%b0 \"entry\": %v0: fnptr<whale (i32) -> i32> = null_function %v1: i32 = const i32 41 %v2: i32 = call whale i32 indirect %v0(%v1) ret i32 %v2");
@@ -266,14 +229,12 @@ fn split_callable_body() -> &'static str {
     %v15: i32 = call whale i32 indirect %v13(%v14)
     ret i32 %v15"
 }
+
 #[test]
 fn function_pointer_identity_survives_return_mov_select_phi_and_split_byte_copies() {
     let body = split_callable_body();
     let m = append_using_fixture(8, &[], "i32", body);
-    assert_eq!(
-        interpret(&m, FunctionId(8), &[]).unwrap().value,
-        Some(ConstValue::I(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(8), &[]).unwrap().value, Some(ConstValue::I(42)));
     let incomplete = body.replace("memcpy ptr<u8> %v7, ptr<u8> %v6, u64 %v5, align 1", "");
     memory_trap(
         &append_using_fixture(8, &[], "i32", &incomplete),
@@ -287,6 +248,7 @@ fn function_pointer_identity_survives_return_mov_select_phi_and_split_byte_copie
         matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::Trap(t)) if t.reason == TrapReason::InvalidFunctionPointer)
     );
 }
+
 #[test]
 fn storage_views_cannot_change_callable_signature_convention_or_data_pointer_kind() {
     let prefix = "%b0 \"entry\": %v0: ptr<fnptr<whale (i32) -> i32>> = alloca fnptr<whale (i32) -> i32>, align 8 %v1: fnptr<whale (i32) -> i32> = function_addr @f0 store fnptr<whale (i32) -> i32> %v1, ptr<fnptr<whale (i32) -> i32>> %v0, align 8";
@@ -296,11 +258,7 @@ fn storage_views_cannot_change_callable_signature_convention_or_data_pointer_kin
         matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::Trap(t)) if t.reason == TrapReason::InvalidFunctionPointer)
     );
     let body = format!("{prefix} %v2: ptr<ptr<u32>> = bitcast ptr<fnptr<whale (i32) -> i32>> %v0 to ptr<ptr<u32>> %v3: ptr<u32> = load ptr<u32>, ptr<ptr<u32>> %v2, align 8 %v4: u32 = load u32, ptr<u32> %v3, align 4 ret u32 %v4");
-    memory_trap(
-        &append_using_fixture(8, &[], "u32", &body),
-        8,
-        MemoryTrap::MissingProvenance,
-    );
+    memory_trap(&append_using_fixture(8, &[], "u32", &body), 8, MemoryTrap::MissingProvenance);
     let m = append_using_fixture(
         8,
         &["fnptr<whale (i32) -> i32>", "i32"],
@@ -316,6 +274,7 @@ fn storage_views_cannot_change_callable_signature_convention_or_data_pointer_kin
         Err(InterpreterError::ArgumentType { index: 0, .. })
     ));
 }
+
 #[test]
 fn indirect_preflight_ignores_unrelated_external_and_unsupported_same_signature_bodies() {
     let mut m = append_using_fixture(8, &[], "i32", "%b0 \"entry\": %v0: fnptr<whale (i32) -> i32> = function_addr @f0 %v1: i32 = const i32 41 %v2: i32 = call whale i32 indirect %v0(%v1) ret i32 %v2");
@@ -333,16 +292,9 @@ fn indirect_preflight_ignores_unrelated_external_and_unsupported_same_signature_
         linkage: Linkage::External,
         link_name: Some("external".into()),
     });
-    assert_eq!(
-        interpret(&m, FunctionId(8), &[]).unwrap().value,
-        Some(ConstValue::I(42))
-    );
+    assert_eq!(interpret(&m, FunctionId(8), &[]).unwrap().value, Some(ConstValue::I(42)));
     // A matching address in any retained block of a reachable function makes it a candidate.
-    let fun = m
-        .functions
-        .iter_mut()
-        .find(|f| f.id == FunctionId(8))
-        .unwrap();
+    let fun = m.functions.iter_mut().find(|f| f.id == FunctionId(8)).unwrap();
     fun.blocks.push(BasicBlock {
         id: BlockId(2),
         name: "dead".into(),
@@ -351,28 +303,17 @@ fn indirect_preflight_ignores_unrelated_external_and_unsupported_same_signature_
             function: FunctionId(9),
             signature: FunctionSignature::whale(vec![Type::I32], Type::I32),
         }],
-        terminator: Some(Terminator::Ret {
-            ty: Type::I32,
-            value: Some(ValueId(4)),
-        }),
+        terminator: Some(Terminator::Ret { ty: Type::I32, value: Some(ValueId(4)) }),
     });
-    fun.blocks
-        .last_mut()
-        .unwrap()
-        .instructions
-        .push(Instruction::Const {
-            dst: ValueId(4),
-            ty: Type::I32,
-            value: ConstValue::I(0),
-        });
+
+    fun.blocks.last_mut().unwrap().instructions.push(Instruction::Const {
+        dst: ValueId(4),
+        ty: Type::I32,
+        value: ConstValue::I(0),
+    });
+
     fun.value_types.extend([
-        (
-            ValueId(3),
-            Type::FnPtr(Box::new(FunctionSignature::whale(
-                vec![Type::I32],
-                Type::I32,
-            ))),
-        ),
+        (ValueId(3), Type::FnPtr(Box::new(FunctionSignature::whale(vec![Type::I32], Type::I32)))),
         (ValueId(4), Type::I32),
     ]);
     assert!(
@@ -388,10 +329,7 @@ fn unused_results_execute_callee_traps_and_retired_frames_count_toward_total_bud
             &m,
             FunctionId(8),
             &[],
-            InterpreterOptions {
-                max_call_depth: 2,
-                ..Default::default()
-            }
+            InterpreterOptions { max_call_depth: 2, ..Default::default() }
         )
         .unwrap()
         .value,
@@ -400,31 +338,21 @@ fn unused_results_execute_callee_traps_and_retired_frames_count_toward_total_bud
     assert!(
         matches!(interpret_with_options(&m, FunctionId(8), &[], InterpreterOptions { max_frames: 2, ..Default::default() }), Err(InterpreterError::CallLimit { site, resource: CallResource::Frames, limit: 2 }) if site.function == FunctionId(8) && site.value == Some(ValueId(2)))
     );
-    let fun = m
-        .functions
-        .iter_mut()
-        .find(|f| f.id == FunctionId(0))
-        .unwrap();
+    let fun = m.functions.iter_mut().find(|f| f.id == FunctionId(0)).unwrap();
     fun.blocks[0].instructions.insert(
         0,
-        Instruction::Const {
-            dst: ValueId(90),
-            ty: Type::Bool,
-            value: ConstValue::Bool(true),
-        },
+        Instruction::Const { dst: ValueId(90), ty: Type::Bool, value: ConstValue::Bool(true) },
     );
     fun.blocks[0].instructions.insert(
         1,
-        Instruction::TrapIf {
-            cond: ValueId(90),
-            reason: "callee effects execute".into(),
-        },
+        Instruction::TrapIf { cond: ValueId(90), reason: "callee effects execute".into() },
     );
     fun.value_types.push((ValueId(90), Type::Bool));
     assert!(
         matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::Trap(t)) if t.reason == TrapReason::Explicit("callee effects execute".into()) && t.site.function == FunctionId(0) && t.steps == 4)
     );
 }
+
 #[test]
 fn callee_pointer_checks_preserve_one_past_bounds_and_expired_values_in_caller_storage() {
     let m = append_using_fixture(8, &[], "u32", "%b0 \"entry\": %v0: ptr<u32> = alloca u32, align 4 %v1: u64 = const u64 1 %v2: ptr<u32> = gep %v0, %v1 %v3: ptr<u32> = call whale ptr<u32> @f1(%v2) %v4: u32 = load u32, ptr<u32> %v0, align 4 ret u32 %v4");
@@ -432,20 +360,15 @@ fn callee_pointer_checks_preserve_one_past_bounds_and_expired_values_in_caller_s
         matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::Trap(t)) if t.reason == TrapReason::Memory(MemoryTrap::OutOfBounds) && t.site.function == FunctionId(1))
     );
     let source = format!("{HEADER} declare @f0 \"local_store\": whale (ptr<ptr<u32>>) -> void, linkage internal declare @f1 \"entry\": whale () -> u32, linkage internal fn @f0 \"local_store\"(%v0 \"out\": ptr<ptr<u32>>) -> void, entry %b0 {{ %b0 \"entry\": %v1: ptr<u32> = alloca u32, align 4 store ptr<u32> %v1, ptr<ptr<u32>> %v0, align 8 ret void }} fn @f1 \"entry\"() -> u32, entry %b0 {{ %b0 \"entry\": %v0: ptr<ptr<u32>> = alloca ptr<u32>, align 8 call whale void @f0(%v0) %v1: ptr<u32> = load ptr<u32>, ptr<ptr<u32>> %v0, align 8 %v2: u32 = load u32, ptr<u32> %v1, align 4 ret u32 %v2 }} }}");
-    memory_trap(
-        &parse_module(&source).unwrap(),
-        1,
-        MemoryTrap::ExpiredAllocation,
-    );
+    memory_trap(&parse_module(&source).unwrap(), 1, MemoryTrap::ExpiredAllocation);
 }
+
 #[test]
 fn recursive_stack_allocations_belong_to_each_invocation_and_share_memory_limits() {
     let source = format!("{HEADER} declare @f0 \"sum\": whale (u32) -> u32, linkage internal fn @f0 \"sum\"(%v0 \"n\": u32) -> u32, entry %b0 {{ %b0 \"entry\": %v1: ptr<u32> = alloca u32, align 4 store u32 %v0, ptr<u32> %v1, align 4 %v2: u32 = const u32 0 %v3: bool = icmp eq u32 %v0, %v2 cbr bool %v3, label %b1, label %b2 %b1 \"base\": ret u32 %v2 %b2 \"recursive\": %v4: u32 = const u32 1 %v5: u32 = sub u32 %v0, %v4 %v6: u32 = call whale u32 @f0(%v5) %v7: u32 = load u32, ptr<u32> %v1, align 4 %v8: u32 = add u32 %v6, %v7 ret u32 %v8 }} }}");
     let m = parse_module(&source).unwrap();
     assert_eq!(
-        interpret(&m, FunctionId(0), &[ConstValue::U(4)])
-            .unwrap()
-            .value,
+        interpret(&m, FunctionId(0), &[ConstValue::U(4)]).unwrap().value,
         Some(ConstValue::U(10))
     );
     assert!(matches!(
@@ -454,18 +377,11 @@ fn recursive_stack_allocations_belong_to_each_invocation_and_share_memory_limits
             FunctionId(0),
             &[ConstValue::U(4)],
             InterpreterOptions {
-                memory_limits: MemoryLimits {
-                    max_bytes: 19,
-                    ..Default::default()
-                },
+                memory_limits: MemoryLimits { max_bytes: 19, ..Default::default() },
                 ..Default::default()
             }
         ),
-        Err(InterpreterError::MemoryLimit {
-            resource: MemoryResource::Bytes,
-            limit: 19,
-            ..
-        })
+        Err(InterpreterError::MemoryLimit { resource: MemoryResource::Bytes, limit: 19, .. })
     ));
     // More frames than the default host stack could safely hold still fail at the explicit budget.
     assert!(matches!(
@@ -473,16 +389,9 @@ fn recursive_stack_allocations_belong_to_each_invocation_and_share_memory_limits
             &m,
             FunctionId(0),
             &[ConstValue::U(10000)],
-            InterpreterOptions {
-                max_call_depth: 1024,
-                ..Default::default()
-            }
+            InterpreterOptions { max_call_depth: 1024, ..Default::default() }
         ),
-        Err(InterpreterError::CallLimit {
-            resource: CallResource::Depth,
-            limit: 1024,
-            ..
-        })
+        Err(InterpreterError::CallLimit { resource: CallResource::Depth, limit: 1024, .. })
     ));
 }
 
@@ -490,10 +399,7 @@ fn recursive_stack_allocations_belong_to_each_invocation_and_share_memory_limits
 fn invocation_value_budget_rejects_large_live_environments_before_entering_a_callee() {
     let m = fixture();
     // The recursive body reserves seven SSA slots, independently of its chosen path.
-    let options = InterpreterOptions {
-        max_live_values: 13,
-        ..Default::default()
-    };
+    let options = InterpreterOptions { max_live_values: 13, ..Default::default() };
     assert!(
         matches!(interpret_with_options(&m, FunctionId(5), &[ConstValue::I(2)], options), Err(InterpreterError::CallLimit { site, resource: CallResource::Values, limit: 13 }) if site.function == FunctionId(5) && site.value == Some(ValueId(5)))
     );
@@ -507,10 +413,7 @@ fn invocation_value_budget_rejects_large_live_environments_before_entering_a_cal
             &m,
             FunctionId(8),
             &[],
-            InterpreterOptions {
-                max_live_values: 8,
-                ..Default::default()
-            }
+            InterpreterOptions { max_live_values: 8, ..Default::default() }
         )
         .unwrap()
         .value,
@@ -527,17 +430,10 @@ fn callable_library_values_cannot_rebind_equal_ids_and_signatures_in_another_mod
         "%b0 \"entry\": %v2: i32 = call whale i32 indirect %v0(%v1) ret i32 %v2",
     );
     let target = RuntimeValue::function(&m, FunctionId(0)).unwrap();
-    let returned_target = interpret_values(&m, FunctionId(7), &[])
-        .unwrap()
-        .value
-        .unwrap();
+    let returned_target = interpret_values(&m, FunctionId(7), &[]).unwrap().value.unwrap();
     let input = RuntimeValue::scalar(Type::I32, ConstValue::I(41)).unwrap();
     let mut other = m.clone();
-    let fun = other
-        .functions
-        .iter_mut()
-        .find(|f| f.id == FunctionId(0))
-        .unwrap();
+    let fun = other.functions.iter_mut().find(|f| f.id == FunctionId(0)).unwrap();
     let Instruction::Const { value, .. } = &mut fun.blocks[0].instructions[3] else {
         unreachable!()
     };
@@ -587,6 +483,7 @@ fn callable_storage_preserves_null_initialization_and_bool_representation_checks
     let m = append_using_fixture(8, &[], "bool", "%b0 \"entry\": %v0: ptr<fnptr<whale (ptr<u32>) -> ptr<u32>>> = alloca fnptr<whale (ptr<u32>) -> ptr<u32>>, align 8 %v1: fnptr<whale (ptr<u32>) -> ptr<u32>> = function_addr @f1 store fnptr<whale (ptr<u32>) -> ptr<u32>> %v1, ptr<fnptr<whale (ptr<u32>) -> ptr<u32>>> %v0, align 8 %v2: ptr<bool> = bitcast ptr<fnptr<whale (ptr<u32>) -> ptr<u32>>> %v0 to ptr<bool> %v3: bool = load bool, ptr<bool> %v2, align 1 ret bool %v3");
     memory_trap(&m, 8, MemoryTrap::InvalidBool { byte: 2 });
 }
+
 #[test]
 fn callable_metadata_and_copied_fragments_use_the_shared_memory_budget() {
     let m = append_using_fixture(8, &[], "i32", split_callable_body());
@@ -603,6 +500,7 @@ fn interpret(
 ) -> Result<InterpreterResult, InterpreterError> {
     ir::interpret(module, function, args).map_err(InterpreterError::into_root_cause)
 }
+
 fn interpret_with_options(
     module: &Module,
     function: FunctionId,
@@ -612,6 +510,7 @@ fn interpret_with_options(
     ir::interpret_with_options(module, function, args, options)
         .map_err(InterpreterError::into_root_cause)
 }
+
 fn interpret_values<'a>(
     module: &'a Module,
     function: FunctionId,

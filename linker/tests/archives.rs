@@ -2,7 +2,9 @@ use linker::{
     core::{archive::read_archive, linker::OutputFormat},
     Linker,
 };
+
 use object::*;
+
 fn object(name: &str, code: &[u8]) -> ObjectFile {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
     o.add_section(".text", SectionKind::Text, 1);
@@ -18,11 +20,10 @@ fn object(name: &str, code: &[u8]) -> ObjectFile {
     });
     o
 }
+
 fn entry() -> ObjectFile {
-    let mut o = object(
-        "_start",
-        &[0xe8, 0, 0, 0, 0, 0x89, 0xc7, 0xb8, 60, 0, 0, 0, 0x0f, 5],
-    );
+    let mut o = object("_start", &[0xe8, 0, 0, 0, 0, 0x89, 0xc7, 0xb8, 60, 0, 0, 0, 0x0f, 5]);
+
     o.symbols.push(ObjectSymbol {
         name: "helper".into(),
         section_index: None,
@@ -32,6 +33,7 @@ fn entry() -> ObjectFile {
         kind: SymbolKind::Function,
         visibility: SymbolVisibility::Default,
     });
+
     o.relocations.push(ObjectRelocation {
         section_index: 0,
         offset: 1,
@@ -39,55 +41,62 @@ fn entry() -> ObjectFile {
         kind: RelocKind::PLT32,
         addend: -4,
     });
+
     o
 }
+
 fn member(out: &mut Vec<u8>, name: &str, payload: &[u8]) {
     assert!(name.len() <= 16);
-    let header = format!(
-        "{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n",
-        0,
-        0,
-        0,
-        "100644",
-        payload.len()
-    );
+    let header =
+        format!("{name:<16}{:<12}{:<6}{:<6}{:<8}{:<10}`\n", 0, 0, 0, "100644", payload.len());
+
     assert_eq!(header.len(), 60);
     out.extend(header.bytes());
     out.extend(payload);
+
     if payload.len() % 2 != 0 {
         out.push(b'\n');
     }
 }
+
 fn archive(objects: &[(&str, ObjectFile)]) -> Vec<u8> {
     let mut out = b"!<arch>\n".to_vec();
+
     for (name, object) in objects {
         member(&mut out, name, &object.write().unwrap());
     }
+
     out
 }
+
 #[test]
 fn ordinary_long_names_and_malformed_boundaries() {
     let mut out = b"!<arch>\n".to_vec();
     member(&mut out, "//", b"a-very-long-object-name.o/\n");
     member(&mut out, "/0", b"abc");
     member(&mut out, "#1/19", b"bsd-long-name.o\0\0\0\0xyz");
+
     let parsed = read_archive(&out).unwrap();
     assert_eq!(parsed[0].name, "a-very-long-object-name.o");
     assert_eq!(parsed[0].bytes, b"abc");
     assert_eq!(parsed[1].name, "bsd-long-name.o");
     assert_eq!(parsed[1].bytes, b"xyz");
+
     for end in 1..out.len() {
         if end != 8 {
             let _ = read_archive(&out[..end]);
         }
     }
+
     assert!(read_archive(b"!<thin>\n").is_err());
+
     let mut bad = out.clone();
     bad[8 + 48] = b'-';
     assert!(read_archive(&bad).is_err());
     out.pop();
     assert!(read_archive(&out).is_err());
 }
+
 #[test]
 fn unused_duplicate_definitions_do_not_participate_and_entry_seeds_extraction() {
     let bytes = archive(&[
@@ -95,22 +104,29 @@ fn unused_duplicate_definitions_do_not_participate_and_entry_seeds_extraction() 
         ("entry.o/", entry()),
         ("unused.o/", object("helper", &[0xc3])),
     ]);
+
     let mut linker = Linker::new(OutputFormat::ELF64Executable);
     linker.add_archive(&bytes).unwrap();
+
     let result = linker.link().unwrap();
     assert!(result.len() < 4096);
     assert_eq!(linker.link().unwrap(), result);
+
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
         let path = std::env::temp_dir().join(format!("whale-archive-run-{}", std::process::id()));
+
         fs::write(&path, result).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         let status = Command::new(&path).status();
         fs::remove_file(&path).unwrap();
+
         assert_eq!(status.unwrap().code(), Some(42));
     }
 }
+
 #[test]
 fn archive_order_is_left_to_right_and_undefined_weak_does_not_extract() {
     let bytes = archive(&[("helper.o/", object("helper", &[0xc3]))]);
@@ -153,12 +169,9 @@ fn archive_order_is_left_to_right_and_undefined_weak_does_not_extract() {
 }
 
 fn reader_resource(error: linker::LinkError) -> ObjectResource {
-    error
-        .input_cause
-        .expect("typed reader cause")
-        .resource
-        .expect("resource cause")
+    error.input_cause.expect("typed reader cause").resource.expect("resource cause")
 }
+
 fn aliased_object(section_count: usize, size: usize) -> Vec<u8> {
     // Independent alias fixture: only one payload is stored in the file, but
     // every raw PROGBITS header describes that same range.
@@ -178,6 +191,7 @@ fn aliased_object(section_count: usize, size: usize) -> Vec<u8> {
     }
     bytes
 }
+
 #[test]
 fn archive_alias_payloads_share_one_budget_even_when_members_are_unused() {
     use linker::core::archive::read_objects_with_limits;
@@ -191,10 +205,7 @@ fn archive_alias_payloads_share_one_budget_even_when_members_are_unused() {
     assert!(object.len() < usage.payload_bytes);
     let error = read_objects_with_limits(
         &bytes,
-        ObjectReadLimits {
-            max_payload_bytes: 24 * 1024,
-            ..ObjectReadLimits::default()
-        },
+        ObjectReadLimits { max_payload_bytes: 24 * 1024, ..ObjectReadLimits::default() },
     )
     .err()
     .expect("unused decoded members must still share payload budget");
@@ -202,16 +213,14 @@ fn archive_alias_payloads_share_one_budget_even_when_members_are_unused() {
     assert_eq!(
         read_objects_with_limits(
             &bytes,
-            ObjectReadLimits {
-                max_payload_bytes: 48 * 1024,
-                ..ObjectReadLimits::default()
-            }
+            ObjectReadLimits { max_payload_bytes: 48 * 1024, ..ObjectReadLimits::default() }
         )
         .unwrap()
         .len(),
         3
     );
 }
+
 #[test]
 fn every_reader_counter_is_cumulative_across_objects_including_auxiliary_records() {
     let bytes = entry().write().unwrap();
@@ -222,11 +231,7 @@ fn every_reader_counter_is_cumulative_across_objects_including_auxiliary_records
     assert_eq!(u.relocations, 1);
     let owned_names: usize = object.sections.iter().map(|s| s.name.len()).sum::<usize>()
         + object.symbols.iter().map(|s| s.name.len()).sum::<usize>()
-        + object
-            .relocations
-            .iter()
-            .map(|s| s.symbol.len())
-            .sum::<usize>();
+        + object.relocations.iter().map(|s| s.symbol.len()).sum::<usize>();
     assert!(u.string_bytes > owned_names); // auxiliary/repeated name inspections
     for resource in [
         ObjectResource::InputBytes,
@@ -252,26 +257,18 @@ fn every_reader_counter_is_cumulative_across_objects_including_auxiliary_records
         *slot = amount * 2 - 1;
         let mut linker = Linker::with_read_limits(OutputFormat::ELF64Executable, limits);
         linker.add_object_bytes(&bytes).unwrap();
-        assert_eq!(
-            reader_resource(linker.add_object_bytes(&bytes).unwrap_err()),
-            resource
-        );
+        assert_eq!(reader_resource(linker.add_object_bytes(&bytes).unwrap_err()), resource);
     }
 }
+
 #[test]
 fn shared_budget_spans_objects_and_archives_and_failed_archives_are_transactional() {
     let start = entry().write().unwrap();
     let helper = object("helper", &[0xc3]);
-    let bytes = archive(&[
-        ("a.o/", helper.clone()),
-        ("b.o/", object("unused", &[0x90; 32])),
-    ]);
+    let bytes = archive(&[("a.o/", helper.clone()), ("b.o/", object("unused", &[0x90; 32]))]);
     let mut linker = Linker::with_read_limits(
         OutputFormat::ELF64Executable,
-        ObjectReadLimits {
-            max_payload_bytes: 15,
-            ..ObjectReadLimits::default()
-        },
+        ObjectReadLimits { max_payload_bytes: 15, ..ObjectReadLimits::default() },
     );
     linker.add_object_bytes(&start).unwrap(); // 14 bytes
     for _ in 0..2 {
@@ -287,10 +284,7 @@ fn shared_budget_spans_objects_and_archives_and_failed_archives_are_transactiona
     let one = archive(&[("a.o/", helper)]);
     let mut linker = Linker::with_read_limits(
         OutputFormat::ELF64Executable,
-        ObjectReadLimits {
-            max_payload_bytes: 1,
-            ..ObjectReadLimits::default()
-        },
+        ObjectReadLimits { max_payload_bytes: 1, ..ObjectReadLimits::default() },
     );
     linker.add_archive(&one).unwrap();
     assert_eq!(
@@ -298,6 +292,7 @@ fn shared_budget_spans_objects_and_archives_and_failed_archives_are_transactiona
         ObjectResource::PayloadBytes
     );
 }
+
 #[test]
 fn archive_names_and_parser_work_are_preflighted_with_shared_reader_limits() {
     use linker::core::archive::read_objects_with_limits;
@@ -305,20 +300,14 @@ fn archive_names_and_parser_work_are_preflighted_with_shared_reader_limits() {
     member(&mut bsd, "#1/9", b"long-name");
     let error = read_objects_with_limits(
         &bsd,
-        ObjectReadLimits {
-            max_string_bytes: 8,
-            ..ObjectReadLimits::default()
-        },
+        ObjectReadLimits { max_string_bytes: 8, ..ObjectReadLimits::default() },
     )
     .err()
     .unwrap();
     assert_eq!(reader_resource(error), ObjectResource::StringBytes);
     let error = read_objects_with_limits(
         &bsd,
-        ObjectReadLimits {
-            max_work: 1,
-            ..ObjectReadLimits::default()
-        },
+        ObjectReadLimits { max_work: 1, ..ObjectReadLimits::default() },
     )
     .err()
     .unwrap();
@@ -334,8 +323,6 @@ fn archive_names_and_parser_work_are_preflighted_with_shared_reader_limits() {
         } else {
             member(&mut bytes, "#1/1048577", &long);
         }
-        assert!(read_archive(&bytes)
-            .unwrap_err()
-            .contains("name byte budget"));
+        assert!(read_archive(&bytes).unwrap_err().contains("name byte budget"));
     }
 }

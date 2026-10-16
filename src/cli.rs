@@ -29,7 +29,7 @@ pub fn run() {
             eprintln!("Unknown command: {}", cmd);
             print_help();
             std::process::exit(2);
-        }
+        },
     }
 }
 

@@ -33,13 +33,9 @@ impl FloatBits {
             64 => 16,
             _ => return Err("float width must be 16, 32 or 64".into()),
         };
-        let hex = text
-            .strip_prefix("0x")
-            .ok_or("float value must start with 0x")?;
+        let hex = text.strip_prefix("0x").ok_or("float value must start with 0x")?;
         if hex.len() != digits || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(format!(
-                "f{width} requires exactly {digits} hexadecimal digits"
-            ));
+            return Err(format!("f{width} requires exactly {digits} hexadecimal digits"));
         }
         let bits = u64::from_str_radix(hex, 16).map_err(|e| e.to_string())?;
         Ok(match width {
@@ -80,19 +76,14 @@ impl FloatBits {
                 } else {
                     magnitude
                 }
-            }
+            },
         }
     }
 }
 
 impl std::fmt::Display for FloatBits {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "0x{:0width$x}",
-            self.bits(),
-            width = usize::from(self.width() / 4)
-        )
+        write!(f, "0x{:0width$x}", self.bits(), width = usize::from(self.width() / 4))
     }
 }
 
@@ -116,11 +107,7 @@ fn f64_to_f16(value: f64) -> u16 {
         return sign;
     }
     let mantissa = fraction | (1u64 << 52);
-    let shift = if unbiased < -14 {
-        (28 - unbiased) as u32
-    } else {
-        42
-    };
+    let shift = if unbiased < -14 { (28 - unbiased) as u32 } else { 42 };
     let base = mantissa >> shift;
     let remainder = mantissa & ((1u64 << shift) - 1);
     let halfway = 1u64 << (shift - 1);

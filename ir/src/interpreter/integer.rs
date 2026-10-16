@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use super::TrapReason;
+
 use crate::{BinOp, CastOp, CheckedOp, ConstValue, Type};
 
 pub(super) fn shape(ty: &Type) -> Option<(u32, bool)> {
@@ -21,6 +22,7 @@ pub(super) fn shape(ty: &Type) -> Option<(u32, bool)> {
         _ => return None,
     })
 }
+
 fn mask(bits: u32) -> u128 {
     if bits == 128 {
         u128::MAX
@@ -28,6 +30,7 @@ fn mask(bits: u32) -> u128 {
         (1u128 << bits) - 1
     }
 }
+
 pub(super) fn raw(value: &ConstValue, bits: u32) -> u128 {
     (match value {
         ConstValue::I(v) => *v as u128,
@@ -36,6 +39,7 @@ pub(super) fn raw(value: &ConstValue, bits: u32) -> u128 {
         ConstValue::F(_) => unreachable!("scalar subset checked before execution"),
     }) & mask(bits)
 }
+
 fn signed(value: u128, bits: u32) -> i128 {
     if bits < 128 && value & (1u128 << (bits - 1)) != 0 {
         (value | !mask(bits)) as i128
@@ -43,6 +47,7 @@ fn signed(value: u128, bits: u32) -> i128 {
         value as i128
     }
 }
+
 pub(super) fn pack(ty: &Type, value: u128) -> ConstValue {
     let (bits, is_signed) = shape(ty).expect("integer subset checked");
     let value = value & mask(bits);
@@ -52,6 +57,7 @@ pub(super) fn pack(ty: &Type, value: u128) -> ConstValue {
         ConstValue::U(value)
     }
 }
+
 pub(super) fn bin(
     op: &BinOp,
     ty: &Type,
@@ -83,6 +89,7 @@ pub(super) fn bin(
     };
     Ok(pack(ty, value))
 }
+
 pub(super) fn checked(
     op: &CheckedOp,
     ty: &Type,
@@ -96,12 +103,9 @@ pub(super) fn checked(
         CheckedOp::UAdd => {
             let (sum, carry) = a.overflowing_add(b);
             (sum, carry || sum > mask(bits))
-        }
+        },
         CheckedOp::USub => (a.wrapping_sub(b), a < b),
-        CheckedOp::UMul => (
-            a.wrapping_mul(b),
-            a.checked_mul(b).is_none_or(|v| v > mask(bits)),
-        ),
+        CheckedOp::UMul => (a.wrapping_mul(b), a.checked_mul(b).is_none_or(|v| v > mask(bits))),
         CheckedOp::SAdd | CheckedOp::SSub | CheckedOp::SMul => {
             let sa = signed(a, bits);
             let sb = signed(b, bits);
@@ -114,20 +118,18 @@ pub(super) fn checked(
                 bits < 128 && (v < -(1i128 << (bits - 1)) || v >= (1i128 << (bits - 1)))
             });
             (wrapped, overflow)
-        }
+        },
     };
     (pack(ty, wrapped), overflow)
 }
+
 pub(super) fn cast(op: &CastOp, src_ty: &Type, dst_ty: &Type, value: &ConstValue) -> ConstValue {
     let bits = shape(src_ty).map_or(1, |s| s.0);
     let value = raw(value, bits);
-    let value = if *op == CastOp::SExt {
-        signed(value, bits) as u128
-    } else {
-        value
-    };
+    let value = if *op == CastOp::SExt { signed(value, bits) as u128 } else { value };
     pack(dst_ty, value)
 }
+
 pub(super) fn compare(
     pred: &crate::ICmpPred,
     ty: &Type,

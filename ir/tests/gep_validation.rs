@@ -2,12 +2,7 @@ use ir::*;
 
 fn gep(base: Type, indices: Vec<(Type, Option<ConstValue>)>, result: Type) -> Module {
     let mut params = vec![("base".into(), base)];
-    params.extend(
-        indices
-            .iter()
-            .enumerate()
-            .map(|(i, (ty, _))| (format!("index{i}"), ty.clone())),
-    );
+    params.extend(indices.iter().enumerate().map(|(i, (ty, _))| (format!("index{i}"), ty.clone())));
     let mut builder = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     let mut f = builder.begin_function("address", params, Type::Void);
     f.ret(None);
@@ -39,6 +34,7 @@ fn gep(base: Type, indices: Vec<(Type, Option<ConstValue>)>, result: Type) -> Mo
 fn literal(value: i128) -> (Type, Option<ConstValue>) {
     (Type::I64, Some(ConstValue::I(value)))
 }
+
 fn index() -> (Type, Option<ConstValue>) {
     (Type::I64, None)
 }
@@ -46,12 +42,7 @@ fn index() -> (Type, Option<ConstValue>) {
 #[test]
 fn element_offsets_preserve_the_pointee_and_require_integer_indices() {
     let ptr = Type::ptr_to(Type::I32);
-    for indices in [
-        vec![],
-        vec![index()],
-        vec![literal(2)],
-        vec![(Type::U64, None)],
-    ] {
+    for indices in [vec![], vec![index()], vec![literal(2)], vec![(Type::U64, None)]] {
         verify_module(&gep(ptr.clone(), indices, ptr.clone())).unwrap();
     }
     for (base, indices, result) in [
@@ -60,11 +51,7 @@ fn element_offsets_preserve_the_pointee_and_require_integer_indices() {
         (ptr.clone(), vec![(Type::F64, None)], ptr.clone()),
         (ptr.clone(), vec![index()], Type::I32),
         (ptr.clone(), vec![index()], Type::ptr_to(Type::U8)),
-        (
-            Type::ptr_to(Type::Void),
-            vec![index()],
-            Type::ptr_to(Type::Void),
-        ),
+        (Type::ptr_to(Type::Void), vec![index()], Type::ptr_to(Type::Void)),
         (ptr.clone(), vec![index(), index()], ptr),
     ] {
         assert!(verify_module(&gep(base, indices, result)).is_err());
@@ -76,12 +63,8 @@ fn nested_aggregate_paths_derive_the_selected_field_type() {
     let record = Type::Struct(vec![Type::I32, Type::Array(Box::new(Type::Bool), 4)]);
     let base = Type::ptr_to(record.clone());
     verify_module(&gep(base.clone(), vec![index()], base.clone())).unwrap();
-    verify_module(&gep(
-        base.clone(),
-        vec![literal(0), literal(0)],
-        Type::ptr_to(Type::I32),
-    ))
-    .unwrap();
+    verify_module(&gep(base.clone(), vec![literal(0), literal(0)], Type::ptr_to(Type::I32)))
+        .unwrap();
     verify_module(&gep(
         base.clone(),
         vec![literal(0), literal(1), index()],
@@ -105,12 +88,7 @@ fn nested_aggregate_paths_derive_the_selected_field_type() {
 #[test]
 fn fields_require_representable_literal_ordinals_and_gep_never_loads_pointers() {
     let base = Type::ptr_to(Type::Struct(vec![Type::I32, Type::Bool]));
-    for field in [
-        index(),
-        literal(-1),
-        literal(2),
-        (Type::U128, Some(ConstValue::U(u128::MAX))),
-    ] {
+    for field in [index(), literal(-1), literal(2), (Type::U128, Some(ConstValue::U(u128::MAX)))] {
         assert!(verify_module(&gep(
             base.clone(),
             vec![literal(0), field],

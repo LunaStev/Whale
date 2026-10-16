@@ -5,10 +5,7 @@ fn forward_constants_match_backward_definitions_without_relocations() {
     for usage in ["mov eax, N", "dd N + 1", "mov eax, [rbx + N]", "resb N"] {
         let forward = assemble(&format!("{usage}\nN equ M + 1\nM equ 2"), &AMD64).unwrap();
         let backward = assemble(&format!("M equ 2\nN equ M + 1\n{usage}"), &AMD64).unwrap();
-        assert_eq!(
-            forward.sections[0].data, backward.sections[0].data,
-            "{usage}"
-        );
+        assert_eq!(forward.sections[0].data, backward.sections[0].data, "{usage}");
         assert!(forward.sections[0].relocs.is_empty(), "{usage}");
         assert!(forward.symbols.is_empty());
     }
@@ -21,10 +18,7 @@ fn local_constants_keep_their_defining_label_scope() {
         &AMD64,
     )
     .unwrap();
-    assert_eq!(
-        output.sections[0].data,
-        [0xb8, 3, 0, 0, 0, 0xb8, 7, 0, 0, 0]
-    );
+    assert_eq!(output.sections[0].data, [0xb8, 3, 0, 0, 0, 0xb8, 7, 0, 0, 0]);
     assert!(output.sections[0].relocs.is_empty());
 }
 

@@ -3,16 +3,20 @@
 pub fn u16_at(b: &[u8], p: usize) -> u16 {
     u16::from_le_bytes(b[p..p + 2].try_into().unwrap())
 }
+
 pub fn u32_at(b: &[u8], p: usize) -> u32 {
     u32::from_le_bytes(b[p..p + 4].try_into().unwrap())
 }
+
 pub fn u64_at(b: &[u8], p: usize) -> u64 {
     u64::from_le_bytes(b[p..p + 8].try_into().unwrap())
 }
+
 fn string(b: &[u8], p: usize) -> String {
     let n = b[p..].iter().position(|v| *v == 0).unwrap();
     String::from_utf8(b[p..p + n].to_vec()).unwrap()
 }
+
 #[derive(Debug)]
 pub struct Section {
     pub index: usize,
@@ -24,6 +28,7 @@ pub struct Section {
     pub info: usize,
     pub entsize: usize,
 }
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Symbol {
     pub index: usize,
@@ -35,6 +40,7 @@ pub struct Symbol {
     pub visibility: u8,
     pub section: usize,
 }
+
 pub fn sections(b: &[u8]) -> Vec<Section> {
     assert_eq!(&b[..7], b"\x7fELF\x02\x01\x01");
     let table = u64_at(b, 40) as usize;
@@ -57,6 +63,7 @@ pub fn sections(b: &[u8]) -> Vec<Section> {
         })
         .collect()
 }
+
 pub fn symbols(b: &[u8], sections: &[Section]) -> Vec<Symbol> {
     let symtab = sections.iter().find(|s| s.kind == 2).unwrap();
     let strings = &sections[symtab.link];

@@ -16,10 +16,11 @@ fn main() {
         Ok(module) => {
             ir::verify_module(&module).expect("successful lowering must verify");
             println!("decode=accept lower=accept verify=accept");
-        }
+        },
         Err(_) => println!("decode=accept lower=reject verify=skip"),
     }
 }
+
 #[cfg(not(feature = "socket-cli"))]
 fn main() {
     eprintln!("schema_probe requires --features socket-cli");

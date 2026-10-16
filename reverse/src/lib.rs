@@ -2,12 +2,17 @@
 //! AMD64 reverse analysis with a Wave implementation and a checked Rust boundary.
 //! Ordinary builds report an unavailable core; no Rust decoder substitutes for it.
 mod cfg;
+
 mod model;
+
 pub use cfg::*;
+
 pub use model::*;
+
 use std::fmt;
 
 pub const ABI_VERSION: u64 = 1;
+
 pub const DECODE_WORDS: usize = 96;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +26,7 @@ pub enum DecodeError {
     AbiMismatch { expected: u64, actual: u64 },
     InvalidOutput(&'static str),
 }
+
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -35,11 +41,13 @@ impl fmt::Display for DecodeError {
         }
     }
 }
+
 impl std::error::Error for DecodeError {}
 
 pub const fn backend_available() -> bool {
     cfg!(whale_wave_reverse)
 }
+
 pub const fn backend_name() -> &'static str {
     if backend_available() {
         "wave-llvm-bootstrap"
@@ -51,6 +59,7 @@ pub const fn backend_name() -> &'static str {
 #[cfg(whale_wave_reverse)]
 extern "C" {
     fn whale_wave_reverse_abi() -> u64;
+
     fn whale_wave_reverse_decode(
         abi: u64,
         input: *const u8,
@@ -60,6 +69,7 @@ extern "C" {
         capacity: u64,
     ) -> i32;
 }
+
 /// Decode one instruction at a checked slice offset. Input and its original bytes
 /// remain caller-owned; any failure publishes no partial instruction.
 pub fn decode(input: &[u8], offset: usize) -> Result<Instruction, DecodeError> {
@@ -76,10 +86,7 @@ pub fn decode(input: &[u8], offset: usize) -> Result<Instruction, DecodeError> {
         // SAFETY: the fixed no-argument capability entry has no memory operands.
         let actual = unsafe { whale_wave_reverse_abi() };
         if actual != ABI_VERSION {
-            return Err(DecodeError::AbiMismatch {
-                expected: ABI_VERSION,
-                actual,
-            });
+            return Err(DecodeError::AbiMismatch { expected: ABI_VERSION, actual });
         }
         let mut record = [0u64; DECODE_WORDS];
         // SAFETY: both buffers live through this call, output is aligned and has
@@ -104,14 +111,12 @@ pub fn decode(input: &[u8], offset: usize) -> Result<Instruction, DecodeError> {
             3 => Err(DecodeError::Unsupported { offset }),
             4 => Err(DecodeError::Overlong { offset }),
             5 => Err(DecodeError::Capacity),
-            6 => Err(DecodeError::AbiMismatch {
-                expected: ABI_VERSION,
-                actual,
-            }),
+            6 => Err(DecodeError::AbiMismatch { expected: ABI_VERSION, actual }),
             _ => Err(DecodeError::InvalidOutput("unknown status")),
         }
     }
 }
+
 #[cfg(whale_wave_reverse)]
 fn decode_record(
     input: &[u8],
@@ -134,22 +139,15 @@ fn decode_record(
     let mut original = [0; 15];
     original[..bytes.len()].copy_from_slice(bytes);
     let opcode = Opcode::from_code(r[3]).ok_or(bad("opcode"))?;
-    let condition = if r[4] == 16 {
-        None
-    } else {
-        Some(Condition::from_code(r[4]).ok_or(bad("condition"))?)
-    };
+    let condition =
+        if r[4] == 16 { None } else { Some(Condition::from_code(r[4]).ok_or(bad("condition"))?) };
     if condition.is_some() != matches!(opcode, Opcode::Jcc | Opcode::Setcc | Opcode::Cmovcc) {
         return Err(bad("condition opcode"));
     }
-    let operand_count = usize::try_from(r[5])
-        .ok()
-        .filter(|n| *n <= 3)
-        .ok_or(bad("operand count"))?;
-    let prefix_count = usize::try_from(r[7])
-        .ok()
-        .filter(|n| *n < bytes.len())
-        .ok_or(bad("prefix count"))?;
+    let operand_count =
+        usize::try_from(r[5]).ok().filter(|n| *n <= 3).ok_or(bad("operand count"))?;
+    let prefix_count =
+        usize::try_from(r[7]).ok().filter(|n| *n < bytes.len()).ok_or(bad("prefix count"))?;
     if r[8] != prefix_count as u64 || !matches!(r[9], 1 | 2) || r[8] + r[9] > u64::from(length) {
         return Err(bad("opcode range"));
     }
@@ -181,10 +179,7 @@ fn decode_record(
         if r[at + 1] != u64::from(bytes[off]) {
             return Err(bad("encoding byte bits"));
         }
-        Ok(Some(EncodingByte {
-            offset: off as u8,
-            value: bytes[off],
-        }))
+        Ok(Some(EncodingByte { offset: off as u8, value: bytes[off] }))
     };
     let field = |at: usize| -> Result<Option<EncodingField>, DecodeError> {
         if r[at] == 0 {
@@ -195,10 +190,7 @@ fn decode_record(
             .ok()
             .filter(|n| matches!(n, 1 | 2 | 4 | 8))
             .ok_or(bad("field width"))?;
-        let end = off
-            .checked_add(width)
-            .filter(|n| *n <= bytes.len())
-            .ok_or(bad("field range"))?;
+        let end = off.checked_add(width).filter(|n| *n <= bytes.len()).ok_or(bad("field range"))?;
         let bits = bytes[off..end]
             .iter()
             .enumerate()
@@ -206,11 +198,7 @@ fn decode_record(
         if bits != r[at + 2] {
             return Err(bad("field bits"));
         }
-        Ok(Some(EncodingField {
-            offset: off as u8,
-            width: width as u8,
-            bits,
-        }))
+        Ok(Some(EncodingField { offset: off as u8, width: width as u8, bits }))
     };
     let encoding = Encoding {
         prefixes,
@@ -224,16 +212,8 @@ fn decode_record(
     };
     let mut operands = Vec::with_capacity(operand_count);
     let gpr = |code: u64| -> Result<Register, DecodeError> {
-        let index = u8::try_from(code)
-            .ok()
-            .filter(|n| *n < 16)
-            .ok_or(bad("address register"))?;
-        Ok(Register {
-            class: RegisterClass::General,
-            index,
-            width: 64,
-            high8: false,
-        })
+        let index = u8::try_from(code).ok().filter(|n| *n < 16).ok_or(bad("address register"))?;
+        Ok(Register { class: RegisterClass::General, index, width: 64, high8: false })
     };
     for operand in 0..operand_count {
         let at = 40 + operand * 16;
@@ -259,16 +239,12 @@ fn decode_record(
                     return Err(bad("XMM shape"));
                 }
                 Operand::Register(Register {
-                    class: if kind == 1 {
-                        RegisterClass::General
-                    } else {
-                        RegisterClass::Xmm
-                    },
+                    class: if kind == 1 { RegisterClass::General } else { RegisterClass::Xmm },
                     index,
                     width,
                     high8,
                 })
-            }
+            },
             3 => {
                 if !matches!(width, 8 | 16 | 32 | 64) {
                     return Err(bad("memory width"));
@@ -295,7 +271,7 @@ fn decode_record(
                     displacement: r[at + 5] as i64,
                     rip_relative: r[at + 2] == 17,
                 })
-            }
+            },
             4 => {
                 let encoded_width = u8::try_from(r[at + 6])
                     .ok()
@@ -310,17 +286,14 @@ fn decode_record(
                     encoded_width,
                     sign_extended: r[at + 3] == 1,
                 })
-            }
+            },
             5 => {
                 let encoded_width = u8::try_from(r[at + 6])
                     .ok()
                     .filter(|n| matches!(n, 8 | 32))
                     .ok_or(bad("relative width"))?;
-                Operand::Relative(Relative {
-                    displacement: r[at + 2] as i64,
-                    encoded_width,
-                })
-            }
+                Operand::Relative(Relative { displacement: r[at + 2] as i64, encoded_width })
+            },
             _ => return Err(bad("operand kind")),
         };
         operands.push(value);
@@ -335,36 +308,20 @@ fn decode_record(
     let required = || relative.ok_or(bad("missing relative operand"));
     let flow = match r[6] {
         0 => Flow::FallThrough,
-        1 => Flow::Call {
-            relative: Some(required()?),
-        },
+        1 => Flow::Call { relative: Some(required()?) },
         2 => Flow::Call { relative: None },
-        3 => Flow::Jump {
-            relative: Some(required()?),
-        },
+        3 => Flow::Jump { relative: Some(required()?) },
         4 => Flow::Jump { relative: None },
-        5 => Flow::Conditional {
-            relative: required()?,
-        },
-        6 => Flow::Loop {
-            relative: required()?,
-        },
+        5 => Flow::Conditional { relative: required()? },
+        6 => Flow::Loop { relative: required()? },
         7 => Flow::Return,
         8 => Flow::Trap,
         9 => Flow::Syscall,
         _ => return Err(bad("flow kind")),
     };
-    Ok(Instruction {
-        offset,
-        length,
-        bytes: original,
-        opcode,
-        condition,
-        operands,
-        encoding,
-        flow,
-    })
+    Ok(Instruction { offset, length, bytes: original, opcode, condition, operands, encoding, flow })
 }
 
 pub mod format;
+
 pub mod image;

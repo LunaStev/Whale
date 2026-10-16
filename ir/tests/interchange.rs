@@ -3,18 +3,17 @@ use ir::lower_ast::{
     interchange::{decode, decode_with_limit, encode},
     lower_o0,
 };
+
 use ir::{DataLayout, FloatBits, Type};
 
 fn lower(source: &str) -> Result<ir::Module, String> {
     let program = decode(source)?;
-    lower_o0(
-        &program,
-        "x86_64-whale-linux",
-        DataLayout::default_64bit_le(),
-    )
-    .map_err(|e| format!("{e:?}"))
+    lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le())
+        .map_err(|e| format!("{e:?}"))
 }
+
 const INTEGER: &str = include_str!("fixtures/ast-v2-u128.json");
+
 const FLOAT: &str = include_str!("fixtures/ast-v2-float.json");
 
 #[test]
@@ -30,25 +29,18 @@ fn exact_numeric_fixtures_round_trip_and_lower() {
     assert!(printed.contains(&u128::MAX.to_string()));
     assert!(printed.contains("format_version 7\n  semantics_version 1"));
     assert!(ir::print_module(&lower(FLOAT).unwrap()).contains("0xffc01234"));
-    let signed = INTEGER
-        .replace("false", "true")
-        .replace(&u128::MAX.to_string(), &i128::MIN.to_string());
+    let signed =
+        INTEGER.replace("false", "true").replace(&u128::MAX.to_string(), &i128::MIN.to_string());
     assert!(ir::print_module(&lower(&signed).unwrap()).contains(&i128::MIN.to_string()));
 }
 
 #[test]
 fn raw_json_rejects_duplicate_keys_even_inside_enum_and_escaped_names() {
     for (from, to) in [
-        (
-            "\"format_version\": 2",
-            "\"format_version\": 2, \"format_version\": 2",
-        ),
+        ("\"format_version\": 2", "\"format_version\": 2, \"format_version\": 2"),
         ("\"globals\": []", "\"globals\": [], \"glob\\u0061ls\": []"),
         ("\"bits\": 128", "\"bits\": 128, \"bits\": 128"),
-        (
-            "\"name\": \"answer\"",
-            "\"name\": \"answer\", \"name\": \"answer\"",
-        ),
+        ("\"name\": \"answer\"", "\"name\": \"answer\", \"name\": \"answer\""),
     ] {
         let error = decode(&INTEGER.replacen(from, to, 1)).unwrap_err();
         assert!(error.contains("duplicate JSON key"), "{error}");
@@ -65,10 +57,7 @@ fn unsupported_schema_versions_and_features_are_errors() {
         INTEGER.replace("\"globals\": []", "\"extra\": 0, \"globals\": []"),
         INTEGER.replace("\"bits\": 128", "\"extra\": 0, \"bits\": 128"),
         INTEGER.replace("\"name\": \"answer\"", "\"extra\": 0, \"name\": \"answer\""),
-        INTEGER.replace(
-            "\"value\": \"340282366920938463463374607431768211455\"",
-            "\"value\": 42",
-        ),
+        INTEGER.replace("\"value\": \"340282366920938463463374607431768211455\"", "\"value\": 42"),
         format!("{INTEGER} null"),
     ] {
         assert!(decode(&source).is_err(), "{source}");
@@ -81,19 +70,8 @@ fn unsupported_schema_versions_and_features_are_errors() {
 
 #[test]
 fn numeric_ranges_and_storage_widths_are_checked() {
-    for value in [
-        "-1",
-        "+1",
-        "1.0",
-        " 1",
-        "1e2",
-        "",
-        "340282366920938463463374607431768211456",
-    ] {
-        assert!(
-            lower(&INTEGER.replace(&u128::MAX.to_string(), value)).is_err(),
-            "{value}"
-        );
+    for value in ["-1", "+1", "1.0", " 1", "1e2", "", "340282366920938463463374607431768211456"] {
+        assert!(lower(&INTEGER.replace(&u128::MAX.to_string(), value)).is_err(), "{value}");
     }
     assert!(lower(&INTEGER.replace("128", "8")).is_err());
     for value in ["nan", "1.5", "0x1234", "0x100000000", "0xzzzzzzzz"] {
@@ -136,10 +114,7 @@ fn every_float_width_preserves_zero_infinity_and_nan_storage() {
         ),
     ] {
         for bits in values {
-            assert_eq!(
-                FloatBits::parse(bits.width(), &bits.to_string()).unwrap(),
-                bits
-            );
+            assert_eq!(FloatBits::parse(bits.width(), &bits.to_string()).unwrap(), bits);
             let source = FLOAT
                 .replace("\"bits\": 32", &format!("\"bits\": {}", bits.width()))
                 .replace("0xffc01234", &bits.to_string());
@@ -175,10 +150,7 @@ fn wire_numeric_syntax_matches_schema_while_ranges_remain_semantic() {
     assert!(decode(&INTEGER.replace("\"bits\": 128", "\"bits\": 7"))
         .unwrap_err()
         .contains("numeric width or spelling"));
-    let range = INTEGER.replace(
-        &u128::MAX.to_string(),
-        "340282366920938463463374607431768211456",
-    );
+    let range = INTEGER.replace(&u128::MAX.to_string(), "340282366920938463463374607431768211456");
     decode(&range).unwrap();
     assert!(lower(&range).is_err());
 }

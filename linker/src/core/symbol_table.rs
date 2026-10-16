@@ -1,4 +1,5 @@
 use object::{ObjectFile, SymbolBinding, SymbolKind, SymbolVisibility};
+
 use std::collections::HashMap;
 
 /// Local names belong to one input object; exported names share a link namespace.
@@ -48,21 +49,20 @@ impl SymbolTable {
     pub fn resolve(&mut self, objects: &[ObjectFile]) -> Result<(), String> {
         self.symbols.clear();
         self.references.clear();
+
         for (index, obj) in objects.iter().enumerate() {
-            obj.validate()
-                .map_err(|e| format!("link input {index}: {e}"))?;
+            obj.validate().map_err(|e| format!("link input {index}: {e}"))?;
         }
+
         let mut symbols: HashMap<SymbolKey, ResolvedSymbol> = HashMap::new();
         for (obj_idx, obj) in objects.iter().enumerate() {
             for sym in obj.symbols.iter().filter(|s| s.section_index.is_some()) {
                 let key = if sym.binding == SymbolBinding::Local {
-                    SymbolKey::Local {
-                        object_index: obj_idx,
-                        name: sym.name.clone(),
-                    }
+                    SymbolKey::Local { object_index: obj_idx, name: sym.name.clone() }
                 } else {
                     SymbolKey::Global(sym.name.clone())
                 };
+
                 if let Some(existing) = symbols.get(&key) {
                     if sym.binding == SymbolBinding::Local {
                         return Err(format!(
@@ -70,6 +70,7 @@ impl SymbolTable {
                             sym.name
                         ));
                     }
+
                     match (existing.binding, sym.binding) {
                         (SymbolBinding::Global, SymbolBinding::Global) => {
                             return Err(format!(
@@ -77,12 +78,14 @@ impl SymbolTable {
                                 sym.name,
                                 existing.object_index.unwrap()
                             ))
-                        }
+                        },
+
                         (SymbolBinding::Global, SymbolBinding::Weak)
                         | (SymbolBinding::Weak, SymbolBinding::Weak) => continue,
-                        _ => {}
+                        _ => {},
                     }
                 }
+
                 symbols.insert(
                     key,
                     ResolvedSymbol {
@@ -98,6 +101,7 @@ impl SymbolTable {
                 );
             }
         }
+
         let mut references = Vec::new();
         let mut weak_undefined = HashMap::new();
         for (obj_idx, obj) in objects.iter().enumerate() {
@@ -106,34 +110,32 @@ impl SymbolTable {
             for reloc in &obj.relocations {
                 let declaration = declarations.get(reloc.symbol.as_str());
                 let key = if declaration.is_some_and(|s| s.binding == SymbolBinding::Local) {
-                    SymbolKey::Local {
-                        object_index: obj_idx,
-                        name: reloc.symbol.clone(),
-                    }
+                    SymbolKey::Local { object_index: obj_idx, name: reloc.symbol.clone() }
                 } else {
                     SymbolKey::Global(reloc.symbol.clone())
                 };
+
                 let missing = !symbols.contains_key(&key);
                 let weak = declaration.is_some_and(|s| s.binding == SymbolBinding::Weak);
                 if missing && !weak {
                     return Err(format!("Unresolved strong symbol {:?} referenced by object {obj_idx}, section {:?} ({}), offset {}",
                         reloc.symbol, obj.sections[reloc.section_index].name, reloc.section_index, reloc.offset));
                 }
+
                 if missing {
                     let declaration = declaration.expect("weak reference has a declaration");
-                    weak_undefined
-                        .entry(key.clone())
-                        .or_insert_with(|| ResolvedSymbol {
-                            name: reloc.symbol.clone(),
-                            object_index: None,
-                            section_index: None,
-                            value: 0,
-                            size: 0,
-                            binding: SymbolBinding::Weak,
-                            kind: declaration.kind,
-                            visibility: declaration.visibility,
-                        });
+                    weak_undefined.entry(key.clone()).or_insert_with(|| ResolvedSymbol {
+                        name: reloc.symbol.clone(),
+                        object_index: None,
+                        section_index: None,
+                        value: 0,
+                        size: 0,
+                        binding: SymbolBinding::Weak,
+                        kind: declaration.kind,
+                        visibility: declaration.visibility,
+                    });
                 }
+
                 references.push(ResolvedReference {
                     object_index: obj_idx,
                     section_index: reloc.section_index,
@@ -143,9 +145,12 @@ impl SymbolTable {
                 });
             }
         }
+
         symbols.extend(weak_undefined);
+
         self.symbols = symbols;
         self.references = references;
+
         Ok(())
     }
 }

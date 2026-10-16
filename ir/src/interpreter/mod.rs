@@ -3,10 +3,13 @@
 //! Tracked stack memory and bounded direct/indirect Whale calls are supported.
 
 mod integer;
+
 mod memory;
+
 pub use memory::{MemoryLimits, MemoryResource, MemoryTrap};
 
 use crate::*;
+
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -28,6 +31,7 @@ pub struct InterpreterOptions {
     pub ir_limits: IrLimits,
     pub memory_limits: MemoryLimits,
 }
+
 impl Default for InterpreterOptions {
     fn default() -> Self {
         Self {
@@ -41,11 +45,13 @@ impl Default for InterpreterOptions {
         }
     }
 }
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterpreterResult {
     pub value: Option<ConstValue>,
     pub steps: u64,
 }
+
 /// An instruction index is zero-based; the terminator follows the instructions.
 /// These are IR identities, not a fabricated source-file location.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,20 +61,19 @@ pub struct ExecutionSite {
     pub instruction: usize,
     pub value: Option<ValueId>,
 }
+
 impl fmt::Display for ExecutionSite {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "@f{} {} instruction {}",
-            self.function.0, self.block, self.instruction
-        )?;
+        write!(f, "@f{} {} instruction {}", self.function.0, self.block, self.instruction)?;
         if let Some(value) = self.value {
             write!(f, " ({value})")?;
         }
         Ok(())
     }
 }
+
 pub const MAX_RUNTIME_TRACE_FRAMES: usize = 256;
+
 pub const MAX_RUNTIME_DIAGNOSTIC_SOURCE_BYTES: usize = 1024 * 1024;
 
 /// One active caller edge, in outermost-to-innermost order within the retained tail.
@@ -79,6 +84,7 @@ pub struct RuntimeCallFrame {
     pub site: ExecutionSite,
     pub original: Option<OriginalLocation>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeDiagnostic {
     pub site: Option<ExecutionSite>,
@@ -90,6 +96,7 @@ pub struct RuntimeDiagnostic {
     /// Source filename/span details omitted by the independent diagnostic byte budget.
     pub omitted_source_details: usize,
 }
+
 impl fmt::Display for RuntimeDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(original) = &self.original {
@@ -103,11 +110,7 @@ impl fmt::Display for RuntimeDiagnostic {
             )?;
         }
         if self.omitted_call_frames > 0 {
-            write!(
-                f,
-                "\n  ... {} outer caller frames omitted",
-                self.omitted_call_frames
-            )?;
+            write!(f, "\n  ... {} outer caller frames omitted", self.omitted_call_frames)?;
         }
         for call in &self.calls {
             write!(f, "\n  called from {} -> @f{}", call.site, call.callee.0)?;
@@ -118,6 +121,7 @@ impl fmt::Display for RuntimeDiagnostic {
         Ok(())
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TrapReason {
     DivisionByZero,
@@ -128,6 +132,7 @@ pub enum TrapReason {
     InvalidFunctionPointer,
     FunctionSignatureMismatch,
 }
+
 impl fmt::Display for TrapReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -138,19 +143,21 @@ impl fmt::Display for TrapReason {
             Self::NullFunction => f.write_str("null function pointer call"),
             Self::InvalidFunctionPointer => {
                 f.write_str("function pointer has no callable authority")
-            }
+            },
             Self::FunctionSignatureMismatch => {
                 f.write_str("function pointer signature does not match its target")
-            }
+            },
         }
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InterpreterTrap {
     pub site: ExecutionSite,
     pub reason: TrapReason,
     pub steps: u64,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallResource {
     Depth,
@@ -207,6 +214,7 @@ pub enum InterpreterError {
     },
     Trap(InterpreterTrap),
 }
+
 impl fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -227,6 +235,7 @@ impl fmt::Display for InterpreterError {
         }
     }
 }
+
 impl InterpreterError {
     pub fn root_cause(&self) -> &Self {
         let mut error = self;
@@ -235,6 +244,7 @@ impl InterpreterError {
         }
         error
     }
+
     pub fn into_root_cause(self) -> Self {
         let mut error = self;
         while let Self::Diagnostic { cause, .. } = error {
@@ -242,12 +252,14 @@ impl InterpreterError {
         }
         error
     }
+
     pub fn diagnostic(&self) -> Option<&RuntimeDiagnostic> {
         match self {
             Self::Diagnostic { diagnostic, .. } => Some(diagnostic),
             _ => None,
         }
     }
+
     fn runtime_site(&self) -> Option<ExecutionSite> {
         match self.root_cause() {
             Self::Trap(trap) => Some(trap.site),
@@ -258,6 +270,7 @@ impl InterpreterError {
         }
     }
 }
+
 impl std::error::Error for InterpreterError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -275,6 +288,7 @@ pub struct RuntimeValue<'module> {
     value: Value,
     callable_module: Option<&'module Module>,
 }
+
 impl fmt::Debug for RuntimeValue<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RuntimeValue")
@@ -283,20 +297,16 @@ impl fmt::Debug for RuntimeValue<'_> {
             .finish_non_exhaustive()
     }
 }
+
 impl<'module> RuntimeValue<'module> {
     pub fn scalar(ty: Type, value: ConstValue) -> Result<Self, CallError> {
         if !scalar_type(&ty) || !crate::constant::valid_constant(&ty, &value) {
             crate::limits::discard_type(ty);
-            return Err(CallError::InvalidSignature(
-                "invalid scalar runtime value".into(),
-            ));
+            return Err(CallError::InvalidSignature("invalid scalar runtime value".into()));
         }
-        Ok(Self {
-            ty,
-            value: Value::Scalar(value),
-            callable_module: None,
-        })
+        Ok(Self { ty, value: Value::Scalar(value), callable_module: None })
     }
+
     pub fn raw_pointer(ty: Type, address: u64) -> Result<Self, CallError> {
         if let Err(error) =
             crate::limits::Budget::new(IrLimits::default()).and_then(|mut b| b.ty(&ty))
@@ -306,9 +316,7 @@ impl<'module> RuntimeValue<'module> {
         }
         if !matches!(ty, Type::Ptr(_)) {
             crate::limits::discard_type(ty);
-            return Err(CallError::InvalidSignature(
-                "data pointer type required".into(),
-            ));
+            return Err(CallError::InvalidSignature("data pointer type required".into()));
         }
         let mut signature = FunctionSignature::whale(vec![ty], Type::Void);
         if let Err(error) = validate_signature_with_limits(&signature, IrLimits::default()) {
@@ -316,12 +324,9 @@ impl<'module> RuntimeValue<'module> {
             return Err(error);
         }
         let ty = signature.params.pop().unwrap();
-        Ok(Self {
-            ty,
-            value: Value::Pointer(memory::Pointer::raw(address)),
-            callable_module: None,
-        })
+        Ok(Self { ty, value: Value::Pointer(memory::Pointer::raw(address)), callable_module: None })
     }
+
     pub fn function(module: &'module Module, target: FunctionId) -> Result<Self, CallError> {
         let declaration = module
             .declarations
@@ -339,6 +344,7 @@ impl<'module> RuntimeValue<'module> {
             callable_module: Some(module),
         })
     }
+
     pub fn null_function(signature: FunctionSignature) -> Result<Self, CallError> {
         if let Err(error) = validate_signature_with_limits(&signature, IrLimits::default()) {
             crate::limits::discard_signature(signature);
@@ -353,15 +359,18 @@ impl<'module> RuntimeValue<'module> {
             callable_module: None,
         })
     }
+
     pub fn ty(&self) -> &Type {
         &self.ty
     }
+
     pub fn scalar_value(&self) -> Option<&ConstValue> {
         match &self.value {
             Value::Scalar(value) => Some(value),
             _ => None,
         }
     }
+
     /// Synthetic address only; converting it back to a pointer cannot recover authority.
     pub fn pointer_address(&self) -> Option<u64> {
         match self.value {
@@ -369,32 +378,36 @@ impl<'module> RuntimeValue<'module> {
             _ => None,
         }
     }
+
     pub fn function_target(&self) -> Option<FunctionId> {
         match &self.value {
             Value::FunctionPointer(FunctionPointer {
-                target: FunctionTarget::Defined(id),
-                ..
+                target: FunctionTarget::Defined(id), ..
             }) => Some(*id),
             _ => None,
         }
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct RuntimeInterpreterResult<'module> {
     pub value: Option<RuntimeValue<'module>>,
     pub steps: u64,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FunctionTarget {
     Null,
     Defined(FunctionId),
     InvalidBits(u64),
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FunctionPointer {
     signature: Arc<FunctionSignature>,
     target: FunctionTarget,
 }
+
 impl FunctionPointer {
     fn bits(&self) -> u64 {
         match self.target {
@@ -404,6 +417,7 @@ impl FunctionPointer {
         }
     }
 }
+
 #[derive(Clone, Debug)]
 enum Value {
     Scalar(ConstValue),
@@ -411,6 +425,7 @@ enum Value {
     Pointer(memory::Pointer),
     FunctionPointer(FunctionPointer),
 }
+
 impl Value {
     fn scalar(&self) -> &ConstValue {
         match self {
@@ -418,12 +433,14 @@ impl Value {
             _ => unreachable!("verified scalar operand"),
         }
     }
+
     fn pointer(&self) -> memory::Pointer {
         match self {
             Self::Pointer(p) => *p,
             _ => unreachable!("verified pointer operand"),
         }
     }
+
     fn boolean(&self) -> bool {
         match self.scalar() {
             ConstValue::Bool(v) => *v,
@@ -431,14 +448,17 @@ impl Value {
         }
     }
 }
+
 fn scalar_type(ty: &Type) -> bool {
     *ty == Type::Bool || integer::shape(ty).is_some()
 }
+
 fn value_type(ty: &Type) -> bool {
     scalar_type(ty)
         || matches!(ty, Type::Ptr(_) | Type::FnPtr(_))
         || matches!(ty, Type::Tuple(ts) if ts.len() == 2 && integer::shape(&ts[0]).is_some() && ts[1] == Type::Bool)
 }
+
 fn destination(inst: &Instruction) -> Option<ValueId> {
     use Instruction::*;
     match inst {
@@ -472,6 +492,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | TrapIf { .. } => None,
     }
 }
+
 fn supported(inst: &Instruction) -> Result<(), &'static str> {
     use Instruction::*;
     let unsupported = match inst {
@@ -480,34 +501,23 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         Mov { ty, .. } | Phi { ty, .. } | Select { ty, .. } if value_type(ty) => return Ok(()),
         Bin { ty, .. } | Not { ty, .. } | Checked { ty, .. } if integer::shape(ty).is_some() => {
             return Ok(())
-        }
+        },
         Cmp { ty, .. } | ICmp { ty, .. } if scalar_type(ty) || matches!(ty, Type::Ptr(_)) => {
             return Ok(())
-        }
-        Cast {
-            op, src_ty, dst_ty, ..
-        } if matches!(
-            op,
-            CastOp::ZExt | CastOp::SExt | CastOp::Trunc | CastOp::Bitcast
-        ) && scalar_type(src_ty)
-            && integer::shape(dst_ty).is_some() =>
+        },
+        Cast { op, src_ty, dst_ty, .. }
+            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc | CastOp::Bitcast)
+                && scalar_type(src_ty)
+                && integer::shape(dst_ty).is_some() =>
         {
             return Ok(())
-        }
+        },
         Extract { dst_ty, .. } if scalar_type(dst_ty) => return Ok(()),
         Alloca { ty, .. } | Uninit { ty, .. } if allocation_type(ty) => return Ok(()),
         Load { ty, .. } | Store { ty, .. } if value_type(ty) => return Ok(()),
         Gep { .. } => return Ok(()),
-        Cast {
-            op: CastOp::Bitcast,
-            src_ty: Type::Ptr(_),
-            dst_ty: Type::Ptr(_),
-            ..
-        }
-        | Cast {
-            op: CastOp::IntToPtr | CastOp::PtrToInt,
-            ..
-        } => return Ok(()),
+        Cast { op: CastOp::Bitcast, src_ty: Type::Ptr(_), dst_ty: Type::Ptr(_), .. }
+        | Cast { op: CastOp::IntToPtr | CastOp::PtrToInt, .. } => return Ok(()),
         GlobalAddr { .. }
         | LifetimeEnd { .. }
         | PtrDiff { .. }
@@ -519,7 +529,7 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         Mov { .. } | Phi { .. } | Select { .. } | Extract { .. } => "non-scalar value",
         Bin { .. } | Not { .. } | Checked { .. } | Cmp { .. } | ICmp { .. } | FCmp { .. } => {
             "non-integer arithmetic/comparison"
-        }
+        },
         Cast { .. } => "unsupported cast",
         Alloca { .. } => "alloca",
         Load { .. } => "load",
@@ -529,6 +539,7 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
     };
     Err(unsupported)
 }
+
 fn allocation_type(root: &Type) -> bool {
     let mut pending = vec![root];
     while let Some(ty) = pending.pop() {
@@ -543,6 +554,7 @@ fn allocation_type(root: &Type) -> bool {
     }
     true
 }
+
 fn memory_failure(fault: memory::Fault, site: ExecutionSite, steps: u64) -> InterpreterError {
     match fault {
         memory::Fault::Trap(reason) => InterpreterError::Trap(InterpreterTrap {
@@ -550,22 +562,19 @@ fn memory_failure(fault: memory::Fault, site: ExecutionSite, steps: u64) -> Inte
             reason: TrapReason::Memory(reason),
             steps,
         }),
-        memory::Fault::Limit { resource, limit } => InterpreterError::MemoryLimit {
-            site,
-            resource,
-            limit,
+        memory::Fault::Limit { resource, limit } => {
+            InterpreterError::MemoryLimit { site, resource, limit }
         },
     }
 }
+
 fn gep_plan(
     value_types: &HashMap<ValueId, &Type>,
     ordinals: &HashMap<ValueId, usize>,
     base: ValueId,
     indices: &[ValueId],
 ) -> Vec<memory::GepStep> {
-    let Type::Ptr(pointee) = value_types[&base] else {
-        unreachable!("verified GEP base")
-    };
+    let Type::Ptr(pointee) = value_types[&base] else { unreachable!("verified GEP base") };
     let mut selected: &Type = pointee;
     let mut plan = Vec::new();
     for (position, index) in indices.iter().enumerate() {
@@ -579,17 +588,18 @@ fn gep_plan(
             Type::Array(element, _) => {
                 selected = element;
                 plan.push(memory::GepStep::Stride(l(selected).size));
-            }
+            },
             Type::Struct(fields) | Type::Tuple(fields) => {
                 let ordinal = ordinals[index];
                 plan.push(memory::GepStep::Field(l(selected).field_offsets[ordinal]));
                 selected = &fields[ordinal];
-            }
+            },
             _ => unreachable!("verified GEP path"),
         }
     }
     plan
 }
+
 fn pointer_compare(
     memory: &memory::Memory,
     pred: &ICmpPred,
@@ -610,6 +620,7 @@ fn pointer_compare(
         _ => unreachable!(),
     })
 }
+
 fn cmp_pred(op: CmpOp) -> ICmpPred {
     use CmpOp::*;
     match op {
@@ -635,6 +646,7 @@ pub fn interpret(
 ) -> Result<InterpreterResult, InterpreterError> {
     interpret_with_options(module, function, arguments, InterpreterOptions::default())
 }
+
 pub fn interpret_with_options(
     module: &Module,
     function: FunctionId,
@@ -647,6 +659,7 @@ pub fn interpret_with_options(
         steps: result.steps,
     })
 }
+
 /// Run a checked library entry with integer/Bool, data-pointer or typed callable values.
 /// Returned local pointers are expired. Each run owns a separate arena; passing an
 /// expired/foreign tracked value to another run cannot resurrect its allocation.
@@ -657,6 +670,7 @@ pub fn interpret_values<'module>(
 ) -> Result<RuntimeInterpreterResult<'module>, InterpreterError> {
     interpret_values_with_options(module, function, arguments, InterpreterOptions::default())
 }
+
 pub fn interpret_values_with_options<'module>(
     module: &'module Module,
     function: FunctionId,
@@ -665,10 +679,12 @@ pub fn interpret_values_with_options<'module>(
 ) -> Result<RuntimeInterpreterResult<'module>, InterpreterError> {
     run(module, function, Arguments::Runtime(arguments), options)
 }
+
 enum Arguments<'a, 'module> {
     Scalars(&'a [ConstValue]),
     Runtime(&'a [RuntimeValue<'module>]),
 }
+
 impl Arguments<'_, '_> {
     fn len(&self) -> usize {
         match self {
@@ -676,18 +692,21 @@ impl Arguments<'_, '_> {
             Self::Runtime(values) => values.len(),
         }
     }
+
     fn value(&self, index: usize) -> Value {
         match self {
             Self::Scalars(values) => Value::Scalar(values[index].clone()),
             Self::Runtime(values) => values[index].value.clone(),
         }
     }
+
     fn valid_type(&self, index: usize, expected: &Type) -> bool {
         match self {
             Self::Scalars(_) => true,
             Self::Runtime(values) => &values[index].ty == expected,
         }
     }
+
     fn valid_origin(&self, index: usize, module: &Module) -> bool {
         match self {
             Self::Scalars(_) => true,
@@ -695,9 +714,9 @@ impl Arguments<'_, '_> {
                 Value::FunctionPointer(FunctionPointer {
                     target: FunctionTarget::Defined(_),
                     ..
-                }) => values[index]
-                    .callable_module
-                    .is_some_and(|origin| std::ptr::eq(origin, module)),
+                }) => {
+                    values[index].callable_module.is_some_and(|origin| std::ptr::eq(origin, module))
+                },
                 _ => true,
             },
         }
@@ -712,6 +731,7 @@ struct Prepared<'a> {
     geps: HashMap<(BlockId, usize), Vec<memory::GepStep>>,
     signatures: HashMap<(BlockId, usize), Arc<FunctionSignature>>,
 }
+
 struct Frame {
     function: FunctionId,
     values: HashMap<ValueId, Value>,
@@ -722,24 +742,25 @@ struct Frame {
     return_destination: Option<ValueId>,
     call_site: Option<ExecutionSite>,
 }
+
 fn callable_signature(signature: &FunctionSignature) -> bool {
     signature.convention == CallingConvention::Whale
         && !signature.variadic
         && signature.params.iter().all(call_value_type)
         && (signature.ret == Type::Void || call_value_type(&signature.ret))
 }
+
 fn call_value_type(ty: &Type) -> bool {
     scalar_type(ty) || matches!(ty, Type::Ptr(_) | Type::FnPtr(_))
 }
+
 fn intern_signature<'a>(
     signatures: &mut HashMap<&'a FunctionSignature, Arc<FunctionSignature>>,
     signature: &'a FunctionSignature,
 ) -> Arc<FunctionSignature> {
-    signatures
-        .entry(signature)
-        .or_insert_with(|| Arc::new(signature.clone()))
-        .clone()
+    signatures.entry(signature).or_insert_with(|| Arc::new(signature.clone())).clone()
 }
+
 fn frame_values(
     fun: &Function,
     arguments: impl IntoIterator<Item = Value>,
@@ -747,27 +768,25 @@ fn frame_values(
     site: ExecutionSite,
 ) -> Result<HashMap<ValueId, Value>, InterpreterError> {
     let mut values = HashMap::new();
-    values
-        .try_reserve(capacity)
-        .map_err(|_| InterpreterError::CallLimit {
-            site,
-            resource: CallResource::HostAllocation,
-            limit: capacity as u64,
-        })?;
+    values.try_reserve(capacity).map_err(|_| InterpreterError::CallLimit {
+        site,
+        resource: CallResource::HostAllocation,
+        limit: capacity as u64,
+    })?;
     values.extend(fun.params.iter().zip(arguments).map(|(p, a)| (p.id, a)));
     Ok(values)
 }
+
 struct SourceDetailBudget {
     remaining: usize,
     omitted: usize,
 }
+
 impl SourceDetailBudget {
     fn new() -> Self {
-        Self {
-            remaining: MAX_RUNTIME_DIAGNOSTIC_SOURCE_BYTES,
-            omitted: 0,
-        }
+        Self { remaining: MAX_RUNTIME_DIAGNOSTIC_SOURCE_BYTES, omitted: 0 }
     }
+
     fn location(&mut self, module: &Module, target: SourceTarget) -> Option<OriginalLocation> {
         let original = module.sources.original(target)?;
         let source = original.span.as_ref().and_then(|span| {
@@ -785,12 +804,10 @@ impl SourceDetailBudget {
             self.remaining -= file.name.len();
             Some((name, span.clone()))
         });
-        Some(OriginalLocation {
-            original: original.id,
-            source,
-        })
+        Some(OriginalLocation { original: original.id, source })
     }
 }
+
 fn run<'module>(
     module: &'module Module,
     function: FunctionId,
@@ -809,9 +826,7 @@ fn run<'module>(
         };
         let mut budget = SourceDetailBudget::new();
         if let Some((global, original)) = global.and_then(|global| {
-            budget
-                .location(module, SourceTarget::Global(global))
-                .map(|original| (global, original))
+            budget.location(module, SourceTarget::Global(global)).map(|original| (global, original))
         }) {
             InterpreterError::Diagnostic {
                 cause: Box::new(cause),
@@ -829,6 +844,7 @@ fn run<'module>(
         }
     })
 }
+
 fn execution_source(
     module: &Module,
     site: ExecutionSite,
@@ -837,10 +853,7 @@ fn execution_source(
     let function = module.functions.iter().find(|f| f.id == site.function)?;
     let block = function.blocks.iter().find(|b| b.id == site.block)?;
     let target = if site.instruction == block.instructions.len() {
-        SourceTarget::Terminator {
-            function: site.function,
-            block: site.block,
-        }
+        SourceTarget::Terminator { function: site.function, block: site.block }
     } else {
         SourceTarget::Instruction {
             function: site.function,
@@ -850,6 +863,7 @@ fn execution_source(
     };
     budget.location(module, target)
 }
+
 fn runtime_failure(
     module: &Module,
     cause: InterpreterError,
@@ -892,6 +906,7 @@ fn runtime_failure(
         }),
     }
 }
+
 fn run_inner<'module>(
     module: &'module Module,
     function: FunctionId,
@@ -910,9 +925,7 @@ fn run_inner<'module>(
         .iter()
         .map(|decl| (decl.id, intern_signature(&mut signatures, &decl.signature)))
         .collect();
-    let entry_fun = *functions
-        .get(&function)
-        .ok_or(InterpreterError::UnknownFunction(function))?;
+    let entry_fun = *functions.get(&function).ok_or(InterpreterError::UnknownFunction(function))?;
     if matches!(arguments, Arguments::Scalars(_))
         && (!entry_fun.params.iter().all(|p| scalar_type(&p.ty))
             || !(entry_fun.ret_ty == Type::Void || scalar_type(&entry_fun.ret_ty)))
@@ -926,42 +939,32 @@ fn run_inner<'module>(
         });
     }
     let mut input_values = Vec::new();
-    input_values
-        .try_reserve_exact(arguments.len())
-        .map_err(|_| InterpreterError::CallLimit {
-            site: ExecutionSite {
-                function,
-                block: entry_fun.entry,
-                instruction: 0,
-                value: None,
-            },
-            resource: CallResource::HostAllocation,
-            limit: arguments.len() as u64,
-        })?;
+    input_values.try_reserve_exact(arguments.len()).map_err(|_| InterpreterError::CallLimit {
+        site: ExecutionSite { function, block: entry_fun.entry, instruction: 0, value: None },
+        resource: CallResource::HostAllocation,
+        limit: arguments.len() as u64,
+    })?;
     for (index, param) in entry_fun.params.iter().enumerate() {
         let valid_type = arguments.valid_type(index, &param.ty);
         let mut argument = arguments.value(index);
         let valid_value = match &argument {
             Value::Scalar(value) => {
                 scalar_type(&param.ty) && crate::constant::valid_constant(&param.ty, value)
-            }
+            },
             Value::Pointer(_) => matches!(param.ty, Type::Ptr(_)),
             Value::FunctionPointer(pointer) => {
                 matches!(&param.ty, Type::FnPtr(signature) if **signature == *pointer.signature)
                     && match pointer.target {
-                        FunctionTarget::Defined(id) => declarations
-                            .get(&id)
-                            .is_some_and(|d| d.signature == *pointer.signature),
+                        FunctionTarget::Defined(id) => {
+                            declarations.get(&id).is_some_and(|d| d.signature == *pointer.signature)
+                        },
                         FunctionTarget::Null | FunctionTarget::InvalidBits(_) => true,
                     }
-            }
+            },
             Value::Checked(..) => false,
         };
         if !valid_type || !valid_value || !arguments.valid_origin(index, module) {
-            return Err(InterpreterError::ArgumentType {
-                index,
-                expected: param.ty.clone(),
-            });
+            return Err(InterpreterError::ArgumentType { index, expected: param.ty.clone() });
         }
         if let Value::FunctionPointer(pointer) = &mut argument {
             let Type::FnPtr(signature) = &param.ty else {
@@ -977,15 +980,11 @@ fn run_inner<'module>(
     let mut callable_by_signature: HashMap<&FunctionSignature, Vec<FunctionId>> = HashMap::new();
     for argument in arguments {
         if let Value::FunctionPointer(FunctionPointer {
-            target: FunctionTarget::Defined(id),
-            ..
+            target: FunctionTarget::Defined(id), ..
         }) = argument
         {
             if callable_targets.insert(id.0) {
-                callable_by_signature
-                    .entry(&declarations[id].signature)
-                    .or_default()
-                    .push(*id);
+                callable_by_signature.entry(&declarations[id].signature).or_default().push(*id);
             }
         }
     }
@@ -1037,19 +1036,14 @@ fn run_inner<'module>(
                             (block.id, index),
                             intern_signature(&mut signatures, signature),
                         );
-                    }
-                    Instruction::Load {
-                        ty: Type::FnPtr(signature),
-                        ..
-                    } => {
+                    },
+                    Instruction::Load { ty: Type::FnPtr(signature), .. } => {
                         instruction_signatures.insert(
                             (block.id, index),
                             intern_signature(&mut signatures, signature),
                         );
-                    }
-                    Instruction::Call {
-                        callee, convention, ..
-                    } => {
+                    },
+                    Instruction::Call { callee, convention, .. } => {
                         if *convention != CallingConvention::Whale {
                             return Err(InterpreterError::UnsupportedInstruction {
                                 site: at,
@@ -1068,7 +1062,7 @@ fn run_inner<'module>(
                                     });
                                 }
                                 pending.push(*id);
-                            }
+                            },
                             Callee::Indirect(value) => {
                                 let Type::FnPtr(signature) = value_types[value] else {
                                     unreachable!("verified indirect callee")
@@ -1094,23 +1088,16 @@ fn run_inner<'module>(
                                         pending.push(*target);
                                     }
                                 }
-                            }
+                            },
                         }
-                    }
-                    Instruction::FunctionAddr {
-                        function: target,
-                        signature,
-                        ..
-                    } => {
+                    },
+                    Instruction::FunctionAddr { function: target, signature, .. } => {
                         instruction_signatures.insert(
                             (block.id, index),
                             intern_signature(&mut signatures, signature),
                         );
                         if callable_targets.insert(target.0) {
-                            callable_by_signature
-                                .entry(signature)
-                                .or_default()
-                                .push(*target);
+                            callable_by_signature.entry(signature).or_default().push(*target);
                             if let Some(at) = indirect_signatures.get(signature) {
                                 if declarations[target].linkage != Linkage::Internal
                                     || !functions.contains_key(target)
@@ -1123,7 +1110,7 @@ fn run_inner<'module>(
                                 pending.push(*target);
                             }
                         }
-                    }
+                    },
                     Instruction::Alloca { ty, .. } | Instruction::Uninit { ty, .. } => {
                         let l = layout_of_with_limit(ty, Target::X86_64WhaleLinux, MAX_IR_NESTING)
                             .unwrap();
@@ -1133,23 +1120,18 @@ fn run_inner<'module>(
                             l.align
                         };
                         sizes.insert((block.id, index), (l.size, alignment));
-                    }
-                    Instruction::Gep {
-                        base_ptr, indices, ..
-                    } => {
+                    },
+                    Instruction::Gep { base_ptr, indices, .. } => {
                         let plan = gep_plan(&value_types, &ordinals, *base_ptr, indices);
-                        if plan
-                            .iter()
-                            .any(|step| matches!(step, memory::GepStep::Stride(0)))
-                        {
+                        if plan.iter().any(|step| matches!(step, memory::GepStep::Stride(0))) {
                             return Err(InterpreterError::UnsupportedInstruction {
                                 site: at,
                                 operation: "zero-sized pointer arithmetic",
                             });
                         }
                         geps.insert((block.id, index), plan);
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -1181,14 +1163,11 @@ fn run_inner<'module>(
     let mut global_pointers = HashMap::new();
     for global in &module.global_storage {
         let failure = |fault| match fault {
-            memory::Fault::Trap(reason) => InterpreterError::GlobalMemory {
-                global: global.id,
-                reason,
+            memory::Fault::Trap(reason) => {
+                InterpreterError::GlobalMemory { global: global.id, reason }
             },
-            memory::Fault::Limit { resource, limit } => InterpreterError::GlobalMemoryLimit {
-                global: global.id,
-                resource,
-                limit,
+            memory::Fault::Limit { resource, limit } => {
+                InterpreterError::GlobalMemoryLimit { global: global.id, resource, limit }
             },
         };
         let layout = layout_of_with_limit(
@@ -1197,31 +1176,19 @@ fn run_inner<'module>(
             options.ir_limits.max_type_depth,
         )
         .expect("verified scalar layout");
-        let pointer = memory
-            .allocate_global(layout.size, layout.align, global.align)
-            .map_err(failure)?;
+        let pointer =
+            memory.allocate_global(layout.size, layout.align, global.align).map_err(failure)?;
         if let crate::GlobalStorageInit::Value(value) = &global.init {
             memory
-                .store(
-                    pointer,
-                    &global.ty,
-                    &Value::Scalar(value.clone()),
-                    global.align,
-                )
+                .store(pointer, &global.ty, &Value::Scalar(value.clone()), global.align)
                 .map_err(failure)?;
         }
-        let pointer = memory
-            .seal_global(pointer, global.readonly)
-            .map_err(failure)?;
+        let pointer = memory.seal_global(pointer, global.readonly).map_err(failure)?;
         global_pointers.insert(global.id, pointer);
     }
     let entry_allocation_start = memory.allocation_count();
-    let entry_site = ExecutionSite {
-        function,
-        block: entry_fun.entry,
-        instruction: 0,
-        value: None,
-    };
+    let entry_site =
+        ExecutionSite { function, block: entry_fun.entry, instruction: 0, value: None };
     if options.max_call_depth == 0 || options.max_frames == 0 {
         return Err(InterpreterError::CallLimit {
             site: entry_site,
@@ -1241,12 +1208,7 @@ fn run_inner<'module>(
             limit: options.max_live_values as u64,
         });
     }
-    let entry_values = frame_values(
-        entry_fun,
-        arguments.iter().cloned(),
-        live_values,
-        entry_site,
-    )?;
+    let entry_values = frame_values(entry_fun, arguments.iter().cloned(), live_values, entry_site)?;
     let mut frames = vec![Frame {
         function,
         values: entry_values,
@@ -1261,10 +1223,7 @@ fn run_inner<'module>(
     let mut steps = 0;
     let charge = |steps: &mut u64, site| -> Result<(), InterpreterError> {
         if *steps >= options.max_steps {
-            return Err(InterpreterError::StepLimit {
-                site,
-                limit: options.max_steps,
-            });
+            return Err(InterpreterError::StepLimit { site, limit: options.max_steps });
         }
         *steps += 1;
         Ok(())
@@ -1296,12 +1255,11 @@ fn run_inner<'module>(
                     .iter()
                     .take_while(|i| matches!(i, Instruction::Phi { .. }))
                     .count();
-                phis.try_reserve_exact(phi_count)
-                    .map_err(|_| InterpreterError::CallLimit {
-                        site: site(current, 0, None),
-                        resource: CallResource::HostAllocation,
-                        limit: phi_count as u64,
-                    })?;
+                phis.try_reserve_exact(phi_count).map_err(|_| InterpreterError::CallLimit {
+                    site: site(current, 0, None),
+                    resource: CallResource::HostAllocation,
+                    limit: phi_count as u64,
+                })?;
                 for (index, inst) in block.instructions.iter().enumerate() {
                     if let Instruction::Phi { dst, incomings, .. } = inst {
                         charge(&mut steps, site(current, index, Some(*dst)))?;
@@ -1329,13 +1287,13 @@ fn run_inner<'module>(
                 let result = match inst {
                     Instruction::GlobalAddr { global, .. } => {
                         Value::Pointer(global_pointers[global])
-                    }
+                    },
                     Instruction::LifetimeEnd { ptr } => {
                         memory
                             .retire_stack(get(ptr).pointer(), frame.allocation_start)
                             .map_err(|e| memory_failure(e, at, steps))?;
                         continue;
-                    }
+                    },
                     Instruction::PtrDiff { lhs, rhs, .. } => Value::Scalar(ConstValue::I(
                         memory
                             .difference(get(lhs).pointer(), get(rhs).pointer())
@@ -1345,15 +1303,13 @@ fn run_inner<'module>(
                         signature: prepared[&function].signatures[&(current, index)].clone(),
                         target: FunctionTarget::Null,
                     }),
-                    Instruction::FunctionAddr {
-                        function: target, ..
-                    } => Value::FunctionPointer(FunctionPointer {
-                        signature: prepared[&function].signatures[&(current, index)].clone(),
-                        target: FunctionTarget::Defined(*target),
-                    }),
-                    Instruction::Call {
-                        callee, args, dst, ..
-                    } => {
+                    Instruction::FunctionAddr { function: target, .. } => {
+                        Value::FunctionPointer(FunctionPointer {
+                            signature: prepared[&function].signatures[&(current, index)].clone(),
+                            target: FunctionTarget::Defined(*target),
+                        })
+                    },
+                    Instruction::Call { callee, args, dst, .. } => {
                         let target = match callee {
                             Callee::Direct(id) => *id,
                             Callee::Indirect(id) => {
@@ -1364,14 +1320,14 @@ fn run_inner<'module>(
                                     FunctionTarget::Null => Some(TrapReason::NullFunction),
                                     FunctionTarget::InvalidBits(_) => {
                                         Some(TrapReason::InvalidFunctionPointer)
-                                    }
+                                    },
                                     FunctionTarget::Defined(id)
                                         if function_signatures.get(&id).is_none_or(
                                             |signature| !Arc::ptr_eq(signature, &pointer.signature),
                                         ) =>
                                     {
                                         Some(TrapReason::FunctionSignatureMismatch)
-                                    }
+                                    },
                                     FunctionTarget::Defined(_) => None,
                                 };
                                 if let Some(reason) = reason {
@@ -1385,7 +1341,7 @@ fn run_inner<'module>(
                                     unreachable!()
                                 };
                                 id
-                            }
+                            },
                         };
                         if depth >= options.max_call_depth {
                             return Err(InterpreterError::CallLimit {
@@ -1417,13 +1373,11 @@ fn run_inner<'module>(
                             at,
                         )?;
                         let destination = *dst;
-                        frames
-                            .try_reserve(1)
-                            .map_err(|_| InterpreterError::CallLimit {
-                                site: at,
-                                resource: CallResource::HostAllocation,
-                                limit: depth as u64,
-                            })?;
+                        frames.try_reserve(1).map_err(|_| InterpreterError::CallLimit {
+                            site: at,
+                            resource: CallResource::HostAllocation,
+                            limit: depth as u64,
+                        })?;
                         frames.push(Frame {
                             function: target,
                             values: child_values,
@@ -1437,29 +1391,21 @@ fn run_inner<'module>(
                         frames_created += 1;
                         live_values = next_live_values;
                         continue;
-                    }
+                    },
                     Instruction::Const { value, .. } | Instruction::ConstDecl { value, .. } => {
                         Value::Scalar(value.clone())
-                    }
+                    },
                     Instruction::Mov { src, .. } => get(src).clone(),
-                    Instruction::Bin {
-                        op, ty, lhs, rhs, ..
-                    } => Value::Scalar(integer::bin(op, ty, scalar(lhs), scalar(rhs)).map_err(
-                        |reason| {
-                            InterpreterError::Trap(InterpreterTrap {
-                                site: at,
-                                reason,
-                                steps,
-                            })
-                        },
-                    )?),
+                    Instruction::Bin { op, ty, lhs, rhs, .. } => Value::Scalar(
+                        integer::bin(op, ty, scalar(lhs), scalar(rhs)).map_err(|reason| {
+                            InterpreterError::Trap(InterpreterTrap { site: at, reason, steps })
+                        })?,
+                    ),
                     Instruction::Not { ty, src, .. } => Value::Scalar(integer::pack(
                         ty,
                         !integer::raw(scalar(src), integer::shape(ty).unwrap().0),
                     )),
-                    Instruction::Cmp {
-                        op, ty, lhs, rhs, ..
-                    } => {
+                    Instruction::Cmp { op, ty, lhs, rhs, .. } => {
                         let result = if matches!(ty, Type::Ptr(_)) {
                             pointer_compare(
                                 &memory,
@@ -1472,10 +1418,8 @@ fn run_inner<'module>(
                             integer::compare(&cmp_pred(*op), ty, scalar(lhs), scalar(rhs))
                         };
                         Value::Scalar(ConstValue::Bool(result))
-                    }
-                    Instruction::ICmp {
-                        pred, ty, lhs, rhs, ..
-                    } => {
+                    },
+                    Instruction::ICmp { pred, ty, lhs, rhs, .. } => {
                         let result = if matches!(ty, Type::Ptr(_)) {
                             pointer_compare(&memory, pred, get(lhs).pointer(), get(rhs).pointer())
                                 .map_err(|e| memory_failure(e, at, steps))?
@@ -1483,30 +1427,16 @@ fn run_inner<'module>(
                             integer::compare(pred, ty, scalar(lhs), scalar(rhs))
                         };
                         Value::Scalar(ConstValue::Bool(result))
-                    }
-                    Instruction::Select {
-                        cond,
-                        on_true,
-                        on_false,
-                        ..
-                    } => get(if get(cond).boolean() {
-                        on_true
-                    } else {
-                        on_false
-                    })
-                    .clone(),
-                    Instruction::Cast {
-                        op,
-                        src_ty,
-                        dst_ty,
-                        src,
-                        ..
-                    } => match op {
+                    },
+                    Instruction::Select { cond, on_true, on_false, .. } => {
+                        get(if get(cond).boolean() { on_true } else { on_false }).clone()
+                    },
+                    Instruction::Cast { op, src_ty, dst_ty, src, .. } => match op {
                         CastOp::IntToPtr => {
                             Value::Pointer(memory::Pointer::raw(
                                 integer::raw(scalar(src), 64) as u64
                             ))
-                        }
+                        },
                         CastOp::PtrToInt => Value::Scalar(integer::pack(
                             dst_ty,
                             u128::from(get(src).pointer().address),
@@ -1521,7 +1451,7 @@ fn run_inner<'module>(
                                 .allocate(size, natural, *align)
                                 .map_err(|e| memory_failure(e, at, steps))?,
                         )
-                    }
+                    },
                     Instruction::Load { ty, ptr, align, .. } => memory
                         .load_with_signature(
                             get(ptr).pointer(),
@@ -1530,23 +1460,18 @@ fn run_inner<'module>(
                             prepared[&function].signatures.get(&(current, index)),
                         )
                         .map_err(|e| memory_failure(e, at, steps))?,
-                    Instruction::Store {
-                        ty,
-                        value,
-                        ptr,
-                        align,
-                    } => {
+                    Instruction::Store { ty, value, ptr, align } => {
                         memory
                             .store(get(ptr).pointer(), ty, get(value), *align)
                             .map_err(|e| memory_failure(e, at, steps))?;
                         continue;
-                    }
+                    },
                     Instruction::Uninit { ptr, align, .. } => {
                         memory
                             .uninit(get(ptr).pointer(), sizes[&(current, index)].0, *align)
                             .map_err(|e| memory_failure(e, at, steps))?;
                         continue;
-                    }
+                    },
                     Instruction::Memcpy { dst, src, n, align } => {
                         memory
                             .copy(
@@ -1557,7 +1482,7 @@ fn run_inner<'module>(
                             )
                             .map_err(|e| memory_failure(e, at, steps))?;
                         continue;
-                    }
+                    },
                     Instruction::Memset { dst, val, n, align } => {
                         memory
                             .set(
@@ -1568,23 +1493,19 @@ fn run_inner<'module>(
                             )
                             .map_err(|e| memory_failure(e, at, steps))?;
                         continue;
-                    }
-                    Instruction::Gep {
-                        base_ptr, indices, ..
-                    } => {
+                    },
+                    Instruction::Gep { base_ptr, indices, .. } => {
                         let inputs: Vec<_> = indices.iter().map(|id| scalar(id).clone()).collect();
                         Value::Pointer(
                             memory
                                 .gep(get(base_ptr).pointer(), &geps[&(current, index)], &inputs)
                                 .map_err(|e| memory_failure(e, at, steps))?,
                         )
-                    }
-                    Instruction::Checked {
-                        op, ty, lhs, rhs, ..
-                    } => {
+                    },
+                    Instruction::Checked { op, ty, lhs, rhs, .. } => {
                         let (v, overflow) = integer::checked(op, ty, scalar(lhs), scalar(rhs));
                         Value::Checked(v, overflow)
-                    }
+                    },
                     Instruction::Extract { tuple, index, .. } => match get(tuple) {
                         Value::Checked(v, overflow) => Value::Scalar(if *index == 0 {
                             v.clone()
@@ -1602,36 +1523,24 @@ fn run_inner<'module>(
                             }));
                         }
                         continue;
-                    }
+                    },
                     _ => unreachable!("supported subset checked before execution"),
                 };
-                values.insert(
-                    destination(inst).expect("value-producing instruction"),
-                    result,
-                );
+                values.insert(destination(inst).expect("value-producing instruction"), result);
                 continue;
             }
             let at = site(current, block.instructions.len(), None);
             charge(&mut steps, at)?;
             let next = match block.terminator.as_ref().expect("verified terminator") {
                 Terminator::Br { target } => *target,
-                Terminator::CBr {
-                    cond,
-                    then_bb,
-                    else_bb,
-                } => {
+                Terminator::CBr { cond, then_bb, else_bb } => {
                     if values[cond].boolean() {
                         *then_bb
                     } else {
                         *else_bb
                     }
-                }
-                Terminator::Switch {
-                    value,
-                    default_bb,
-                    cases,
-                    ..
-                } => cases
+                },
+                Terminator::Switch { value, default_bb, cases, .. } => cases
                     .iter()
                     .find(|(case, _)| case == values[value].scalar())
                     .map_or(*default_bb, |(_, target)| *target),
@@ -1659,14 +1568,14 @@ fn run_inner<'module>(
                         }),
                         steps,
                     });
-                }
+                },
                 Terminator::Trap { reason } => {
                     return Err(InterpreterError::Trap(InterpreterTrap {
                         site: at,
                         reason: TrapReason::Explicit(reason.clone()),
                         steps,
                     }))
-                }
+                },
             };
             frame.predecessor = Some(current);
             frame.current = next;

@@ -2,29 +2,31 @@
 //! participates in expected results. Bounds, initialization and token authority
 //! are computed from the operation stream before invoking the real memory API.
 use super::*;
+
 const SIZE: usize = 24;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Cell {
     byte: u8,
     initialized: bool,
     token: Option<(u8, u8)>,
 }
+
 #[derive(Clone, Debug)]
 struct Model {
     cells: [[Cell; SIZE]; 3],
     alive: [bool; 3],
     data_alive: bool,
 }
+
 impl Default for Model {
     fn default() -> Self {
-        Self {
-            cells: [[Cell::default(); SIZE]; 3],
-            alive: [true; 3],
-            data_alive: true,
-        }
+        Self { cells: [[Cell::default(); SIZE]; 3], alive: [true; 3], data_alive: true }
     }
 }
+
 type Op = [u8; 6];
+
 impl Model {
     fn access(
         &self,
@@ -45,20 +47,16 @@ impl Model {
         }
         Ok(())
     }
+
     fn load(&self, a: u8, offset: usize, n: usize) -> std::result::Result<u64, MemoryTrap> {
         self.access(a, offset, n, false)?;
         let cells = &self.cells[usize::from(a) % 3][offset..offset + n];
         if let Some(at) = cells.iter().position(|c| !c.initialized) {
-            return Err(MemoryTrap::Uninitialized {
-                offset: (offset + at) as u64,
-            });
+            return Err(MemoryTrap::Uninitialized { offset: (offset + at) as u64 });
         }
-        Ok(cells
-            .iter()
-            .enumerate()
-            .map(|(i, c)| u64::from(c.byte) << (8 * i))
-            .sum())
+        Ok(cells.iter().enumerate().map(|(i, c)| u64::from(c.byte) << (8 * i)).sum())
     }
+
     fn apply(&mut self, op: Op, bits: &[u64; 6]) -> std::result::Result<Option<u64>, MemoryTrap> {
         let [code, a, offset, b, source, n] = op;
         let offset = usize::from(offset) % 25;
@@ -68,12 +66,8 @@ impl Model {
         match code % 10 {
             0 => {
                 self.access(a, offset, 1, true)?;
-                self.cells[dst][offset] = Cell {
-                    byte: op[5],
-                    initialized: true,
-                    token: None,
-                };
-            }
+                self.cells[dst][offset] = Cell { byte: op[5], initialized: true, token: None };
+            },
             1 => {
                 self.access(a, offset, 8, true)?;
                 let token = b % 6;
@@ -84,7 +78,7 @@ impl Model {
                         token: Some((token, i as u8)),
                     };
                 }
-            }
+            },
             2 => {
                 if n == 0 {
                     return Ok(None);
@@ -97,27 +91,23 @@ impl Model {
                 }
                 let copy = self.cells[src][source..source + n].to_vec();
                 self.cells[dst][offset..offset + n].copy_from_slice(&copy);
-            }
+            },
             3 => {
                 if n == 0 {
                     return Ok(None);
                 }
                 self.access(a, offset, n, true)?;
                 for cell in &mut self.cells[dst][offset..offset + n] {
-                    *cell = Cell {
-                        byte: b,
-                        initialized: true,
-                        token: None,
-                    };
+                    *cell = Cell { byte: b, initialized: true, token: None };
                 }
-            }
+            },
             4 => {
                 self.access(a, offset, n, true)?;
                 for cell in &mut self.cells[dst][offset..offset + n] {
                     cell.initialized = false;
                     cell.token = None;
                 }
-            }
+            },
             5 => {
                 self.access(a, 0, 0, false).or_else(|e| {
                     if e == MemoryTrap::PermissionDenied {
@@ -132,15 +122,11 @@ impl Model {
                     return Err(MemoryTrap::OutOfBounds);
                 }
                 return Ok(Some(delta as u64));
-            }
-            6 => {
-                return self
-                    .load(a, offset, if b & 1 == 0 { 1 } else { 8 })
-                    .map(Some)
-            }
+            },
+            6 => return self.load(a, offset, if b & 1 == 0 { 1 } else { 8 }).map(Some),
             7 => {
                 self.alive = [false; 3];
-            }
+            },
             9 => {
                 // Retire an exact base belonging to the selected frame. Allocation
                 // IDs here are test model identities, independent of real caps.
@@ -167,16 +153,17 @@ impl Model {
                 } else {
                     self.data_alive = false;
                 }
-            }
+            },
             _ => {
                 if n != 0 {
                     return Err(MemoryTrap::NullPointer);
                 }
-            }
+            },
         }
         Ok(None)
     }
 }
+
 fn pointer(base: Pointer, a: u8, offset: usize) -> Pointer {
     let mut p = base;
     let cap = p.capability.as_mut().unwrap();
@@ -189,6 +176,7 @@ fn pointer(base: Pointer, a: u8, offset: usize) -> Pointer {
     }
     p
 }
+
 fn actual(
     memory: &mut Memory,
     bases: [Pointer; 3],
@@ -203,18 +191,8 @@ fn actual(
     let n = u64::from(n % 25);
     let dst = pointer(bases[usize::from(a) % 3], a, offset);
     match code % 10 {
-        0 => memory.store(
-            dst,
-            &Type::U8,
-            &Value::Scalar(ConstValue::U(u128::from(op[5]))),
-            1,
-        )?,
-        1 => memory.store(
-            dst,
-            &types[usize::from(b) % 6],
-            &tokens[usize::from(b) % 6],
-            1,
-        )?,
+        0 => memory.store(dst, &Type::U8, &Value::Scalar(ConstValue::U(u128::from(op[5]))), 1)?,
+        1 => memory.store(dst, &types[usize::from(b) % 6], &tokens[usize::from(b) % 6], 1)?,
         2 => memory.copy(dst, pointer(bases[usize::from(b) % 3], b, source), n, 1)?,
         3 => memory.set(dst, b, n, 1)?,
         4 => memory.uninit(dst, n, 1)?,
@@ -225,14 +203,14 @@ fn actual(
                 &[ConstValue::I(i128::from(op[2]) - 2)],
             )?;
             return Ok(Some(p.address - bases[usize::from(a) % 3].address));
-        }
+        },
         6 => {
             let ty = if b & 1 == 0 { Type::U8 } else { Type::U64 };
             let Value::Scalar(ConstValue::U(value)) = memory.load(dst, &ty, 1)? else {
                 panic!("scalar read")
             };
             return Ok(Some(value as u64));
-        }
+        },
         7 => memory.retire_from(2)?,
         9 => {
             let base = match b % 5 {
@@ -252,11 +230,12 @@ fn actual(
                 selected.address += offset as u64;
             }
             memory.retire_stack(selected, source % 6)?;
-        }
+        },
         _ => memory.copy(Pointer::raw(0), Pointer::raw(0), n, 1)?,
     }
     Ok(None)
 }
+
 fn outcome<T>(actual: Result<T>, expected: std::result::Result<T, MemoryTrap>)
 where
     T: PartialEq + std::fmt::Debug,
@@ -267,6 +246,7 @@ where
         (a, b) => panic!("model mismatch actual={a:?} expected={b:?}"),
     }
 }
+
 fn check_state(
     memory: &mut Memory,
     bases: [Pointer; 3],
@@ -278,35 +258,24 @@ fn check_state(
     // A failed end must leave caller/global storage untouched. A successful
     // end invalidates the data target, including every stored token alias.
     let data = memory.load(tokens[0].pointer(), &Type::U8, 1).map(|v| {
-        let Value::Scalar(ConstValue::U(value)) = v else {
-            panic!("data byte")
-        };
+        let Value::Scalar(ConstValue::U(value)) = v else { panic!("data byte") };
         Some(value as u64)
     });
     outcome(
         data,
-        if model.data_alive {
-            Ok(Some(0x5a))
-        } else {
-            Err(MemoryTrap::ExpiredAllocation)
-        },
+        if model.data_alive { Ok(Some(0x5a)) } else { Err(MemoryTrap::ExpiredAllocation) },
     );
     let Value::Scalar(ConstValue::U(value)) = memory.load(global, &Type::U8, 1).unwrap() else {
         panic!("global byte")
     };
     assert_eq!(value, 0xa5);
-    outcome(
-        memory.set(global, 0, 1, 1),
-        Err(MemoryTrap::PermissionDenied),
-    );
+    outcome(memory.set(global, 0, 1, 1), Err(MemoryTrap::PermissionDenied));
     for (slot, base) in bases.iter().enumerate() {
         for at in 0..SIZE {
-            let value = memory
-                .load(pointer(*base, 0, at), &Type::U8, 1)
-                .map(|v| match v {
-                    Value::Scalar(ConstValue::U(v)) => Some(v as u64),
-                    _ => panic!("byte"),
-                });
+            let value = memory.load(pointer(*base, 0, at), &Type::U8, 1).map(|v| match v {
+                Value::Scalar(ConstValue::U(v)) => Some(v as u64),
+                _ => panic!("byte"),
+            });
             outcome(value, model.load(slot as u8, at, 1).map(Some));
         }
         if !model.alive[slot] {
@@ -323,27 +292,18 @@ fn check_state(
                     index == 0 && (0..8).all(|i| cells[i].token == Some((t, i as u8)))
                 })
                 .map(|t| t.0);
-            let Value::Pointer(p) = memory
-                .load(pointer(*base, 0, at), &Type::ptr_to(Type::U8), 1)
-                .unwrap()
+            let Value::Pointer(p) =
+                memory.load(pointer(*base, 0, at), &Type::ptr_to(Type::U8), 1).unwrap()
             else {
                 panic!("data pointer")
             };
             if let Some(t @ 0..=1) = token {
-                let Value::Pointer(expected) = tokens[usize::from(t)] else {
-                    unreachable!()
-                };
+                let Value::Pointer(expected) = tokens[usize::from(t)] else { unreachable!() };
                 assert_eq!(p, expected);
-                let access = memory
-                    .gep(p, &[GepStep::Stride(1)], &[ConstValue::I(0)])
-                    .map(|_| ());
+                let access = memory.gep(p, &[GepStep::Stride(1)], &[ConstValue::I(0)]).map(|_| ());
                 outcome(
                     access,
-                    if model.data_alive {
-                        Ok(())
-                    } else {
-                        Err(MemoryTrap::ExpiredAllocation)
-                    },
+                    if model.data_alive { Ok(()) } else { Err(MemoryTrap::ExpiredAllocation) },
                 );
             } else {
                 assert_eq!(p.address, bits);
@@ -375,6 +335,7 @@ fn check_state(
         }
     }
 }
+
 fn run(ops: &[Op]) {
     assert!(ops.len() <= 1024);
     let mut memory = Memory::new(MemoryLimits {
@@ -439,32 +400,26 @@ fn run(ops: &[Op]) {
         assert!(memory.work <= 4_000_000, "step {i}");
     }
 }
+
 fn parse(source: &str) -> Vec<Op> {
     assert!(source.len() <= 8192);
     source
         .lines()
         .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
         .map(|line| {
-            let fields: Vec<u8> = line
-                .split_whitespace()
-                .map(|v| v.parse().unwrap())
-                .collect();
+            let fields: Vec<u8> = line.split_whitespace().map(|v| v.parse().unwrap()).collect();
             fields.try_into().expect("six operation bytes")
         })
         .collect()
 }
+
 #[test]
 fn retained_memory_sequences_match_independent_cells_and_authority_tokens() {
-    run(&parse(include_str!(
-        "../../../../fuzz/corpus/memory/authority.ops"
-    )));
-    run(&parse(include_str!(
-        "../../../../fuzz/corpus/memory/lifetime.ops"
-    )));
-    run(&parse(include_str!(
-        "../../../../fuzz/corpus/memory/explicit-lifetime.ops"
-    )));
+    run(&parse(include_str!("../../../../fuzz/corpus/memory/authority.ops")));
+    run(&parse(include_str!("../../../../fuzz/corpus/memory/lifetime.ops")));
+    run(&parse(include_str!("../../../../fuzz/corpus/memory/explicit-lifetime.ops")));
 }
+
 fn generated(seed: u64, count: usize) -> Vec<Op> {
     let mut state = seed.max(1);
     (0..count)
@@ -494,31 +449,27 @@ fn generated(seed: u64, count: usize) -> Vec<Op> {
         })
         .collect()
 }
+
 #[test]
 fn generated_memory_sequences_match_independent_model() {
     for seed in 1..=16 {
         run(&generated(seed, 64));
     }
 }
+
 #[test]
 #[ignore = "bounded generated operation campaign; set WHALE_MEMORY_SEED/WHALE_MEMORY_CASES or WHALE_MEMORY_REPLAY"]
 fn generated_memory_campaign() {
     if let Some(path) = std::env::var_os("WHALE_MEMORY_REPLAY") {
         use std::io::Read;
         let mut bytes = Vec::new();
-        std::fs::File::open(path)
-            .unwrap()
-            .take(8193)
-            .read_to_end(&mut bytes)
-            .unwrap();
+        std::fs::File::open(path).unwrap().take(8193).read_to_end(&mut bytes).unwrap();
         assert!(bytes.len() <= 8192);
         run(&parse(std::str::from_utf8(&bytes).unwrap()));
         return;
     }
-    let seed = std::env::var("WHALE_MEMORY_SEED")
-        .unwrap_or_else(|_| "1".into())
-        .parse::<u64>()
-        .unwrap();
+    let seed =
+        std::env::var("WHALE_MEMORY_SEED").unwrap_or_else(|_| "1".into()).parse::<u64>().unwrap();
     let count = std::env::var("WHALE_MEMORY_CASES")
         .unwrap_or_else(|_| "256".into())
         .parse::<usize>()
@@ -549,13 +500,11 @@ fn generated_memory_campaign() {
                 .collect::<Vec<_>>()
                 .join("\n");
             std::fs::write(&path, text).unwrap();
-            panic!(
-                "seed {seed} case {case}; minimized replay {}",
-                path.display()
-            );
+            panic!("seed {seed} case {case}; minimized replay {}", path.display());
         }
     }
 }
+
 #[test]
 fn memory_resource_rejections_never_publish_partial_destination_changes() {
     for fragments in [0, 7, 8, 15, 16] {
@@ -568,54 +517,31 @@ fn memory_resource_rejections_never_publish_partial_destination_changes() {
         let target = m.allocate(1, 1, 1).unwrap();
         let src = m.allocate(8, 8, 8).unwrap();
         let dst = m.allocate(8, 8, 8).unwrap();
-        let before = m
-            .allocations
-            .iter()
-            .map(|a| a.bytes.clone())
-            .collect::<Vec<_>>();
+        let before = m.allocations.iter().map(|a| a.bytes.clone()).collect::<Vec<_>>();
         assert!(matches!(
             m.allocate(1, 1, 1),
-            Err(Fault::Limit {
-                resource: MemoryResource::Allocations,
-                ..
-            })
+            Err(Fault::Limit { resource: MemoryResource::Allocations, .. })
         ));
-        assert_eq!(
-            before,
-            m.allocations
-                .iter()
-                .map(|a| a.bytes.clone())
-                .collect::<Vec<_>>()
-        );
+        assert_eq!(before, m.allocations.iter().map(|a| a.bytes.clone()).collect::<Vec<_>>());
         m.set(dst, 0xa5, 8, 1).unwrap();
         let before = m.allocations[2].bytes.clone();
         if fragments < 8 {
             assert!(matches!(
                 m.store(src, &Type::ptr_to(Type::U8), &Value::Pointer(target), 1),
-                Err(Fault::Limit {
-                    resource: MemoryResource::PointerFragments,
-                    ..
-                })
+                Err(Fault::Limit { resource: MemoryResource::PointerFragments, .. })
             ));
         } else {
-            m.store(src, &Type::ptr_to(Type::U8), &Value::Pointer(target), 1)
-                .unwrap();
+            m.store(src, &Type::ptr_to(Type::U8), &Value::Pointer(target), 1).unwrap();
             let result = m.copy(dst, src, 8, 1);
             if fragments < 16 {
                 assert!(matches!(
                     result,
-                    Err(Fault::Limit {
-                        resource: MemoryResource::PointerFragments,
-                        ..
-                    })
+                    Err(Fault::Limit { resource: MemoryResource::PointerFragments, .. })
                 ));
                 assert_eq!(m.allocations[2].bytes, before);
             } else {
                 result.unwrap();
-                assert_eq!(
-                    m.load(dst, &Type::ptr_to(Type::U8), 1).unwrap().pointer(),
-                    target
-                );
+                assert_eq!(m.load(dst, &Type::ptr_to(Type::U8), 1).unwrap().pointer(), target);
             }
         }
         let before = (
@@ -626,10 +552,7 @@ fn memory_resource_rejections_never_publish_partial_destination_changes() {
         m.limits.max_work = m.work;
         assert!(matches!(
             m.retire_stack(dst, 0),
-            Err(Fault::Limit {
-                resource: MemoryResource::Work,
-                ..
-            })
+            Err(Fault::Limit { resource: MemoryResource::Work, .. })
         ));
         assert!(m.allocations[2].alive);
         assert_eq!(
@@ -642,10 +565,7 @@ fn memory_resource_rejections_never_publish_partial_destination_changes() {
         );
         assert!(matches!(
             m.set(dst, 0, 8, 1),
-            Err(Fault::Limit {
-                resource: MemoryResource::Work,
-                ..
-            })
+            Err(Fault::Limit { resource: MemoryResource::Work, .. })
         ));
         assert_eq!(
             (
@@ -656,16 +576,10 @@ fn memory_resource_rejections_never_publish_partial_destination_changes() {
             before
         );
     }
-    let mut m = Memory::new(MemoryLimits {
-        max_bytes: 3,
-        ..Default::default()
-    });
+    let mut m = Memory::new(MemoryLimits { max_bytes: 3, ..Default::default() });
     assert!(matches!(
         m.allocate(4, 1, 1),
-        Err(Fault::Limit {
-            resource: MemoryResource::Bytes,
-            ..
-        })
+        Err(Fault::Limit { resource: MemoryResource::Bytes, .. })
     ));
     assert_eq!(m.allocation_count(), 0);
 }

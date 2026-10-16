@@ -1,4 +1,5 @@
 use std::{fs, process::Command};
+
 #[test]
 fn cli_reports_real_filename_both_symbol_sites_and_preserves_existing_output() {
     let dir = tempfile::tempdir().unwrap();

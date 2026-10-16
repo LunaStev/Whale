@@ -23,10 +23,7 @@ pub struct Function {
 
 impl Function {
     pub fn value_type(&self, id: ValueId) -> Option<&Type> {
-        self.value_types
-            .iter()
-            .find(|(vid, _)| *vid == id)
-            .map(|(_, t)| t)
+        self.value_types.iter().find(|(vid, _)| *vid == id).map(|(_, t)| t)
     }
 }
 
@@ -52,16 +49,13 @@ pub struct FunctionSignature {
     pub convention: CallingConvention,
     pub variadic: bool,
 }
+
 impl FunctionSignature {
     pub fn whale(params: Vec<Type>, ret: Type) -> Self {
-        Self {
-            params,
-            ret,
-            convention: CallingConvention::Whale,
-            variadic: false,
-        }
+        Self { params, ret, convention: CallingConvention::Whale, variadic: false }
     }
 }
+
 impl core::fmt::Display for FunctionSignature {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
@@ -109,19 +103,9 @@ pub enum CallError {
     MissingDefinition(crate::FunctionId),
     UnknownValue(ValueId),
     NotFunctionPointer(ValueId),
-    ArgumentCount {
-        expected: usize,
-        got: usize,
-    },
-    ArgumentType {
-        index: usize,
-        expected: Type,
-        got: Type,
-    },
-    ReturnType {
-        expected: Type,
-        got: Type,
-    },
+    ArgumentCount { expected: usize, got: usize },
+    ArgumentType { index: usize, expected: Type, got: Type },
+    ReturnType { expected: Type, got: Type },
     ResultPresence,
     ConventionMismatch,
     AddressTypeMismatch,
@@ -168,10 +152,10 @@ pub fn validate_signature_with_limits(
             match ty {
                 Type::Void => return Err(invalid()),
                 Type::FnPtr(sig) => signatures.push(sig),
-                Type::Ptr(t) if **t == Type::Void => {}
+                Type::Ptr(t) if **t == Type::Void => {},
                 Type::Ptr(t) | Type::Array(t, _) => types.push(t),
                 Type::Struct(ts) | Type::Tuple(ts) => types.extend(ts),
-                _ => {}
+                _ => {},
             }
         }
     }

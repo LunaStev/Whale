@@ -1,4 +1,5 @@
 use crate::error::{AsmError, SourceSpan};
+
 #[derive(Debug, Clone)]
 pub struct AST {
     pub items: Vec<ASTNode>,
@@ -6,24 +7,18 @@ pub struct AST {
     pub spans: Vec<SourceSpan>,
     pub source_name: String,
 }
+
 impl AST {
     /// Manually constructed ASTs may omit source metadata.
     pub fn new(items: Vec<ASTNode>) -> Self {
-        Self {
-            items,
-            spans: Vec::new(),
-            source_name: "<input>".into(),
-        }
+        Self { items, spans: Vec::new(), source_name: "<input>".into() }
     }
+
     pub fn error_at(&self, error: AsmError, item: usize, previous: Option<usize>) -> AsmError {
         let Some(span) = self.spans.get(item).copied() else {
             return error;
         };
-        error.at(
-            &self.source_name,
-            span,
-            previous.and_then(|item| self.spans.get(item).copied()),
-        )
+        error.at(&self.source_name, span, previous.and_then(|item| self.spans.get(item).copied()))
     }
 }
 
@@ -114,6 +109,7 @@ pub enum AsmSectionKind {
     ReadOnlyData,
     Bss,
 }
+
 impl AsmSectionKind {
     pub fn default_for_name(name: &str) -> Self {
         match name {
@@ -123,6 +119,7 @@ impl AsmSectionKind {
             _ => Self::Data,
         }
     }
+
     pub fn default_alignment(self) -> u64 {
         if self == Self::Text {
             16

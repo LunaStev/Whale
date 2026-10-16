@@ -4,12 +4,17 @@ use super::{
     relocation::apply_relocations,
     symbol_table::{SymbolKey, SymbolTable},
 };
+
 use object::{ObjectFile, SectionKind};
+
 const BASE: u64 = 0x400000;
+
 const PAGE: u64 = 4096;
+
 // Portable Linux AMD64 lower 48-bit user range, excluding its final guard page.
 // Do not rely on optional LA57 hardware/kernel support for emitted executables.
 const USER_END: u64 = (1 << 47) - PAGE;
+
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub flags: u32,
@@ -18,11 +23,13 @@ pub struct Segment {
     pub file_size: u64,
     pub memory_size: u64,
 }
+
 fn align(value: u64, alignment: u64) -> Result<u64, String> {
     value
         .checked_add(value.wrapping_neg() & (alignment - 1))
         .ok_or_else(|| "executable alignment overflow".into())
 }
+
 /// The payload Layout API remains useful independently. Executable placement also
 /// accounts for headers and page permissions, and puts NOBITS last in the RW load.
 pub fn executable_layout(
@@ -32,16 +39,11 @@ pub fn executable_layout(
     for object in objects {
         object.validate()?;
     }
-    let has_ro = objects.iter().any(|o| {
-        o.sections
-            .iter()
-            .any(|s| s.kind == SectionKind::ReadOnlyData)
-    });
-    let has_rw = objects.iter().any(|o| {
-        o.sections
-            .iter()
-            .any(|s| matches!(s.kind, SectionKind::Data | SectionKind::Bss))
-    });
+    let has_ro =
+        objects.iter().any(|o| o.sections.iter().any(|s| s.kind == SectionKind::ReadOnlyData));
+    let has_rw = objects
+        .iter()
+        .any(|o| o.sections.iter().any(|s| matches!(s.kind, SectionKind::Data | SectionKind::Bss)));
     let header_size = 64 + 56 * (2 + u64::from(has_ro) + u64::from(has_rw)); // PT_LOADs plus GNU_STACK
     let mut layout = Layout {
         section_offsets: objects.iter().map(|o| vec![0; o.sections.len()]).collect(),
@@ -58,19 +60,15 @@ pub fn executable_layout(
         (&[SectionKind::Data, SectionKind::Bss][..], 6),
     ] {
         let exists = flags == 5
-            || objects
-                .iter()
-                .any(|o| o.sections.iter().any(|s| kinds.contains(&s.kind)));
+            || objects.iter().any(|o| o.sections.iter().any(|s| kinds.contains(&s.kind)));
         if !exists {
             continue;
         }
-        let start = if flags == 5 {
-            0
-        } else {
-            align(layout.file_size, PAGE)?
-        };
+
+        let start = if flags == 5 { 0 } else { align(layout.file_size, PAGE)? };
         let mut cursor = if flags == 5 { header_size } else { start };
         let mut file_end = cursor;
+
         // BSS follows every initialized RW section, including sections in later inputs.
         for kind in kinds {
             for (oi, object) in objects.iter().enumerate() {
@@ -79,8 +77,7 @@ pub fn executable_layout(
                         continue;
                     }
                     let va = align(
-                        BASE.checked_add(cursor)
-                            .ok_or("executable address overflow")?,
+                        BASE.checked_add(cursor).ok_or("executable address overflow")?,
                         section.align.max(1),
                     )?;
                     cursor = va - BASE;
@@ -96,24 +93,23 @@ pub fn executable_layout(
                         file_size: section.file_size(),
                         memory_size: size,
                     });
-                    cursor = cursor
-                        .checked_add(size)
-                        .ok_or("executable memory size overflow")?;
+                    cursor = cursor.checked_add(size).ok_or("executable memory size overflow")?;
                     if *kind != SectionKind::Bss {
                         file_end = cursor;
                     }
                 }
             }
         }
+
         if file_end > max_bytes {
             return Err("executable output byte limit exceeded".into());
         }
-        let memory_end = BASE
-            .checked_add(cursor)
-            .ok_or("executable virtual address overflow")?;
+
+        let memory_end = BASE.checked_add(cursor).ok_or("executable virtual address overflow")?;
         if memory_end > USER_END {
             return Err("executable exceeds portable lower 48-bit user address space".into());
         }
+
         segments.push(Segment {
             flags,
             offset: start,
@@ -124,6 +120,7 @@ pub fn executable_layout(
         layout.file_size = file_end;
         layout.memory_size = cursor;
     }
+
     layout.section_sizes = objects
         .iter()
         .flat_map(|o| o.sections.iter())
@@ -131,6 +128,7 @@ pub fn executable_layout(
         .collect::<Result<_, _>>()?;
     Ok((layout, segments))
 }
+
 pub fn write_executable(
     objects: &[ObjectFile],
     entry: &str,
@@ -138,6 +136,7 @@ pub fn write_executable(
 ) -> Result<Vec<u8>, String> {
     write_executable_checked(objects, entry, max_bytes).map_err(|e| e.to_string())
 }
+
 pub fn write_executable_checked(
     objects: &[ObjectFile],
     entry: &str,
@@ -148,28 +147,20 @@ pub fn write_executable_checked(
         return Err(LinkError::new(K::Entry, "entry symbol must not be empty"));
     }
     let mut symbols = SymbolTable::new();
-    symbols
-        .resolve(objects)
-        .map_err(|e| LinkError::new(K::Symbols, e))?;
-    let selected = symbols
-        .symbols
-        .get(&SymbolKey::Global(entry.into()))
-        .ok_or_else(|| {
-            LinkError::new(
-                K::Entry,
-                format!("entry symbol {entry:?} is missing or not globally defined"),
-            )
-        })?;
+    symbols.resolve(objects).map_err(|e| LinkError::new(K::Symbols, e))?;
+    let selected = symbols.symbols.get(&SymbolKey::Global(entry.into())).ok_or_else(|| {
+        LinkError::new(
+            K::Entry,
+            format!("entry symbol {entry:?} is missing or not globally defined"),
+        )
+    })?;
     let (owner, section) = selected
         .object_index
         .zip(selected.section_index)
         .ok_or_else(|| LinkError::new(K::Entry, "entry symbol is undefined"))?;
     let source = &objects[owner].sections[section];
     if source.kind != SectionKind::Text || selected.value >= source.data.len() as u64 {
-        return Err(LinkError::new(
-            K::Entry,
-            "entry must point inside an executable section",
-        ));
+        return Err(LinkError::new(K::Entry, "entry must point inside an executable section"));
     }
     let (layout, segments) =
         executable_layout(objects, max_bytes).map_err(|e| LinkError::new(K::Layout, e))?;
@@ -220,12 +211,15 @@ pub fn write_executable_checked(
     }
     Ok(out)
 }
+
 fn put16(out: &mut [u8], at: usize, value: u16) {
     out[at..at + 2].copy_from_slice(&value.to_le_bytes());
 }
+
 fn put32(out: &mut [u8], at: usize, value: u32) {
     out[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
+
 fn put64(out: &mut [u8], at: usize, value: u64) {
     out[at..at + 8].copy_from_slice(&value.to_le_bytes());
 }

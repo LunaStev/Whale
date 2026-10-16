@@ -1,9 +1,11 @@
 #[path = "../fuzz/support.rs"]
 mod fuzz;
+
 use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
 };
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let target = fuzz::Target::parse(&args.next().expect("target: assembler|object|ir|ast"))
@@ -30,11 +32,7 @@ fn main() {
     let mut accepted = seed_accepted;
     for case in 0..cases {
         let (path, bytes) = &seeds[rng.index(seeds.len())];
-        let input = if case % 8 == 0 {
-            bytes.clone()
-        } else {
-            fuzz::mutate(bytes, &mut rng)
-        };
+        let input = if case % 8 == 0 { bytes.clone() } else { fuzz::mutate(bytes, &mut rng) };
         match catch_unwind(AssertUnwindSafe(|| fuzz::check(target, &input))) {
             Ok(valid) => accepted += usize::from(valid),
             Err(_) => {
@@ -62,13 +60,10 @@ fn main() {
                 std::fs::write(&crash, minimal).unwrap();
                 eprintln!("seed={} case={case} origin={} replay: cargo run --locked --features socket-cli --example fuzz_boundaries -- {} --replay {}",seed,path.display(),target.name(),crash.display());
                 std::process::exit(1);
-            }
+            },
         }
     }
-    assert!(
-        accepted > 0,
-        "fuzz invocation must execute at least one valid seed"
-    );
+    assert!(accepted > 0, "fuzz invocation must execute at least one valid seed");
     println!(
         "{} seed={seed} cases={cases} accepted={accepted} max_input={} passed",
         target.name(),

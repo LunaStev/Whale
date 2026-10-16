@@ -1,18 +1,13 @@
 use super::VerifyError;
+
 use crate::{BinOp, CmpOp, ConstValue, ICmpPred, Instruction, Type, ValueId};
 
 fn is_signed(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-    )
+    matches!(ty, Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
 }
 
 fn is_unsigned(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::U1 | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128
-    )
+    matches!(ty, Type::U1 | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128)
 }
 
 pub(super) fn is_integer(ty: &Type) -> bool {
@@ -65,7 +60,7 @@ fn valid_cast(op: &crate::CastOp, source: &Type, destination: &Type) -> bool {
                 .zip(integer_width(destination).or_else(|| float_width(destination)))
                 .is_some_and(|(s, d)| s == d)
                 || matches!((source, destination), (Type::Ptr(_), Type::Ptr(_)))
-        }
+        },
         // These are type checks only. Runtime address validity and metadata
         // cannot be established by an integer/pointer cast (see memory rules).
         PtrToInt => matches!(source, Type::Ptr(_)) && is_integer(destination),
@@ -97,11 +92,7 @@ pub(super) fn verify_type_category(
     if valid {
         Ok(())
     } else {
-        Err(VerifyError::InvalidInstructionType {
-            func: f.name.clone(),
-            operation,
-            ty: ty.clone(),
-        })
+        Err(VerifyError::InvalidInstructionType { func: f.name.clone(), operation, ty: ty.clone() })
     }
 }
 
@@ -112,10 +103,7 @@ pub(super) fn verify_operand(
 ) -> Result<(), VerifyError> {
     let got = f
         .value_type(value)
-        .ok_or_else(|| VerifyError::MissingValueType {
-            func: f.name.clone(),
-            value,
-        })?;
+        .ok_or_else(|| VerifyError::MissingValueType { func: f.name.clone(), value })?;
     if got != expected {
         return Err(VerifyError::OperandTypeMismatch {
             func: f.name.clone(),
@@ -129,10 +117,7 @@ pub(super) fn verify_operand(
 
 fn verify_alignment(f: &super::IndexedFunction<'_>, align: u32) -> Result<(), VerifyError> {
     if !align.is_power_of_two() {
-        return Err(VerifyError::InvalidMemoryAlignment {
-            func: f.name.clone(),
-            align,
-        });
+        return Err(VerifyError::InvalidMemoryAlignment { func: f.name.clone(), align });
     }
     Ok(())
 }
@@ -144,34 +129,21 @@ fn verify_gep(
     base: ValueId,
     indices: &[ValueId],
 ) -> Result<(), VerifyError> {
-    let invalid = |index, reason| VerifyError::InvalidGep {
-        func: f.name.clone(),
-        value: dst,
-        index,
-        reason,
-    };
+    let invalid =
+        |index, reason| VerifyError::InvalidGep { func: f.name.clone(), value: dst, index, reason };
     let base_ty = f
         .value_type(base)
-        .ok_or_else(|| VerifyError::MissingValueType {
-            func: f.name.clone(),
-            value: base,
-        })?;
+        .ok_or_else(|| VerifyError::MissingValueType { func: f.name.clone(), value: base })?;
     let Type::Ptr(mut selected) = base_ty.clone() else {
         return Err(invalid(None, "base must be a pointer"));
     };
     if !indices.is_empty() && !is_storable(&selected) {
-        return Err(invalid(
-            None,
-            "element addressing requires a concrete stored type",
-        ));
+        return Err(invalid(None, "element addressing requires a concrete stored type"));
     }
     for (position, value) in indices.iter().enumerate() {
         let ty = f
             .value_type(*value)
-            .ok_or_else(|| VerifyError::MissingValueType {
-                func: f.name.clone(),
-                value: *value,
-            })?;
+            .ok_or_else(|| VerifyError::MissingValueType { func: f.name.clone(), value: *value })?;
         if !is_integer(ty) {
             return Err(invalid(Some(position), "index must be an integer"));
         }
@@ -187,16 +159,8 @@ fn verify_gep(
                     .iter()
                     .flat_map(|b| &b.instructions)
                     .find_map(|ins| {
-                        if let Instruction::Const {
-                            dst,
-                            value: constant,
-                            ..
-                        }
-                        | Instruction::ConstDecl {
-                            dst,
-                            value: constant,
-                            ..
-                        } = ins
+                        if let Instruction::Const { dst, value: constant, .. }
+                        | Instruction::ConstDecl { dst, value: constant, .. } = ins
                         {
                             if dst == value {
                                 return match constant {
@@ -222,7 +186,7 @@ fn verify_gep(
                         })?
                         .clone(),
                 )
-            }
+            },
             _ => return Err(invalid(
                 Some(position),
                 "further indices require an array, struct, or tuple; GEP does not load pointers",
@@ -246,13 +210,7 @@ pub(super) fn verify_instruction(
     ins: &Instruction,
 ) -> Result<(), VerifyError> {
     match ins {
-        Instruction::Cast {
-            dst,
-            op,
-            src_ty,
-            src,
-            dst_ty,
-        } => {
+        Instruction::Cast { dst, op, src_ty, src, dst_ty } => {
             verify_operand(f, *src, src_ty)?;
             if !valid_cast(op, src_ty, dst_ty) {
                 return Err(VerifyError::InvalidCast {
@@ -263,25 +221,21 @@ pub(super) fn verify_instruction(
                     destination: dst_ty.clone(),
                 });
             }
-        }
-        Instruction::Checked {
-            op, ty, lhs, rhs, ..
-        } => {
+        },
+        Instruction::Checked { op, ty, lhs, rhs, .. } => {
             let valid = match op {
                 crate::CheckedOp::SAdd | crate::CheckedOp::SSub | crate::CheckedOp::SMul => {
                     is_signed(ty)
-                }
+                },
                 crate::CheckedOp::UAdd | crate::CheckedOp::USub | crate::CheckedOp::UMul => {
                     is_unsigned(ty)
-                }
+                },
             };
             verify_type_category(f, "checked arithmetic", ty, valid)?;
             verify_operand(f, *lhs, ty)?;
             verify_operand(f, *rhs, ty)?;
-        }
-        Instruction::Bin {
-            op, ty, lhs, rhs, ..
-        } => {
+        },
+        Instruction::Bin { op, ty, lhs, rhs, .. } => {
             let valid = match op {
                 BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem => is_float(ty),
                 BinOp::SDiv | BinOp::SRem => is_signed(ty) || matches!(ty, Type::Ptr(_)),
@@ -291,127 +245,98 @@ pub(super) fn verify_instruction(
             verify_type_category(f, "binary operation", ty, valid)?;
             verify_operand(f, *lhs, ty)?;
             verify_operand(f, *rhs, ty)?;
-        }
+        },
         Instruction::LifetimeEnd { ptr } => {
-            let ty = f
-                .value_type(*ptr)
-                .ok_or_else(|| VerifyError::MissingValueType {
-                    func: f.name.clone(),
-                    value: *ptr,
-                })?;
+            let ty = f.value_type(*ptr).ok_or_else(|| VerifyError::MissingValueType {
+                func: f.name.clone(),
+                value: *ptr,
+            })?;
             verify_type_category(f, "lifetime_end", ty, matches!(ty, Type::Ptr(_)))?;
-        }
+        },
         Instruction::PtrDiff { lhs, rhs, .. } => {
-            let ty = f
-                .value_type(*lhs)
-                .ok_or_else(|| VerifyError::MissingValueType {
-                    func: f.name.clone(),
-                    value: *lhs,
-                })?;
+            let ty = f.value_type(*lhs).ok_or_else(|| VerifyError::MissingValueType {
+                func: f.name.clone(),
+                value: *lhs,
+            })?;
             verify_type_category(f, "ptrdiff", ty, matches!(ty, Type::Ptr(_)))?;
             verify_operand(f, *rhs, ty)?;
-        }
+        },
         Instruction::Not { ty, src, .. } => {
             verify_type_category(f, "not", ty, is_integer(ty))?;
             verify_operand(f, *src, ty)?;
-        }
+        },
         Instruction::Mov { ty, src, .. } => {
             verify_type_category(f, "mov", ty, is_storable(ty))?;
             verify_operand(f, *src, ty)?;
-        }
-        Instruction::Cmp {
-            op, ty, lhs, rhs, ..
-        } => {
+        },
+        Instruction::Cmp { op, ty, lhs, rhs, .. } => {
             let valid = match op {
                 CmpOp::Eq | CmpOp::Ne => supports_equality(ty),
                 CmpOp::SLt | CmpOp::SLe | CmpOp::SGt | CmpOp::SGe => {
                     is_signed(ty) || matches!(ty, Type::Ptr(_))
-                }
+                },
                 CmpOp::ULt | CmpOp::ULe | CmpOp::UGt | CmpOp::UGe => {
                     is_unsigned(ty) || matches!(ty, Type::Ptr(_))
-                }
+                },
                 _ => is_float(ty),
             };
             verify_type_category(f, "comparison", ty, valid)?;
             verify_operand(f, *lhs, ty)?;
             verify_operand(f, *rhs, ty)?;
-        }
-        Instruction::ICmp {
-            pred, ty, lhs, rhs, ..
-        } => {
+        },
+        Instruction::ICmp { pred, ty, lhs, rhs, .. } => {
             let valid = match pred {
                 ICmpPred::Eq | ICmpPred::Ne => supports_equality(ty),
                 ICmpPred::Slt | ICmpPred::Sle | ICmpPred::Sgt | ICmpPred::Sge => {
                     is_signed(ty) || matches!(ty, Type::Ptr(_))
-                }
+                },
                 _ => is_unsigned(ty) || matches!(ty, Type::Ptr(_)),
             };
             verify_type_category(f, "integer comparison", ty, valid)?;
             verify_operand(f, *lhs, ty)?;
             verify_operand(f, *rhs, ty)?;
-        }
+        },
         Instruction::FCmp { ty, lhs, rhs, .. } => {
             verify_type_category(f, "floating comparison", ty, is_float(ty))?;
             verify_operand(f, *lhs, ty)?;
             verify_operand(f, *rhs, ty)?;
-        }
-        Instruction::Select {
-            ty,
-            cond,
-            on_true,
-            on_false,
-            ..
-        } => {
+        },
+        Instruction::Select { ty, cond, on_true, on_false, .. } => {
             super::verify_condition(f, *cond)?;
             verify_type_category(f, "select", ty, is_storable(ty))?;
             verify_operand(f, *on_true, ty)?;
             verify_operand(f, *on_false, ty)?;
-        }
-        Instruction::Extract {
-            dst_ty,
-            tuple,
-            index,
-            ..
-        } => {
+        },
+        Instruction::Extract { dst_ty, tuple, index, .. } => {
             let field = match f.value_type(*tuple) {
                 Some(Type::Tuple(fields)) => fields.get(*index as usize),
                 _ => None,
             };
             verify_type_category(f, "extract", dst_ty, field == Some(dst_ty))?;
-        }
+        },
         Instruction::Uninit { ty, ptr, align } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "uninit", ty, is_storable(ty))?;
             verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
-        }
+        },
         Instruction::Alloca { ty, align, .. } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "alloca", ty, is_storable(ty))?;
-        }
+        },
         Instruction::Load { ty, ptr, align, .. } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "load", ty, is_storable(ty))?;
             verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
-        }
-        Instruction::Store {
-            ty,
-            ptr,
-            value,
-            align,
-        } => {
+        },
+        Instruction::Store { ty, ptr, value, align } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "store", ty, is_storable(ty))?;
             verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
             verify_operand(f, *value, ty)?;
-        }
-        Instruction::Gep {
-            dst,
-            dst_ty,
-            base_ptr,
-            indices,
-        } => {
+        },
+        Instruction::Gep { dst, dst_ty, base_ptr, indices } => {
             verify_gep(f, *dst, dst_ty, *base_ptr, indices)?;
-        }
+        },
         // These operand types are already explicit in the textual IR printer.
         // Bounds, lifetimes and overlapping-copy behavior remain separate rules.
         Instruction::Memcpy { dst, src, n, align } => {
@@ -419,14 +344,14 @@ pub(super) fn verify_instruction(
             verify_operand(f, *dst, &Type::ptr_to(Type::U8))?;
             verify_operand(f, *src, &Type::ptr_to(Type::U8))?;
             verify_operand(f, *n, &Type::U64)?;
-        }
+        },
         Instruction::Memset { dst, val, n, align } => {
             verify_alignment(f, *align)?;
             verify_operand(f, *dst, &Type::ptr_to(Type::U8))?;
             verify_operand(f, *val, &Type::U8)?;
             verify_operand(f, *n, &Type::U64)?;
-        }
-        _ => {}
+        },
+        _ => {},
     }
     Ok(())
 }

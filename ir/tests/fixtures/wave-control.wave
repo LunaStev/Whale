@@ -1,6 +1,7 @@
 fun increment(x: i32) -> i32 {
     return x + 1;
 }
+
 fun main() {
     var i: i32 = 0;
     while (i < 3) {

@@ -1,5 +1,7 @@
 use linker::{core::linker::OutputFormat, Linker};
+
 use std::{path::Path, process};
+
 pub fn run(args: Vec<String>) {
     if args.is_empty() || args == ["--help"] {
         help();
@@ -10,6 +12,7 @@ pub fn run(args: Vec<String>) {
         process::exit(1);
     }
 }
+
 fn execute(args: Vec<String>) -> Result<(), String> {
     let mut inputs = Vec::new();
     let mut output = None;
@@ -30,12 +33,12 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                         if output.replace(value).is_some() {
                             return Err("duplicate -o".into());
                         }
-                    }
+                    },
                     "--entry" => {
                         if value.is_empty() || entry.replace(value).is_some() {
                             return Err("duplicate or empty --entry".into());
                         }
-                    }
+                    },
                     "--max-input" => {
                         if input_limit
                             .replace(super::input::byte_limit(&value).map_err(str::to_owned)?)
@@ -43,7 +46,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                         {
                             return Err("duplicate --max-input".into());
                         }
-                    }
+                    },
                     _ => {
                         if output_limit
                             .replace(super::input::byte_limit(&value).map_err(str::to_owned)?)
@@ -51,10 +54,10 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                         {
                             return Err("duplicate --max-output".into());
                         }
-                    }
+                    },
                 }
                 i += 1;
-            }
+            },
             value if !value.starts_with('-') => inputs.push(value.to_owned()),
             value => return Err(format!("unknown option {value}")),
         }
@@ -80,13 +83,9 @@ fn execute(args: Vec<String>) -> Result<(), String> {
             .checked_sub(bytes.len() as u64)
             .ok_or("total link input byte limit exceeded")?;
         if bytes.starts_with(b"!<arch>\n") || bytes.starts_with(b"!<thin>\n") {
-            linker
-                .add_archive(&bytes)
-                .map_err(|e| format!("{input}: {e}"))?;
+            linker.add_archive(&bytes).map_err(|e| format!("{input}: {e}"))?;
         } else {
-            linker
-                .add_object_bytes(&bytes)
-                .map_err(|e| format!("{input}: {e}"))?;
+            linker.add_object_bytes(&bytes).map_err(|e| format!("{input}: {e}"))?;
         }
     }
     let bytes = linker
@@ -98,6 +97,7 @@ fn execute(args: Vec<String>) -> Result<(), String> {
     println!("Wrote {} bytes to {}", bytes.len(), output);
     Ok(())
 }
+
 fn help() {
     println!("Usage: whale link <input.o|input.a>... -o <executable> [--entry NAME]\n\nStatic Linux AMD64 ELF64 only; entry defaults to _start.\n--max-input N    cumulative input byte limit (default 268435456)\n--max-output N   executable byte limit (default 268435456)\nArchives use left-to-right order with a fixed-point scan within each archive.\nThin archives, shared libraries, GOT and dynamic PLT linking are unsupported.");
 }

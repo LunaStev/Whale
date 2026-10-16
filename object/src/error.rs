@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 use std::fmt;
+
 use whale_diagnostic::{Context, Diagnostic, ToDiagnostic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +20,7 @@ pub enum ObjectErrorKind {
     InvalidEncoding,
     HostAllocation,
 }
+
 impl ObjectErrorKind {
     pub const fn code(self) -> &'static str {
         match self {
@@ -39,6 +41,7 @@ impl ObjectErrorKind {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjectResource {
     InputBytes,
@@ -51,6 +54,7 @@ pub enum ObjectResource {
     Work,
     OutputBytes,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObjectError {
     pub kind: ObjectErrorKind,
@@ -59,29 +63,29 @@ pub struct ObjectError {
     pub contexts: Vec<Context>,
     pub resource: Option<ObjectResource>,
 }
+
 impl ObjectError {
     pub fn new(phase: &'static str, kind: ObjectErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            phase,
-            message: message.into(),
-            contexts: Vec::new(),
-            resource: None,
-        }
+        Self { kind, phase, message: message.into(), contexts: Vec::new(), resource: None }
     }
+
     pub fn context(mut self, context: Context) -> Self {
         self.contexts.push(context);
         self
     }
+
     pub fn at(self, offset: u64) -> Self {
         self.context(Context::FileOffset(offset))
     }
+
     pub fn section(self, index: usize) -> Self {
         self.context(Context::Section { index, name: None })
     }
+
     pub fn symbol(self, name: impl Into<String>) -> Self {
         self.context(Context::Symbol(name.into()))
     }
+
     pub fn limit(phase: &'static str, resource: ObjectResource) -> Self {
         let mut e = Self::new(
             phase,
@@ -92,6 +96,7 @@ impl ObjectError {
         e
     }
 }
+
 impl ToDiagnostic for ObjectError {
     fn diagnostic(&self) -> Diagnostic {
         Diagnostic {
@@ -103,10 +108,13 @@ impl ToDiagnostic for ObjectError {
         }
     }
 }
+
 impl fmt::Display for ObjectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.diagnostic().fmt(f)
     }
 }
+
 impl std::error::Error for ObjectError {}
+
 pub type ObjectReadError = ObjectError;

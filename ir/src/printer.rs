@@ -25,11 +25,7 @@ pub fn print_module(m: &Module) -> String {
     ));
     out.push_str(" }\n\n");
     for file in &m.sources.files {
-        out.push_str(&format!(
-            "  source_file @s{} \"{}\"\n",
-            file.id,
-            escape(&file.name)
-        ));
+        out.push_str(&format!("  source_file @s{} \"{}\"\n", file.id, escape(&file.name)));
     }
     for original in &m.sources.originals {
         out.push_str(&format!("  original {} ", original.id));
@@ -45,14 +41,12 @@ pub fn print_module(m: &Module) -> String {
     for mapping in &m.sources.mappings {
         out.push_str("  source_map ");
         match mapping.target {
-            crate::SourceTarget::Instruction {
-                function,
-                block,
-                index,
-            } => out.push_str(&format!("instruction @f{} {} {}", function.0, block, index)),
+            crate::SourceTarget::Instruction { function, block, index } => {
+                out.push_str(&format!("instruction @f{} {} {}", function.0, block, index))
+            },
             crate::SourceTarget::Terminator { function, block } => {
                 out.push_str(&format!("terminator @f{} {}", function.0, block))
-            }
+            },
             crate::SourceTarget::Global(id) => out.push_str(&format!("global @g{}", id.0)),
         }
         out.push_str(&format!(" {}\n", mapping.original));
@@ -75,27 +69,18 @@ pub fn print_module(m: &Module) -> String {
     }
 
     for g in &m.global_storage {
-        out.push_str(&format!(
-            "  storage @g{} \"{}\": {} = ",
-            g.id.0,
-            escape(&g.name),
-            g.ty
-        ));
+        out.push_str(&format!("  storage @g{} \"{}\": {} = ", g.id.0, escape(&g.name), g.ty));
         match &g.init {
             crate::GlobalStorageInit::Value(value) => {
                 out.push_str(&format!("value {} {}", g.ty, fmt_const(value)))
-            }
+            },
             crate::GlobalStorageInit::Uninitialized => out.push_str("uninitialized"),
         }
         out.push_str(&format!(
             ", align {}, access {}, linkage {}",
             g.align,
             if g.readonly { "readonly" } else { "readwrite" },
-            if g.linkage == crate::Linkage::Internal {
-                "internal"
-            } else {
-                "external"
-            }
+            if g.linkage == crate::Linkage::Internal { "internal" } else { "external" }
         ));
         if let Some(name) = &g.link_name {
             out.push_str(&format!(", link_name \"{}\"", escape(name)));
@@ -177,12 +162,7 @@ fn print_instr(i: &Instruction) -> String {
         GlobalAddr { dst, global, ty } => format!("{dst}: ptr<{ty}> = global_addr @g{}", global.0),
         LifetimeEnd { ptr } => format!("lifetime_end {ptr}"),
         PtrDiff { dst, lhs, rhs } => format!("{dst}: i128 = ptrdiff {lhs}, {rhs}"),
-        ConstDecl {
-            dst,
-            name,
-            expression,
-            value,
-        } => format!(
+        ConstDecl { dst, name, expression, value } => format!(
             "{dst}: {} = const_decl \"{}\" {} => const {} {}",
             expression.ty,
             escape(name),
@@ -194,58 +174,29 @@ fn print_instr(i: &Instruction) -> String {
         Undef { dst, ty } => format!("{dst}: {ty} = undef {ty}"),
         Mov { dst, ty, src } => format!("{dst}: {ty} = mov {ty} {src}"),
 
-        Bin {
-            dst,
-            op,
-            ty,
-            lhs,
-            rhs,
-        } => format!("{dst}: {ty} = {} {ty} {lhs}, {rhs}", fmt_binop(op)),
+        Bin { dst, op, ty, lhs, rhs } => {
+            format!("{dst}: {ty} = {} {ty} {lhs}, {rhs}", fmt_binop(op))
+        },
         Not { dst, ty, src } => format!("{dst}: {ty} = not {ty} {src}"),
 
-        Cmp {
-            dst,
-            op,
-            ty,
-            lhs,
-            rhs,
-        } => {
+        Cmp { dst, op, ty, lhs, rhs } => {
             format!("{dst}: bool = cmp {} {ty} {lhs}, {rhs}", fmt_cmpop(op))
-        }
+        },
 
-        ICmp {
-            dst,
-            pred,
-            ty,
-            lhs,
-            rhs,
-        } => format!("{dst}: bool = icmp {} {ty} {lhs}, {rhs}", fmt_icmp(pred)),
-        FCmp {
-            dst,
-            pred,
-            ty,
-            lhs,
-            rhs,
-        } => format!("{dst}: bool = fcmp {} {ty} {lhs}, {rhs}", fmt_fcmp(pred)),
+        ICmp { dst, pred, ty, lhs, rhs } => {
+            format!("{dst}: bool = icmp {} {ty} {lhs}, {rhs}", fmt_icmp(pred))
+        },
+        FCmp { dst, pred, ty, lhs, rhs } => {
+            format!("{dst}: bool = fcmp {} {ty} {lhs}, {rhs}", fmt_fcmp(pred))
+        },
 
-        Select {
-            dst,
-            ty,
-            cond,
-            on_true,
-            on_false,
-        } => format!("{dst}: {ty} = select bool {cond}, {ty} {on_true}, {ty} {on_false}"),
+        Select { dst, ty, cond, on_true, on_false } => {
+            format!("{dst}: {ty} = select bool {cond}, {ty} {on_true}, {ty} {on_false}")
+        },
 
-        Cast {
-            dst,
-            op,
-            dst_ty,
-            src_ty,
-            src,
-        } => format!(
-            "{dst}: {dst_ty} = {} {src_ty} {src} to {dst_ty}",
-            fmt_cast(op)
-        ),
+        Cast { dst, op, dst_ty, src_ty, src } => {
+            format!("{dst}: {dst_ty} = {} {src_ty} {src} to {dst_ty}", fmt_cast(op))
+        },
 
         Phi { dst, ty, incomings } => {
             let mut s = format!("{dst}: {ty} = phi {ty} ");
@@ -256,77 +207,48 @@ fn print_instr(i: &Instruction) -> String {
                 s.push_str(&format!("[ {v}, {bb} ]"));
             }
             s
-        }
+        },
 
-        Extract {
-            dst,
-            dst_ty,
-            tuple,
-            index,
-        } => format!("{dst}: {dst_ty} = extract {tuple}, {}", index),
+        Extract { dst, dst_ty, tuple, index } => {
+            format!("{dst}: {dst_ty} = extract {tuple}, {}", index)
+        },
 
-        Checked {
-            dst,
-            op,
-            ty,
-            lhs,
-            rhs,
-        } => format!(
-            "{dst}: tuple<{ty}, bool> = {}_chk {ty} {lhs}, {rhs}",
-            fmt_checked(op)
-        ),
+        Checked { dst, op, ty, lhs, rhs } => {
+            format!("{dst}: tuple<{ty}, bool> = {}_chk {ty} {lhs}, {rhs}", fmt_checked(op))
+        },
 
         Alloca { dst, ty, align } => format!("{dst}: ptr<{ty}> = alloca {ty}, align {align}"),
 
-        Load {
-            dst,
-            ty,
-            ptr,
-            align,
-        } => format!("{dst}: {ty} = load {ty}, ptr<{ty}> {ptr}, align {align}"),
+        Load { dst, ty, ptr, align } => {
+            format!("{dst}: {ty} = load {ty}, ptr<{ty}> {ptr}, align {align}")
+        },
 
         Uninit { ty, ptr, align } => format!("uninit {ty}, ptr<{ty}> {ptr}, align {align}"),
-        Store {
-            ty,
-            value,
-            ptr,
-            align,
-        } => format!("store {ty} {value}, ptr<{ty}> {ptr}, align {align}"),
+        Store { ty, value, ptr, align } => {
+            format!("store {ty} {value}, ptr<{ty}> {ptr}, align {align}")
+        },
 
-        Gep {
-            dst,
-            dst_ty,
-            base_ptr,
-            indices,
-        } => {
+        Gep { dst, dst_ty, base_ptr, indices } => {
             let mut s = format!("{dst}: {dst_ty} = gep {base_ptr}");
             for idx in indices {
                 s.push_str(&format!(", {idx}"));
             }
             s
-        }
+        },
 
         Memcpy { dst, src, n, align } => {
             format!("memcpy ptr<u8> {dst}, ptr<u8> {src}, u64 {n}, align {align}")
-        }
+        },
 
         Memset { dst, val, n, align } => {
             format!("memset ptr<u8> {dst}, u8 {val}, u64 {n}, align {align}")
-        }
+        },
 
         NullFunction { dst, signature } => format!("{dst}: fnptr<{signature}> = null_function"),
-        FunctionAddr {
-            dst,
-            function,
-            signature,
-        } => format!("{dst}: fnptr<{signature}> = function_addr @f{}", function.0),
-        Call {
-            convention,
-            dst,
-            ret_ty,
-            callee,
-            args,
-        } => {
+        FunctionAddr { dst, function, signature } => {
+            format!("{dst}: fnptr<{signature}> = function_addr @f{}", function.0)
+        },
+        Call { convention, dst, ret_ty, callee, args } => {
             let mut s = String::new();
             if let Some(v) = dst {
                 s.push_str(&format!("{v}: {ret_ty} = "));
@@ -347,7 +269,7 @@ fn print_instr(i: &Instruction) -> String {
             }
             s.push(')');
             s
-        }
+        },
 
         TrapIf { cond, reason } => format!("trap_if bool {cond}, reason=\"{}\"", escape(reason)),
     }
@@ -401,17 +323,10 @@ fn print_term(t: &Terminator) -> String {
     use Terminator::*;
     match t {
         Br { target } => format!("br label {target}"),
-        CBr {
-            cond,
-            then_bb,
-            else_bb,
-        } => format!("cbr bool {cond}, label {then_bb}, label {else_bb}"),
-        Switch {
-            ty,
-            value,
-            default_bb,
-            cases,
-        } => {
+        CBr { cond, then_bb, else_bb } => {
+            format!("cbr bool {cond}, label {then_bb}, label {else_bb}")
+        },
+        Switch { ty, value, default_bb, cases } => {
             let mut s = format!("switch {ty} {value}, label {default_bb} [");
             for (i, (c, bb)) in cases.iter().enumerate() {
                 if i != 0 {
@@ -421,7 +336,7 @@ fn print_term(t: &Terminator) -> String {
             }
             s.push_str(" ]");
             s
-        }
+        },
         Ret { ty, value } => {
             if *ty == Type::Void {
                 "ret void".to_string()
@@ -430,7 +345,7 @@ fn print_term(t: &Terminator) -> String {
             } else {
                 format!("ret {ty} <missing>")
             }
-        }
+        },
         Trap { reason } => format!("trap reason=\"{}\"", escape(reason)),
     }
 }
@@ -540,7 +455,7 @@ fn fmt_const(c: &ConstValue) -> String {
             } else {
                 "false".into()
             }
-        }
+        },
         ConstValue::I(i) => i.to_string(),
         ConstValue::U(u) => u.to_string(),
         ConstValue::F(x) => x.to_string(),
@@ -562,7 +477,7 @@ fn escape(s: &str) -> String {
             ch if ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}') => {
                 use std::fmt::Write;
                 write!(&mut out, "\\u{{{:x}}}", ch as u32).expect("writing to a String");
-            }
+            },
             ch => out.push(ch),
         }
     }

@@ -4,4 +4,5 @@ pub mod core;
 pub use core::linker::Linker;
 
 mod diagnostic;
+
 pub use diagnostic::{LinkError, LinkErrorKind};

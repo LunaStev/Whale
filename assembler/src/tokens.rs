@@ -15,6 +15,7 @@ pub enum TokenKind {
     Divide,
     Newline,
 }
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
@@ -27,6 +28,7 @@ pub struct Token {
     pub end_line: usize,
     pub end_column: usize,
 }
+
 impl Token {
     pub fn span(&self) -> SourceSpan {
         SourceSpan {
@@ -37,12 +39,14 @@ impl Token {
         }
     }
 }
+
 #[derive(Clone, Copy)]
 struct Mark {
     position: usize,
     line: usize,
     column: usize,
 }
+
 struct Cursor<'a> {
     source: &'a str,
     position: usize,
@@ -50,17 +54,16 @@ struct Cursor<'a> {
     column: usize,
     previous_cr: bool,
 }
+
 impl<'a> Cursor<'a> {
     fn mark(&self) -> Mark {
-        Mark {
-            position: self.position,
-            line: self.line,
-            column: self.column,
-        }
+        Mark { position: self.position, line: self.line, column: self.column }
     }
+
     fn peek(&self) -> Option<char> {
         self.source[self.position..].chars().next()
     }
+
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek()?;
         self.position += ch.len_utf8();
@@ -69,21 +72,22 @@ impl<'a> Cursor<'a> {
                 self.line += 1;
                 self.column = 1;
                 self.previous_cr = true;
-            }
+            },
             '\n' => {
                 if !self.previous_cr {
                     self.line += 1;
                 }
                 self.column = 1;
                 self.previous_cr = false;
-            }
+            },
             _ => {
                 self.column += 1;
                 self.previous_cr = false;
-            }
+            },
         }
         Some(ch)
     }
+
     fn token(&self, kind: TokenKind, start: Mark) -> Token {
         Token {
             kind,
@@ -95,6 +99,7 @@ impl<'a> Cursor<'a> {
             end_column: self.column,
         }
     }
+
     fn error(&self, msg: &str, start: Mark) -> AsmError {
         let end = if self.position > start.position {
             self.position
@@ -103,24 +108,14 @@ impl<'a> Cursor<'a> {
         };
         AsmError::LexerError(msg.into()).at(
             "<input>",
-            SourceSpan {
-                start: start.position,
-                end,
-                line: start.line,
-                column: start.column,
-            },
+            SourceSpan { start: start.position, end, line: start.line, column: start.column },
             None,
         )
     }
 }
+
 pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
-    let mut c = Cursor {
-        source,
-        position: 0,
-        line: 1,
-        column: 1,
-        previous_cr: false,
-    };
+    let mut c = Cursor { source, position: 0, line: 1, column: 1, previous_cr: false };
     let mut tokens = Vec::new();
     while let Some(ch) = c.peek() {
         let start = c.mark();
@@ -130,54 +125,53 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
                     c.bump();
                 }
                 continue;
-            }
+            },
             ' ' | '\t' => {
                 c.bump();
                 continue;
-            }
+            },
             '\n' | '\r' => {
                 c.bump();
                 if ch == '\r' && c.peek() == Some('\n') {
                     c.bump();
                 }
                 TokenKind::Newline
-            }
+            },
             ',' => {
                 c.bump();
                 TokenKind::Comma
-            }
+            },
             ':' => {
                 c.bump();
                 TokenKind::Colon
-            }
+            },
             '[' => {
                 c.bump();
                 TokenKind::LBracket
-            }
+            },
             ']' => {
                 c.bump();
                 TokenKind::RBracket
-            }
+            },
             '+' => {
                 c.bump();
                 TokenKind::Plus
-            }
+            },
             '-' => {
                 c.bump();
                 TokenKind::Minus
-            }
+            },
             '*' => {
                 c.bump();
                 TokenKind::Multiply
-            }
+            },
             '"' => {
                 c.bump();
                 let mut bytes = Vec::new();
                 loop {
                     let at = c.mark();
-                    let ch = c
-                        .bump()
-                        .ok_or_else(|| c.error("Unterminated string literal", start))?;
+                    let ch =
+                        c.bump().ok_or_else(|| c.error("Unterminated string literal", start))?;
                     match ch {
                         '"' => break,
                         '\\' => {
@@ -210,19 +204,19 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
                                         value = value * 16 + digit as u8;
                                     }
                                     value
-                                }
+                                },
                                 _ => return Err(c.error("Unknown string escape", at)),
                             };
                             bytes.push(byte);
-                        }
+                        },
                         _ => {
                             let mut utf8 = [0; 4];
                             bytes.extend_from_slice(ch.encode_utf8(&mut utf8).as_bytes());
-                        }
+                        },
                     }
                 }
                 TokenKind::StringLiteral(bytes)
-            }
+            },
             ch if ch.is_ascii_digit() => {
                 let rest = &source[c.position..];
                 let radix = if rest.starts_with("0x") || rest.starts_with("0X") {
@@ -246,11 +240,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
                 }
                 if c.position == digits {
                     return Err(c.error(
-                        if radix == 16 {
-                            "Invalid hex number"
-                        } else {
-                            "Invalid binary number"
-                        },
+                        if radix == 16 { "Invalid hex number" } else { "Invalid binary number" },
                         start,
                     ));
                 }
@@ -259,16 +249,13 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
                     .filter(|n| *n <= u64::MAX as i128)
                     .ok_or_else(|| c.error("Number exceeds unsigned 64-bit range", start))?;
                 TokenKind::Number(number)
-            }
+            },
             ch if ch.is_alphanumeric() || ch == '_' || ch == '.' => {
-                while c
-                    .peek()
-                    .is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '.')
-                {
+                while c.peek().is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '.') {
                     c.bump();
                 }
                 TokenKind::Identifier(source[start.position..c.position].into())
-            }
+            },
             _ => return Err(c.error(&format!("Unexpected char '{ch}'"), start)),
         };
         tokens.push(c.token(kind, start));

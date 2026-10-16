@@ -1,5 +1,7 @@
 use object::{ObjectFile, ObjectFormat, ObjectSymbol, SectionKind, SymbolBinding};
+
 use std::process;
+
 use std::time::Instant;
 
 use super::debug::dump_bytes;
@@ -28,22 +30,19 @@ pub fn run(args: Vec<String>) {
             "--help" => {
                 print_help();
                 return;
-            }
+            },
             "-o" => {
                 if output.is_some() {
                     eprintln!("Error: duplicate -o option");
                     process::exit(1);
                 }
-                let path = args
-                    .get(i + 1)
-                    .filter(|s| !s.starts_with('-'))
-                    .unwrap_or_else(|| {
-                        eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
-                        process::exit(1);
-                    });
+                let path = args.get(i + 1).filter(|s| !s.starts_with('-')).unwrap_or_else(|| {
+                    eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
+                    process::exit(1);
+                });
                 output = Some(path.clone());
                 i += 1;
-            }
+            },
             "--debug-whale" => debug_mode = true,
             "--max-input" => {
                 if max_input.is_some() {
@@ -59,7 +58,7 @@ pub fn run(args: Vec<String>) {
                     process::exit(1);
                 }));
                 i += 1;
-            }
+            },
             "--bytes" => show_bytes = true,
             "--dump-hex" => dump_hex = true,
             "--dump-bin" => dump_bin = true,
@@ -68,14 +67,11 @@ pub fn run(args: Vec<String>) {
             "--trace" => trace_enable = true,
             s if input.is_none() && !s.starts_with('-') => input = Some(s.to_string()),
             s => {
-                let kind = if s.starts_with('-') {
-                    "unknown option"
-                } else {
-                    "unexpected argument"
-                };
+                let kind =
+                    if s.starts_with('-') { "unknown option" } else { "unexpected argument" };
                 eprintln!("Error: {kind}: {s}");
                 process::exit(1);
-            }
+            },
         }
         i += 1;
     }
@@ -94,14 +90,12 @@ pub fn run(args: Vec<String>) {
     }
     let start_time = Instant::now();
 
-    let bytes = super::input::read(
-        input.as_ref(),
-        max_input.unwrap_or(super::input::OBJECT_INPUT_BYTES),
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("Failed to read input: {}", e);
-        process::exit(1);
-    });
+    let bytes =
+        super::input::read(input.as_ref(), max_input.unwrap_or(super::input::OBJECT_INPUT_BYTES))
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to read input: {}", e);
+                process::exit(1);
+            });
 
     let mut obj = ObjectFile::new(ObjectFormat::ELF64);
     let sec_idx = obj.add_section(".text", SectionKind::Text, 16);
@@ -129,9 +123,7 @@ pub fn run(args: Vec<String>) {
     });
 
     if debug_mode && (show_bytes || dump_hex || dump_bin || dump_json) {
-        dump_bytes(
-            "object", &out_bytes, show_bytes, dump_hex, dump_bin, dump_json,
-        );
+        dump_bytes("object", &out_bytes, show_bytes, dump_hex, dump_bin, dump_json);
     }
 
     if debug_mode && show_stats {

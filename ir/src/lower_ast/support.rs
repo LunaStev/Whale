@@ -20,7 +20,7 @@ pub(crate) fn socket_type_to_whale(t: &frontend::TypeRef) -> Result<Type, LowerE
 
         S::Opaque(name) => {
             return Err(LowerError::UnsupportedType(format!("opaque {name}")));
-        }
+        },
     })
 }
 
@@ -41,11 +41,7 @@ pub(crate) fn int_type(bits: u16, signed: bool) -> Result<Type, LowerError> {
         (64, false) => Type::U64,
         (128, false) => Type::U128,
 
-        _ => {
-            return Err(LowerError::UnsupportedType(format!(
-                "int bits={bits} signed={signed}"
-            )))
-        }
+        _ => return Err(LowerError::UnsupportedType(format!("int bits={bits} signed={signed}"))),
     })
 }
 
@@ -91,10 +87,7 @@ pub(crate) fn map_binop(op: frontend::BinOpRef, ty: &Type) -> Result<BinOp, Lowe
 }
 
 fn is_signed(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-    )
+    matches!(ty, Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
 }
 
 fn is_float(ty: &Type) -> bool {
@@ -140,10 +133,8 @@ pub(crate) fn map_cmp(op: frontend::CmpOpRef, ty: &Type) -> Result<CmpOp, LowerE
             });
         }
 
-        let signed = matches!(
-            ty,
-            Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-        );
+        let signed =
+            matches!(ty, Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128);
 
         return Ok(match (op, signed) {
             (frontend::CmpOpRef::Eq, _) => CmpOp::Eq,
@@ -168,11 +159,7 @@ pub(crate) fn signature_to_whale(
     sig: &frontend::SignatureRef,
 ) -> Result<crate::FunctionSignature, LowerError> {
     let sig = crate::FunctionSignature {
-        params: sig
-            .params
-            .iter()
-            .map(socket_type_to_whale)
-            .collect::<Result<_, _>>()?,
+        params: sig.params.iter().map(socket_type_to_whale).collect::<Result<_, _>>()?,
         ret: socket_type_to_whale(&sig.ret)?,
         convention: sig.convention,
         variadic: sig.variadic,

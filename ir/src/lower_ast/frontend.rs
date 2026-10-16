@@ -96,29 +96,15 @@ pub enum Stmt {
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Located {
-        annotation: crate::SourceAnnotation,
-        expression: Box<Expr>,
-    },
+    Located { annotation: crate::SourceAnnotation, expression: Box<Expr> },
     BitNot(Box<Expr>),
     FunctionRef(String),
     NullFunction(SignatureRef),
-    Call {
-        callee: CalleeRef,
-        args: Vec<Expr>,
-    },
+    Call { callee: CalleeRef, args: Vec<Expr> },
     Var(String),
     Lit(Lit),
-    Binary {
-        left: Box<Expr>,
-        op: BinOpRef,
-        right: Box<Expr>,
-    },
-    Cmp {
-        left: Box<Expr>,
-        op: CmpOpRef,
-        right: Box<Expr>,
-    },
+    Binary { left: Box<Expr>, op: BinOpRef, right: Box<Expr> },
+    Cmp { left: Box<Expr>, op: CmpOpRef, right: Box<Expr> },
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
@@ -138,15 +124,8 @@ pub enum CmpOpRef {
 #[derive(Clone, Debug)]
 pub enum Lit {
     Bool(bool),
-    Int {
-        bits: u16,
-        signed: bool,
-        value: String,
-    },
-    Float {
-        bits: u16,
-        value: String,
-    },
+    Int { bits: u16, signed: bool, value: String },
+    Float { bits: u16, value: String },
 }
 
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
@@ -176,6 +155,7 @@ pub struct SignatureRef {
     pub convention: crate::CallingConvention,
     pub variadic: bool,
 }
+
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
@@ -185,6 +165,7 @@ pub struct FunctionDeclaration {
     pub linkage: crate::Linkage,
     pub link_name: Option<String>,
 }
+
 #[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]

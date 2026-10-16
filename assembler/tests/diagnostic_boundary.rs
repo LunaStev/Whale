@@ -1,10 +1,10 @@
 use whale_diagnostic::{Context, ToDiagnostic};
+
 #[test]
 fn stable_assembler_codes_preserve_primary_and_related_utf8_ranges() {
     let input = "section .text\nname:\n ret\nname:\n ret\n";
-    let error = assembler::assemble_named("경로/input.asm", input, &assembler::isa::AMD64)
-        .err()
-        .unwrap();
+    let error =
+        assembler::assemble_named("경로/input.asm", input, &assembler::isa::AMD64).err().unwrap();
     let diagnostic = error.diagnostic();
     assert_eq!(
         (diagnostic.component, diagnostic.phase, diagnostic.code),
@@ -13,13 +13,7 @@ fn stable_assembler_codes_preserve_primary_and_related_utf8_ranges() {
     let locations = diagnostic
         .contexts
         .iter()
-        .filter_map(|c| {
-            if let Context::Source(s) = c {
-                Some(s)
-            } else {
-                None
-            }
-        })
+        .filter_map(|c| if let Context::Source(s) = c { Some(s) } else { None })
         .collect::<Vec<_>>();
     assert_eq!(locations.len(), 2);
     assert_eq!(locations[0].source, "경로/input.asm");
@@ -34,8 +28,5 @@ fn stable_assembler_codes_preserve_primary_and_related_utf8_ranges() {
         .unwrap()
         .diagnostic();
     assert_eq!(syntax.phase, "parse");
-    assert!(syntax
-        .contexts
-        .iter()
-        .any(|c| matches!(c,Context::Source(s)if s.source=="bad.asm")));
+    assert!(syntax.contexts.iter().any(|c| matches!(c,Context::Source(s)if s.source=="bad.asm")));
 }

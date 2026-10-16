@@ -21,16 +21,10 @@ impl Section {
     /// Logical memory extent. Legacy zero-valued BSS data remains accepted.
     pub fn memory_size(&self) -> Result<u64, String> {
         if self.kind != SectionKind::Bss && self.zero_fill != 0 {
-            return Err(format!(
-                "section {:?}: zero_fill is only valid for BSS",
-                self.name
-            ));
+            return Err(format!("section {:?}: zero_fill is only valid for BSS", self.name));
         }
         if self.kind == SectionKind::Bss && self.data.iter().any(|b| *b != 0) {
-            return Err(format!(
-                "BSS section {:?} has a nonzero initializer",
-                self.name
-            ));
+            return Err(format!("BSS section {:?} has a nonzero initializer", self.name));
         }
         (self.data.len() as u64)
             .checked_add(self.zero_fill)

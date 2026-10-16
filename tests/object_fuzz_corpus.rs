@@ -1,5 +1,6 @@
 #[path = "../fuzz/support.rs"]
 mod fuzz;
+
 #[test]
 fn binary_elf_is_checked_before_utf8_and_sparse_bss_is_not_materialized() {
     let valid = include_bytes!("../fuzz/corpus/object/nasm-helper.elf-data").to_vec();
@@ -16,11 +17,9 @@ fn binary_elf_is_checked_before_utf8_and_sparse_bss_is_not_materialized() {
     ] {
         assert!(!fuzz::check(fuzz::Target::Object, bad));
     }
-    assert!(!fuzz::check(
-        fuzz::Target::Object,
-        &vec![0; fuzz::MAX_INPUT + 1]
-    ));
+    assert!(!fuzz::check(fuzz::Target::Object, &vec![0; fuzz::MAX_INPUT + 1]));
 }
+
 #[test]
 fn generated_public_models_validate_or_roundtrip_without_losing_link_metadata() {
     let mut accepted = 0;

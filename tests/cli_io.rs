@@ -6,16 +6,10 @@ use std::{
 #[test]
 fn version_forms_use_package_metadata() {
     for option in ["--version", "-V"] {
-        let result = Command::new(env!("CARGO_BIN_EXE_whale"))
-            .arg(option)
-            .output()
-            .unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_whale")).arg(option).output().unwrap();
         assert!(result.status.success(), "{result:?}");
         assert!(result.stderr.is_empty());
-        assert_eq!(
-            result.stdout,
-            format!("whale {}\n", env!("CARGO_PKG_VERSION")).as_bytes()
-        );
+        assert_eq!(result.stdout, format!("whale {}\n", env!("CARGO_PKG_VERSION")).as_bytes());
     }
 }
 
@@ -73,9 +67,7 @@ fn artifact_input_budgets_check_boundaries_and_preserve_output() {
 fn non_utf8_arguments_fail_normally_without_modifying_files() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
     let directory = tempfile::tempdir().unwrap();
-    let input = directory
-        .path()
-        .join(OsString::from_vec(b"input\xff".to_vec()));
+    let input = directory.path().join(OsString::from_vec(b"input\xff".to_vec()));
     let output = directory.path().join("output.o");
     // Linux accepts raw filename bytes; APFS rejects the fixture itself with
     // EILSEQ. In either case the CLI must diagnose raw OS arguments before I/O.
@@ -85,10 +77,7 @@ fn non_utf8_arguments_fail_normally_without_modifying_files() {
         Err(error) => panic!("failed to create non-UTF-8 filename fixture: {error}"),
     };
     fs::write(&output, b"previous").unwrap();
-    for invalid in [
-        input.as_os_str().to_owned(),
-        OsString::from_vec(b"--bad\xff".to_vec()),
-    ] {
+    for invalid in [input.as_os_str().to_owned(), OsString::from_vec(b"--bad\xff".to_vec())] {
         let result = Command::new(env!("CARGO_BIN_EXE_whale"))
             .arg("object")
             .arg(invalid)
@@ -151,10 +140,7 @@ fn closed_ir_stdout_exits_without_a_panic() {
 #[cfg(target_os = "linux")]
 #[test]
 fn ordinary_ir_stdout_failure_is_a_diagnostic() {
-    let full = fs::OpenOptions::new()
-        .write(true)
-        .open("/dev/full")
-        .unwrap();
+    let full = fs::OpenOptions::new().write(true).open("/dev/full").unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_whale"))
         .args(["ir", "--help"])
         .stdout(full)
@@ -162,9 +148,6 @@ fn ordinary_ir_stdout_failure_is_a_diagnostic() {
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
     let diagnostic = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        diagnostic.contains("failed to write stdout"),
-        "{diagnostic}"
-    );
+    assert!(diagnostic.contains("failed to write stdout"), "{diagnostic}");
     assert!(!diagnostic.contains("panicked"));
 }

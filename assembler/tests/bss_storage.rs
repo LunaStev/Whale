@@ -12,10 +12,7 @@ fn large_bss_and_section_reentry_keep_logical_label_offsets_without_payload() {
     assert!(bss.relocs.is_empty());
     assert_eq!(bss.zero_fill, (1 << 40) + 18);
     for (name, offset) in [("start", 0), ("middle", 1 << 40), ("end", (1 << 40) + 18)] {
-        assert_eq!(
-            out.symbols.iter().find(|s| s.name == name).unwrap().offset,
-            offset
-        );
+        assert_eq!(out.symbols.iter().find(|s| s.name == name).unwrap().offset, offset);
     }
     let text = out.sections.iter().find(|s| s.name == ".text").unwrap();
     assert_eq!(text.data, [0xc3]);
@@ -33,10 +30,7 @@ fn bss_rejects_payloads_relocations_instructions_and_reservation_overflow() {
         "resq 9223372036854775807",
         "resb 9223372036854775807\nresb 9223372036854775807\nresb 2",
     ] {
-        assert!(
-            assemble(&format!("section .bss\n{body}\n"), &AMD64).is_err(),
-            "{body}"
-        );
+        assert!(assemble(&format!("section .bss\n{body}\n"), &AMD64).is_err(), "{body}");
     }
     let out = assemble("section .data\nresb 3\ndb 1\n", &AMD64).unwrap();
     assert_eq!(out.sections[1].data, [0, 0, 0, 1]);

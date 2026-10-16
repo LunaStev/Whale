@@ -2,12 +2,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
+
 fn manifest(source: &str) -> Result<BTreeMap<&str, (&str, &str, &str)>, String> {
     let mut entries = BTreeMap::new();
-    for line in source
-        .lines()
-        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
-    {
+    for line in source.lines().filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
         let columns: Vec<_> = line.split('\t').collect();
         if columns.len() != 4 || columns.iter().any(|c| c.is_empty()) {
             return Err("fixture manifest requires four nonempty columns".into());
@@ -20,15 +18,12 @@ fn manifest(source: &str) -> Result<BTreeMap<&str, (&str, &str, &str)>, String> 
             return Err("invalid fixture path".into());
         }
         match outcome {
-            "supported-positive" if diagnostic == "-" => {}
-            "intended-negative" if diagnostic != "-" => {}
-            "future-syntax" if diagnostic != "-" && purpose.contains('#') => {}
+            "supported-positive" if diagnostic == "-" => {},
+            "intended-negative" if diagnostic != "-" => {},
+            "future-syntax" if diagnostic != "-" && purpose.contains('#') => {},
             _ => return Err("invalid fixture expectation or missing feature issue".into()),
         }
-        if entries
-            .insert(path, (outcome, diagnostic, purpose))
-            .is_some()
-        {
+        if entries.insert(path, (outcome, diagnostic, purpose)).is_some() {
             return Err("duplicate fixture manifest entry".into());
         }
     }
@@ -37,22 +32,18 @@ fn manifest(source: &str) -> Result<BTreeMap<&str, (&str, &str, &str)>, String> 
     }
     Ok(entries)
 }
+
 fn discover(root: &Path, at: &Path, out: &mut BTreeSet<String>) {
     for e in std::fs::read_dir(at).unwrap() {
         let p = e.unwrap().path();
         if p.is_dir() {
             discover(root, &p, out);
         } else if p.extension().is_some_and(|e| e == "asm") {
-            out.insert(
-                p.strip_prefix(root)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .replace('\\', "/"),
-            );
+            out.insert(p.strip_prefix(root).unwrap().to_str().unwrap().replace('\\', "/"));
         }
     }
 }
+
 #[test]
 fn every_historical_fixture_has_an_executed_classification() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("test");
@@ -82,6 +73,7 @@ fn every_historical_fixture_has_an_executed_classification() {
         }
     }
 }
+
 #[test]
 fn empty_duplicate_skipped_and_undefined_manifest_contracts_are_rejected() {
     for source in [

@@ -1,5 +1,7 @@
 use reverse::image::Image;
+
 use std::{path::Path, process};
+
 struct Options {
     input: String,
     output: Option<String>,
@@ -13,9 +15,11 @@ struct Options {
     max_work: u64,
     max_workspace: usize,
 }
+
 pub fn disasm(args: Vec<String>) {
     run("disasm", args);
 }
+
 pub fn reverse(mut args: Vec<String>) {
     if args.is_empty() || args == ["--help"] {
         help();
@@ -24,6 +28,7 @@ pub fn reverse(mut args: Vec<String>) {
     let mode = args.remove(0);
     run(&mode, args);
 }
+
 fn run(mode: &str, args: Vec<String>) {
     if args == ["--help"] {
         help();
@@ -34,15 +39,15 @@ fn run(mode: &str, args: Vec<String>) {
         process::exit(1);
     }
 }
+
 fn number(value: &str) -> Result<u64, String> {
     if let Some(hex) = value.strip_prefix("0x") {
         u64::from_str_radix(hex, 16).map_err(|_| "invalid hexadecimal address".into())
     } else {
-        value
-            .parse()
-            .map_err(|_| "invalid unsigned address/count".into())
+        value.parse().map_err(|_| "invalid unsigned address/count".into())
     }
 }
+
 fn options(args: Vec<String>, mode: &str) -> Result<Options, String> {
     let mut input = None;
     let mut output = None;
@@ -60,19 +65,19 @@ fn options(args: Vec<String>, mode: &str) -> Result<Options, String> {
                     return Err("duplicate --amd64".into());
                 }
                 amd64 = true;
-            }
+            },
             "--raw" => {
                 if raw {
                     return Err("duplicate --raw".into());
                 }
                 raw = true;
-            }
+            },
             "--json" => {
                 if structured {
                     return Err("duplicate --json".into());
                 }
                 structured = true;
-            }
+            },
             flag @ ("-o" | "--base" | "--entry" | "--max-input" | "--max-output"
             | "--max-instructions" | "--max-work" | "--max-workspace") => {
                 let v = args
@@ -85,25 +90,25 @@ fn options(args: Vec<String>, mode: &str) -> Result<Options, String> {
                         if output.replace(v).is_some() {
                             return Err("duplicate -o".into());
                         }
-                    }
+                    },
                     "--base" => {
                         if base.replace(number(&v)?).is_some() {
                             return Err("duplicate --base".into());
                         }
-                    }
+                    },
                     "--entry" => {
                         if entry.replace(v).is_some() {
                             return Err("duplicate --entry".into());
                         }
-                    }
+                    },
                     _ => {
                         if limits.insert(flag.to_owned(), number(&v)?).is_some() {
                             return Err(format!("duplicate {flag}"));
                         }
-                    }
+                    },
                 }
                 i += 1;
-            }
+            },
             value if !value.starts_with('-') && input.is_none() => input = Some(value.into()),
             value => return Err(format!("unknown option or surplus argument {value}")),
         }
@@ -154,6 +159,7 @@ fn options(args: Vec<String>, mode: &str) -> Result<Options, String> {
         max_workspace,
     })
 }
+
 fn execute(mode: &str, args: Vec<String>) -> Result<(), String> {
     if !matches!(mode, "disasm" | "inspect" | "cfg" | "xrefs") {
         return Err(format!("unknown reverse command {mode}"));
@@ -175,30 +181,22 @@ fn execute(mode: &str, args: Vec<String>) -> Result<(), String> {
         return Err("reverse output byte limit exceeded".into());
     }
     if let Some(output) = &options.output {
-        super::output::publish(
-            Path::new(&options.input),
-            Path::new(output),
-            rendered.as_bytes(),
-        )
-        .map_err(|e| e.to_string())?;
+        super::output::publish(Path::new(&options.input), Path::new(output), rendered.as_bytes())
+            .map_err(|e| e.to_string())?;
     } else {
         use std::io::Write;
-        std::io::stdout()
-            .lock()
-            .write_all(rendered.as_bytes())
-            .map_err(|e| e.to_string())?;
+        std::io::stdout().lock().write_all(rendered.as_bytes()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
+
 fn seed(image: &Image<'_>, entry: &str) -> Result<(usize, usize), String> {
     let named: Vec<_> = image.symbols.iter().filter(|s| s.name == entry).collect();
     if named.len() > 1 {
         return Err("entry symbol name is ambiguous".into());
     }
     if let Some(symbol) = named.first() {
-        let region = symbol
-            .region
-            .ok_or("entry symbol is not in executable bytes")?;
+        let region = symbol.region.ok_or("entry symbol is not in executable bytes")?;
         let offset =
             usize::try_from(symbol.offset).map_err(|_| "entry offset exceeds host capacity")?;
         if offset >= image.regions[region].bytes.len() {
@@ -209,6 +207,7 @@ fn seed(image: &Image<'_>, entry: &str) -> Result<(usize, usize), String> {
     let address = number(entry).map_err(|_| format!("entry symbol {entry:?} not found"))?;
     address_seed(image, address)
 }
+
 fn address_seed(image: &Image<'_>, address: u64) -> Result<(usize, usize), String> {
     let candidates: Vec<_> = image
         .regions
@@ -220,6 +219,7 @@ fn address_seed(image: &Image<'_>, address: u64) -> Result<(usize, usize), Strin
     }
     Ok((candidates[0].id, (address - candidates[0].address) as usize))
 }
+
 fn listing(image: &Image<'_>, options: &Options) -> Result<String, String> {
     if !reverse::backend_available() {
         return Err(reverse::DecodeError::CoreUnavailable.to_string());
@@ -227,11 +227,7 @@ fn listing(image: &Image<'_>, options: &Options) -> Result<String, String> {
     let mut output =
         super::reverse_render::ListingOutput::new(image, options.json, options.max_output)?;
     let mut count = 0usize;
-    let requested = options
-        .entry
-        .as_deref()
-        .map(|entry| seed(image, entry))
-        .transpose()?;
+    let requested = options.entry.as_deref().map(|entry| seed(image, entry)).transpose()?;
     for r in &image.regions {
         if requested.is_some_and(|(id, _)| id != r.id) {
             continue;
@@ -247,7 +243,7 @@ fn listing(image: &Image<'_>, options: &Options) -> Result<String, String> {
                 Ok(inst) => {
                     output.instruction(image, r, &inst)?;
                     offset += inst.length as usize;
-                }
+                },
                 Err(
                     error @ (reverse::DecodeError::Invalid { .. }
                     | reverse::DecodeError::Truncated { .. }
@@ -256,13 +252,14 @@ fn listing(image: &Image<'_>, options: &Options) -> Result<String, String> {
                 ) => {
                     output.data(r, offset, &error)?;
                     offset += 1;
-                }
+                },
                 Err(error) => return Err(error.to_string()),
             }
         }
     }
     output.finish()
 }
+
 fn graph(image: &Image<'_>, options: &Options, mode: &str) -> Result<String, String> {
     use reverse::{CfgLimits, CfgTarget, FlowOverride};
     if !reverse::backend_available() {
@@ -304,9 +301,7 @@ fn graph(image: &Image<'_>, options: &Options, mode: &str) -> Result<String, Str
         max_input_bytes: usize::try_from(options.max_input).unwrap_or(usize::MAX),
         max_instructions: options.max_instructions.min(length),
         max_blocks: defaults.max_blocks.min(length),
-        max_edges: defaults
-            .max_edges
-            .min(length.saturating_mul(4).max(overlays.len())),
+        max_edges: defaults.max_edges.min(length.saturating_mul(4).max(overlays.len())),
         max_stops: defaults.max_stops.min(length),
         max_work: options.max_work,
         max_workspace_bytes: options.max_workspace,
@@ -327,6 +322,7 @@ fn graph(image: &Image<'_>, options: &Options, mode: &str) -> Result<String, Str
         },
     )
 }
+
 fn help() {
     println!("Usage:\n  whale disasm [--amd64] <file.o|executable> [--json] [-o PATH]\n  whale disasm --raw --amd64 --base ADDRESS <bytes>\n  whale reverse inspect <file.o|executable> [--json]\n  whale reverse cfg|xrefs <file> [--entry NAME|ADDRESS] [--json]\n\nAMD64 long mode, supported integer/scalar SSE forms only.\n--max-input N          input bytes (default 8388608; cap 268435456)\n--max-output N         output bytes (default 16777216; cap 268435456)\n--max-instructions N   records (listing 100000; CFG 16384; cap 1000000)\n--max-work N           CFG shared work (default 67108864; cap 1073741824)\n--max-workspace N      CFG bytes (default 134217728; cap 536870912)\nUnknown listing bytes are data records; CFG stops at unknown encodings.\nCFG/xrefs analyze one region from ELF entry, raw base or _start; --entry overrides.\nET_REL without _start requires --entry. Relocations retain symbolic targets.\nExecutable listing starts at its entry in the containing executable file range.");
 }

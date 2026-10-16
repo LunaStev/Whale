@@ -1,46 +1,25 @@
 use assembler::{assemble, assemble_with_limits, isa::AMD64, AsmSectionKind, AssemblyLimits};
+
 fn error(src: &str) -> String {
-    assemble(src, &AMD64)
-        .err()
-        .unwrap_or_else(|| panic!("accepted {src}"))
-        .to_string()
+    assemble(src, &AMD64).err().unwrap_or_else(|| panic!("accepted {src}")).to_string()
 }
+
 #[test]
 fn explicit_kinds_survive_reentry_and_custom_bss_never_allocates_payloads() {
     let out=assemble("section .code,text\nnop\nalign 32\nend:ret\nsection .readonly,rodata\ndb 7\nalign 16\nsection .mutable,data\ndb 8\nalign 8\nsection .sparse,bss\nresb 1099511627777\nalign 64\nbss_end:\nsection .code\nret",&AMD64).unwrap();
     let sec = |n: &str| out.sections.iter().find(|s| s.name == n).unwrap();
-    assert_eq!(
-        (sec(".code").kind, sec(".code").align),
-        (AsmSectionKind::Text, 32)
-    );
-    assert_eq!(
-        sec(".code").data,
-        [vec![0x90; 32], vec![0xc3, 0xc3]].concat()
-    );
+    assert_eq!((sec(".code").kind, sec(".code").align), (AsmSectionKind::Text, 32));
+    assert_eq!(sec(".code").data, [vec![0x90; 32], vec![0xc3, 0xc3]].concat());
     assert_eq!(sec(".readonly").kind, AsmSectionKind::ReadOnlyData);
     assert_eq!(sec(".readonly").data, [vec![7], vec![0; 15]].concat());
     assert_eq!(sec(".mutable").data, [8, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(
-        (
-            sec(".sparse").kind,
-            sec(".sparse").align,
-            sec(".sparse").zero_fill
-        ),
+        (sec(".sparse").kind, sec(".sparse").align, sec(".sparse").zero_fill),
         (AsmSectionKind::Bss, 64, (1 << 40) + 64)
     );
     assert!(sec(".sparse").data.is_empty());
-    assert_eq!(
-        out.symbols.iter().find(|s| s.name == "end").unwrap().offset,
-        32
-    );
-    assert_eq!(
-        out.symbols
-            .iter()
-            .find(|s| s.name == "bss_end")
-            .unwrap()
-            .offset,
-        (1 << 40) + 64
-    );
+    assert_eq!(out.symbols.iter().find(|s| s.name == "end").unwrap().offset, 32);
+    assert_eq!(out.symbols.iter().find(|s| s.name == "bss_end").unwrap().offset, (1 << 40) + 64);
     for src in [
         "section .x,text\nsection .x,data",
         "section .x,bss\nsection .x,rodata",
@@ -55,24 +34,14 @@ fn explicit_kinds_survive_reentry_and_custom_bss_never_allocates_payloads() {
         error(src);
     }
 }
+
 #[test]
 fn alignment_validation_and_budgets_precede_materialization() {
-    for value in [
-        "0",
-        "3",
-        "-1",
-        "18446744073709551615",
-        "\"8\"",
-        "missing",
-        "8,16",
-    ] {
+    for value in ["0", "3", "-1", "18446744073709551615", "\"8\"", "missing", "8,16"] {
         error(&format!("align {value}"));
     }
     assert!(error("section .sparse,bss\nresb 18446744073709551615\nalign 2").contains("overflow"));
-    let limit = AssemblyLimits {
-        max_output_bytes: 8,
-        ..Default::default()
-    };
+    let limit = AssemblyLimits { max_output_bytes: 8, ..Default::default() };
     assert!(assemble_with_limits("nop\nalign 16", &AMD64, &limit)
         .err()
         .unwrap()
@@ -86,28 +55,24 @@ fn alignment_validation_and_budgets_precede_materialization() {
     .unwrap();
     assert_eq!(out.sections[1].zero_fill, 1 << 63);
     assert!(out.sections[1].data.is_empty());
-    assert_eq!(
-        assemble("A equ 16\ndb 1\nalign A\nx:", &AMD64)
-            .unwrap()
-            .symbols[0]
-            .offset,
-        16
-    );
+    assert_eq!(assemble("A equ 16\ndb 1\nalign A\nx:", &AMD64).unwrap().symbols[0].offset, 16);
 }
+
 fn target(data: &[u8], at: usize) -> usize {
     match data[at] {
         0xeb | 0x74 => (at as i64 + 2 + data[at + 1] as i8 as i64) as usize,
         0xe9 => {
             (at as i64 + 5 + i32::from_le_bytes(data[at + 1..at + 5].try_into().unwrap()) as i64)
                 as usize
-        }
+        },
         0x0f => {
             (at as i64 + 6 + i32::from_le_bytes(data[at + 2..at + 6].try_into().unwrap()) as i64)
                 as usize
-        }
+        },
         _ => panic!("branch expected"),
     }
 }
+
 #[test]
 fn aligned_forward_and_backward_branches_converge_to_independently_decoded_targets() {
     for mnemonic in ["jmp", "je"] {

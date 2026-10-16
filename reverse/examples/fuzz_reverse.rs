@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Bounded, deterministic native Wave decoder/CFG mutation and replay probe.
 use reverse::*;
+
 use std::{
     env, fs,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -8,8 +9,11 @@ use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
+
 const MAX_BYTES: usize = 128;
+
 const MAX_CASES: usize = 100_000;
+
 const FIXTURES: &[&[u8]] = &[
     &[0x90, 0xc3],
     &[0x48, 0x89, 0xe5, 0x48, 0x83, 0xec, 8, 0xc3],
@@ -22,6 +26,7 @@ const FIXTURES: &[&[u8]] = &[
     &[0x40, 0xb4, 1, 0xc3],
     &[0x66, 0x68, 0, 0x80, 0xc3],
 ];
+
 fn require(ok: bool, reason: &str) -> Result<(), String> {
     if ok {
         Ok(())
@@ -29,6 +34,7 @@ fn require(ok: bool, reason: &str) -> Result<(), String> {
         Err(reason.into())
     }
 }
+
 fn instruction(input: &[u8], offset: usize) -> Result<Option<Instruction>, String> {
     let result = decode(input, offset);
     require(result == decode(input, offset), "nondeterministic decoder")?;
@@ -43,17 +49,9 @@ fn instruction(input: &[u8], offset: usize) -> Result<Option<Instruction>, Strin
         Err(e) => return Err(format!("unexpected decoder failure: {e}")),
     };
     let length = usize::from(decoded.length);
-    require(
-        decoded.offset == offset && (1..=15).contains(&length),
-        "decoder offset/length",
-    )?;
-    let bytes = input
-        .get(offset..offset + length)
-        .ok_or("decoder span outside input")?;
-    require(
-        decoded.original_bytes() == bytes,
-        "decoder changed original bytes",
-    )?;
+    require(decoded.offset == offset && (1..=15).contains(&length), "decoder offset/length")?;
+    let bytes = input.get(offset..offset + length).ok_or("decoder span outside input")?;
+    require(decoded.original_bytes() == bytes, "decoder changed original bytes")?;
     let enc = &decoded.encoding;
     require(
         usize::from(enc.opcode_offset) + usize::from(enc.opcode_len) <= length
@@ -61,33 +59,23 @@ fn instruction(input: &[u8], offset: usize) -> Result<Option<Instruction>, Strin
         "opcode span",
     )?;
     for byte in [enc.modrm, enc.sib].into_iter().flatten() {
-        require(
-            bytes.get(usize::from(byte.offset)) == Some(&byte.value),
-            "encoding byte",
-        )?;
+        require(bytes.get(usize::from(byte.offset)) == Some(&byte.value), "encoding byte")?;
     }
     for field in [enc.displacement, enc.immediate].into_iter().flatten() {
         let start = usize::from(field.offset);
         let width = usize::from(field.width);
         require((1..=8).contains(&width), "encoding field width")?;
-        let raw = bytes
-            .get(start..start + width)
-            .ok_or("encoding field outside instruction")?;
+        let raw = bytes.get(start..start + width).ok_or("encoding field outside instruction")?;
         let mut padded = [0; 8];
         padded[..width].copy_from_slice(raw);
-        require(
-            u64::from_le_bytes(padded) == field.bits,
-            "encoding field raw bits",
-        )?;
+        require(u64::from_le_bytes(padded) == field.bits, "encoding field raw bits")?;
     }
     let mut padded = input.to_vec();
     padded.extend_from_slice(&[0x90; 15]);
-    require(
-        decode(&padded, offset) == Ok(decoded.clone()),
-        "suffix changed complete instruction",
-    )?;
+    require(decode(&padded, offset) == Ok(decoded.clone()), "suffix changed complete instruction")?;
     Ok(Some(decoded))
 }
+
 fn limits() -> CfgLimits {
     CfgLimits {
         max_input_bytes: MAX_BYTES,
@@ -100,6 +88,7 @@ fn limits() -> CfgLimits {
         follow_calls: true,
     }
 }
+
 fn properties(bytes: &[u8]) -> Result<(), String> {
     require(bytes.len() <= MAX_BYTES, "probe input bound")?;
     for offset in 0..=bytes.len() {
@@ -108,15 +97,9 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
     if FIXTURES.contains(&bytes) {
         // This check is also determined by the bytes, so replay includes the
         // positive capability guards and cannot succeed on an error-only core.
-        require(
-            decode(bytes, 0).is_ok(),
-            "valid seed fixture did not decode",
-        )?;
+        require(decode(bytes, 0).is_ok(), "valid seed fixture did not decode")?;
         let graph = analyze(bytes, 0x1000, &[0], &[], limits()).map_err(|e| e.to_string())?;
-        require(
-            !graph.instructions.is_empty(),
-            "valid seed fixture has empty graph",
-        )?;
+        require(!graph.instructions.is_empty(), "valid seed fixture has empty graph")?;
     }
     // All graph parameters are pure functions of the saved bytes: a .bin file
     // alone is sufficient to reproduce the complete decoder and CFG case.
@@ -124,11 +107,7 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
     if let Some(last) = bytes.last() {
         seeds.extend([0, usize::from(*last) % bytes.len()]);
     }
-    let base = if bytes.first().is_some_and(|b| b & 4 != 0) {
-        u64::MAX - 256
-    } else {
-        0x1000
-    };
+    let base = if bytes.first().is_some_and(|b| b & 4 != 0) { u64::MAX - 256 } else { 0x1000 };
     let mut overlays = Vec::new();
     if bytes.first().is_some_and(|b| b & 1 != 0) {
         if let Ok(i) = decode(bytes, 0) {
@@ -145,27 +124,15 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
             }
         }
     }
-    let l = CfgLimits {
-        follow_calls: bytes.first().is_none_or(|b| b & 2 == 0),
-        ..limits()
-    };
+    let l = CfgLimits { follow_calls: bytes.first().is_none_or(|b| b & 2 == 0), ..limits() };
     let result = analyze(bytes, base, &seeds, &overlays, l);
-    require(
-        result == analyze(bytes, base, &seeds, &overlays, l),
-        "nondeterministic CFG",
-    )?;
+    require(result == analyze(bytes, base, &seeds, &overlays, l), "nondeterministic CFG")?;
     let graph = result.map_err(|e| format!("unexpected bounded CFG failure: {e}"))?;
-    require(
-        graph.base == base && graph.work <= l.max_work,
-        "CFG base/work accounting",
-    )?;
+    require(graph.base == base && graph.work <= l.max_work, "CFG base/work accounting")?;
     let mut owners = vec![None; bytes.len()];
     let mut membership = vec![0; graph.instructions.len()];
     for (index, i) in graph.instructions.iter().enumerate() {
-        require(
-            instruction(bytes, i.offset)? == Some(i.clone()),
-            "CFG instruction mismatch",
-        )?;
+        require(instruction(bytes, i.offset)? == Some(i.clone()), "CFG instruction mismatch")?;
         let end = i.offset + usize::from(i.length);
         for owner in owners.get_mut(i.offset..end).ok_or("CFG span")? {
             require(owner.is_none(), "overlapping committed instructions")?;
@@ -180,10 +147,7 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
         )?;
         let mut cursor = block.offset;
         for index in &block.instruction_indices {
-            let i = graph
-                .instructions
-                .get(*index)
-                .ok_or("block instruction index")?;
+            let i = graph.instructions.get(*index).ok_or("block instruction index")?;
             require(i.offset == cursor, "noncontiguous block")?;
             cursor += usize::from(i.length);
             membership[*index] += 1;
@@ -191,15 +155,9 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
         require(cursor == block.end, "block end")?;
         previous_end = block.end;
     }
-    require(
-        membership.iter().all(|count| *count == 1),
-        "instruction block partition",
-    )?;
+    require(membership.iter().all(|count| *count == 1), "instruction block partition")?;
     for edge in &graph.edges {
-        require(
-            graph.instructions.iter().any(|i| i.offset == edge.from),
-            "edge source",
-        )?;
+        require(graph.instructions.iter().any(|i| i.offset == edge.from), "edge source")?;
     }
     for stop in &graph.stops {
         if let Some(conflict) = stop.conflict {
@@ -214,19 +172,18 @@ fn properties(bytes: &[u8]) -> Result<(), String> {
     require(
         matches!(
             analyze(bytes, base, &seeds, &overlays, tiny),
-            Err(CfgError::Limit {
-                resource: CfgResource::Work,
-                ..
-            })
+            Err(CfgError::Limit { resource: CfgResource::Work, .. })
         ),
         "zero work must reject atomically",
     )?;
     Ok(())
 }
+
 fn check(bytes: &[u8]) -> Result<(), String> {
     catch_unwind(AssertUnwindSafe(|| properties(bytes)))
         .unwrap_or_else(|_| Err("Rust panic".into()))
 }
+
 fn next(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e3779b97f4a7c15);
     let mut x = *state;
@@ -234,35 +191,35 @@ fn next(state: &mut u64) -> u64 {
     x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);
     x ^ (x >> 31)
 }
+
 fn generated(state: &mut u64, case: usize) -> Vec<u8> {
     let mut bytes = FIXTURES[next(state) as usize % FIXTURES.len()].to_vec();
     if case % 17 == 0 {
         return bytes;
     }
     if case % 7 == 0 {
-        bytes = (0..next(state) as usize % (MAX_BYTES + 1))
-            .map(|_| next(state) as u8)
-            .collect();
+        bytes = (0..next(state) as usize % (MAX_BYTES + 1)).map(|_| next(state) as u8).collect();
     } else {
         for _ in 0..1 + next(state) % 8 {
             let at = next(state) as usize % (bytes.len() + 1);
             match next(state) % 4 {
                 0 if at < bytes.len() => {
                     bytes.remove(at);
-                }
+                },
                 1 if bytes.len() < MAX_BYTES => {
                     bytes.insert(at, next(state) as u8);
-                }
+                },
                 2 if at < bytes.len() => {
                     bytes[at] ^= 1 << (next(state) % 8);
-                }
+                },
                 _ if at < bytes.len() => bytes[at] = next(state) as u8,
-                _ => {}
+                _ => {},
             }
         }
     }
     bytes
 }
+
 fn preserve(
     directory: &Path,
     bytes: &[u8],
@@ -271,19 +228,13 @@ fn preserve(
     case: usize,
     mut fails: impl FnMut(&[u8]) -> bool,
 ) -> io::Result<PathBuf> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let prefix = directory.join(format!("failure-{stamp}-{}", std::process::id()));
     let original = prefix.with_extension("original.bin");
     // Never minimize or overwrite the original. A native signal also leaves
     // current.bin, written before entering Wave, available for exact replay.
     fs::write(&original, bytes)?;
-    fs::write(
-        prefix.with_extension("txt"),
-        format!("seed={seed}\ncase={case}\n{reason}\n"),
-    )?;
+    fs::write(prefix.with_extension("txt"), format!("seed={seed}\ncase={case}\n{reason}\n"))?;
     let mut minimized = bytes.to_vec();
     let mut at = 0;
     for _ in 0..256 {
@@ -301,6 +252,7 @@ fn preserve(
     fs::write(prefix.with_extension("min.bin"), minimized)?;
     Ok(original)
 }
+
 fn prepare_run(
     directory: &Path,
     replay: Option<PathBuf>,
@@ -315,10 +267,7 @@ fn prepare_run(
                 .take((MAX_BYTES + 1) as u64)
                 .read_to_end(&mut bytes)
                 .map_err(|e| e.to_string())?;
-            require(
-                bytes.len() <= MAX_BYTES,
-                "replay exceeds 128-byte probe bound",
-            )?;
+            require(bytes.len() <= MAX_BYTES, "replay exceeds 128-byte probe bound")?;
             Ok(bytes)
         })
         .transpose()?;
@@ -326,6 +275,7 @@ fn prepare_run(
     let current = fs::File::create(directory.join("current.bin")).map_err(|e| e.to_string())?;
     Ok((replay, current))
 }
+
 fn run() -> Result<(), String> {
     let mut seed = 0x5748414c455f5231u64;
     let mut cases = 10_000;
@@ -333,9 +283,8 @@ fn run() -> Result<(), String> {
     let mut directory = PathBuf::from("target/fuzz-reverse");
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
-        let value = args
-            .next()
-            .ok_or("expected --seed N, --cases N, --replay FILE or --out-dir DIR")?;
+        let value =
+            args.next().ok_or("expected --seed N, --cases N, --replay FILE or --out-dir DIR")?;
         match arg.as_str() {
             "--seed" => seed = value.parse().map_err(|_| "invalid decimal seed")?,
             "--cases" => cases = value.parse().map_err(|_| "invalid case count")?,
@@ -344,10 +293,7 @@ fn run() -> Result<(), String> {
             _ => return Err(format!("unknown option {arg}")),
         }
     }
-    require(
-        (1..=MAX_CASES).contains(&cases),
-        "--cases must be in 1..=100000",
-    )?;
+    require((1..=MAX_CASES).contains(&cases), "--cases must be in 1..=100000")?;
     require(
         backend_available(),
         "actual Wave core required; enable wave and WHALE_WAVE_REVERSE_DIR",
@@ -388,6 +334,7 @@ fn run() -> Result<(), String> {
     }
     Ok(())
 }
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("{error}");
@@ -398,18 +345,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn temporary() -> PathBuf {
         let directory = env::temp_dir().join(format!(
             "reverse-probe-test-{}-{}",
             std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
         ));
         fs::create_dir_all(&directory).unwrap();
         directory
     }
+
     #[test]
     fn replay_journal_is_loaded_before_it_is_truncated() {
         let directory = temporary();
@@ -422,6 +368,7 @@ mod tests {
         assert_eq!(fs::read(path).unwrap().len(), MAX_BYTES + 1);
         fs::remove_dir_all(directory).unwrap();
     }
+
     #[test]
     fn original_failure_is_saved_before_bounded_minimization() {
         let directory = temporary();

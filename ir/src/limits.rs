@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Bounded traversal before recursive type cloning, comparison or diagnostics.
 use crate::{ConstExpr, ConstExprKind, FunctionSignature, Instruction, Module, Terminator, Type};
+
 use std::fmt;
 
 /// Recursive downstream type helpers and text parsing use this safety ceiling.
@@ -18,6 +19,7 @@ pub struct IrLimits {
     /// Shared budget for CFG construction, dominance analysis and phi checks.
     pub max_analysis_work: usize,
 }
+
 impl Default for IrLimits {
     fn default() -> Self {
         Self {
@@ -41,28 +43,25 @@ pub enum Resource {
     Configuration,
     AnalysisWork,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LimitError {
     pub resource: Resource,
     pub limit: usize,
 }
+
 impl fmt::Display for LimitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "IR {:?} limit exceeded (limit {})",
-            self.resource, self.limit
-        )
+        write!(f, "IR {:?} limit exceeded (limit {})", self.resource, self.limit)
     }
 }
+
 impl std::error::Error for LimitError {}
+
 impl IrLimits {
     pub fn validate(self) -> Result<(), LimitError> {
         if self.max_type_depth > MAX_IR_NESTING || self.max_const_depth > MAX_IR_NESTING {
-            return Err(LimitError {
-                resource: Resource::Configuration,
-                limit: MAX_IR_NESTING,
-            });
+            return Err(LimitError { resource: Resource::Configuration, limit: MAX_IR_NESTING });
         }
         Ok(())
     }
@@ -72,21 +71,21 @@ pub(crate) struct Budget {
     pub limits: IrLimits,
     remaining: usize,
 }
+
 impl Budget {
     pub fn new(limits: IrLimits) -> Result<Self, LimitError> {
         limits.validate()?;
-        Ok(Self {
-            limits,
-            remaining: limits.max_nodes,
-        })
+        Ok(Self { limits, remaining: limits.max_nodes })
     }
+
     pub fn nodes(&mut self, n: usize) -> Result<(), LimitError> {
-        self.remaining = self.remaining.checked_sub(n).ok_or(LimitError {
-            resource: Resource::Nodes,
-            limit: self.limits.max_nodes,
-        })?;
+        self.remaining = self
+            .remaining
+            .checked_sub(n)
+            .ok_or(LimitError { resource: Resource::Nodes, limit: self.limits.max_nodes })?;
         Ok(())
     }
+
     pub fn ty(&mut self, root: &Type) -> Result<(), LimitError> {
         let mut pending = vec![(root, 0)];
         while let Some((ty, depth)) = pending.pop() {
@@ -109,7 +108,7 @@ impl Budget {
                         });
                     }
                     pending.extend(ts.iter().rev().map(|t| (t, depth + 1)));
-                }
+                },
                 Type::FnPtr(sig) => {
                     if sig.params.len() >= self.remaining.saturating_sub(pending.len()) {
                         return Err(LimitError {
@@ -119,12 +118,13 @@ impl Budget {
                     }
                     pending.push((&sig.ret, depth + 1));
                     pending.extend(sig.params.iter().rev().map(|t| (t, depth + 1)));
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         Ok(())
     }
+
     pub fn signature(&mut self, sig: &FunctionSignature) -> Result<(), LimitError> {
         self.nodes(1)?;
         self.ty(&sig.ret)?;
@@ -133,6 +133,7 @@ impl Budget {
         }
         Ok(())
     }
+
     pub fn expression(&mut self, root: &ConstExpr) -> Result<(), LimitError> {
         let mut pending = vec![(root, 0)];
         while let Some((e, depth)) = pending.pop() {
@@ -150,8 +151,8 @@ impl Budget {
                 | ConstExprKind::Compare { left, right, .. } => {
                     pending.push((right, depth + 1));
                     pending.push((left, depth + 1));
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
         Ok(())
@@ -168,10 +169,7 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
         source_bytes = source_bytes
             .checked_add(file.name.len())
             .filter(|n| *n <= limits.max_input_bytes)
-            .ok_or(LimitError {
-                resource: Resource::InputBytes,
-                limit: limits.max_input_bytes,
-            })?;
+            .ok_or(LimitError { resource: Resource::InputBytes, limit: limits.max_input_bytes })?;
     }
     for g in &m.globals {
         b.nodes(1)?;
@@ -222,26 +220,24 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     Phi { ty, incomings, .. } => {
                         b.ty(ty)?;
                         b.nodes(incomings.len())?;
-                    }
+                    },
                     Cast { src_ty, dst_ty, .. } => {
                         b.ty(src_ty)?;
                         b.ty(dst_ty)?;
-                    }
+                    },
                     Extract { dst_ty, .. } => b.ty(dst_ty)?,
-                    Gep {
-                        dst_ty, indices, ..
-                    } => {
+                    Gep { dst_ty, indices, .. } => {
                         b.ty(dst_ty)?;
                         b.nodes(indices.len())?;
-                    }
+                    },
                     NullFunction { signature, .. } | FunctionAddr { signature, .. } => {
                         b.signature(signature)?
-                    }
+                    },
                     Call { ret_ty, args, .. } => {
                         b.ty(ret_ty)?;
                         b.nodes(args.len())?;
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
             if let Some(t) = &block.terminator {
@@ -251,8 +247,8 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     Terminator::Switch { ty, cases, .. } => {
                         b.ty(ty)?;
                         b.nodes(cases.len())?;
-                    }
-                    _ => {}
+                    },
+                    _ => {},
                 }
             }
         }
@@ -270,11 +266,12 @@ pub(crate) fn discard_type(root: Type) {
             Type::FnPtr(sig) => {
                 pending.push(sig.ret);
                 pending.extend(sig.params);
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
+
 pub(crate) fn discard_signature(sig: FunctionSignature) {
     discard_type(sig.ret);
     for t in sig.params {

@@ -8,28 +8,15 @@ fn object(size: usize) -> ObjectFile {
 }
 
 fn relocation(section_index: usize, offset: usize, kind: RelocKind) -> ObjectRelocation {
-    ObjectRelocation {
-        section_index,
-        offset,
-        kind,
-        symbol: "external".into(),
-        addend: -4,
-    }
+    ObjectRelocation { section_index, offset, kind, symbol: "external".into(), addend: -4 }
 }
 
 #[test]
 fn relocation_section_must_exist() {
     let mut object = object(8);
-    object
-        .relocations
-        .push(relocation(999, 0, RelocKind::Absolute64));
-    let error = object
-        .write()
-        .expect_err("invalid relocation section must fail");
-    assert!(
-        error.contains("section") && error.contains("999"),
-        "{error}"
-    );
+    object.relocations.push(relocation(999, 0, RelocKind::Absolute64));
+    let error = object.write().expect_err("invalid relocation section must fail");
+    assert!(error.contains("section") && error.contains("999"), "{error}");
 }
 
 #[test]
@@ -47,10 +34,7 @@ fn every_relocation_width_must_fit_the_target_section() {
         assert!(object.write().is_ok(), "boundary-valid {kind:?}");
         object.relocations[0].offset = 4;
         let error = object.write().expect_err("patch crosses section boundary");
-        assert!(
-            error.contains("range") && error.contains(".text"),
-            "{error}"
-        );
+        assert!(error.contains("range") && error.contains(".text"), "{error}");
         object.relocations[0].offset = width + 3;
         assert!(object.write().is_err(), "patch starts at section end");
     }
@@ -59,19 +43,11 @@ fn every_relocation_width_must_fit_the_target_section() {
 #[test]
 fn relocation_offset_overflow_and_empty_sections_are_rejected() {
     let mut object = object(8);
-    object
-        .relocations
-        .push(relocation(0, usize::MAX, RelocKind::Absolute64));
-    assert!(object
-        .write()
-        .expect_err("overflow must fail")
-        .contains("overflow"));
+    object.relocations.push(relocation(0, usize::MAX, RelocKind::Absolute64));
+    assert!(object.write().expect_err("overflow must fail").contains("overflow"));
     object.sections[0].data.clear();
     object.relocations[0].offset = 0;
-    assert!(object
-        .write()
-        .expect_err("empty section has no patch range")
-        .contains("range"));
+    assert!(object.write().expect_err("empty section has no patch range").contains("range"));
 }
 
 #[test]
@@ -79,18 +55,10 @@ fn bss_cannot_silently_discard_relocation_patch_storage() {
     let mut object = object(8);
     object.sections[0].kind = SectionKind::Bss;
     object.sections[0].name = ".bss".into();
-    object
-        .relocations
-        .push(relocation(0, 0, RelocKind::Absolute64));
-    assert!(object
-        .write()
-        .expect_err("BSS relocation unsupported")
-        .contains("BSS"));
+    object.relocations.push(relocation(0, 0, RelocKind::Absolute64));
+    assert!(object.write().expect_err("BSS relocation unsupported").contains("BSS"));
     object.relocations.clear();
-    assert!(
-        object.write().is_ok(),
-        "BSS with no relocation remains valid"
-    );
+    assert!(object.write().is_ok(), "BSS with no relocation remains valid");
 }
 
 #[test]
@@ -99,10 +67,7 @@ fn invalid_section_alignment_is_rejected() {
         let mut object = object(1);
         object.sections[0].align = alignment;
         let error = object.write().expect_err("invalid alignment must fail");
-        assert!(
-            error.contains("alignment") && error.contains(".text"),
-            "{error}"
-        );
+        assert!(error.contains("alignment") && error.contains(".text"), "{error}");
     }
 }
 

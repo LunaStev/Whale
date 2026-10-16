@@ -1,50 +1,28 @@
 //! Golden bytes come from the AMD64 opcode/ModRM tables, independently of the
 //! implementation. Tests use the public assembler and need no external assembler.
 use assembler::{assemble, isa::AMD64, RelocKind};
+
 fn bytes(src: &str) -> Vec<u8> {
     let out = assemble(src, &AMD64).unwrap_or_else(|e| panic!("{src}: {e}"));
     assert!(out.sections[0].relocs.is_empty(), "{src}");
     out.sections.into_iter().flat_map(|s| s.data).collect()
 }
+
 fn rejects(src: &str) -> String {
-    assemble(src, &AMD64)
-        .err()
-        .unwrap_or_else(|| panic!("accepted {src}"))
-        .to_string()
+    assemble(src, &AMD64).err().unwrap_or_else(|| panic!("accepted {src}")).to_string()
 }
 
 #[test]
 fn rex_only_low_bytes_cover_register_immediate_memory_and_extended_forms() {
     for (name, code) in [("spl", 4), ("bpl", 5), ("sil", 6), ("dil", 7)] {
         assert_eq!(bytes(&format!("mov {name}, al")), [0x40, 0x88, 0xc0 + code]);
-        assert_eq!(
-            bytes(&format!("mov al, {name}")),
-            [0x40, 0x88, 0xc0 + (code << 3)]
-        );
-        assert_eq!(
-            bytes(&format!("mov {name}, 255")),
-            [0x40, 0xb0 + code, 0xff]
-        );
-        assert_eq!(
-            bytes(&format!("add {name}, 1")),
-            [0x40, 0x80, 0xc0 + code, 1]
-        );
-        assert_eq!(
-            bytes(&format!("mov {name}, [rax]")),
-            [0x40, 0x8a, code << 3]
-        );
-        assert_eq!(
-            bytes(&format!("mov [rax], {name}")),
-            [0x40, 0x88, code << 3]
-        );
-        assert_eq!(
-            bytes(&format!("mov {name}, r8b")),
-            [0x44, 0x88, 0xc0 + code]
-        );
-        assert_eq!(
-            bytes(&format!("mov r8b, {name}")),
-            [0x41, 0x88, 0xc0 + (code << 3)]
-        );
+        assert_eq!(bytes(&format!("mov al, {name}")), [0x40, 0x88, 0xc0 + (code << 3)]);
+        assert_eq!(bytes(&format!("mov {name}, 255")), [0x40, 0xb0 + code, 0xff]);
+        assert_eq!(bytes(&format!("add {name}, 1")), [0x40, 0x80, 0xc0 + code, 1]);
+        assert_eq!(bytes(&format!("mov {name}, [rax]")), [0x40, 0x8a, code << 3]);
+        assert_eq!(bytes(&format!("mov [rax], {name}")), [0x40, 0x88, code << 3]);
+        assert_eq!(bytes(&format!("mov {name}, r8b")), [0x44, 0x88, 0xc0 + code]);
+        assert_eq!(bytes(&format!("mov r8b, {name}")), [0x41, 0x88, 0xc0 + (code << 3)]);
         for other in ["ah", "ch", "dh", "bh"] {
             for src in [
                 format!("mov {name}, {other}"),
@@ -55,13 +33,8 @@ fn rex_only_low_bytes_cover_register_immediate_memory_and_extended_forms() {
             }
         }
     }
-    for src in [
-        "mov ah, r8b",
-        "mov r8b, ah",
-        "mov ah, [r8]",
-        "mov [r8], ah",
-        "add bh, [rbx+r12*2]",
-    ] {
+    for src in ["mov ah, r8b", "mov r8b, ah", "mov ah, [r8]", "mov [r8], ah", "add bh, [rbx+r12*2]"]
+    {
         assert!(rejects(src).contains("REX"));
     }
     assert_eq!(bytes("mov ah, 1\nmov ah, al"), [0xb4, 1, 0x88, 0xc4]);
@@ -82,6 +55,7 @@ pub const LEA_FIXTURES: &[(&str, &[u8])] = &[
     ("lea rax, [rbx+128]", &[0x48, 0x8d, 0x83, 0x80, 0, 0, 0]),
     ("lea rax, [rbx+r12*4]", &[0x4a, 0x8d, 0x04, 0xa3]),
 ];
+
 #[test]
 fn lea_uses_destination_width_and_shared_64_bit_addressing() {
     for (src, expected) in LEA_FIXTURES {
@@ -168,11 +142,9 @@ fn shifts_select_one_immediate_cl_group_width_and_rex() {
 
 #[test]
 fn dividend_preparation_is_zero_operand_with_exact_prefixes() {
-    for (mnemonic, expected) in [
-        ("cwd", vec![0x66, 0x99]),
-        ("cdq", vec![0x99]),
-        ("cqo", vec![0x48, 0x99]),
-    ] {
+    for (mnemonic, expected) in
+        [("cwd", vec![0x66, 0x99]), ("cdq", vec![0x99]), ("cqo", vec![0x48, 0x99])]
+    {
         assert_eq!(bytes(mnemonic), expected);
         for operands in ["1", "rax", "rax, rbx"] {
             assert!(rejects(&format!("; comment\n{mnemonic} {operands}")).contains("line 2"));
@@ -217,25 +189,13 @@ fn immediate_imul_checks_ranges_and_preserves_two_operand_forms() {
     for (src, expected) in [
         ("imul rax, rbx, -128", vec![0x48, 0x6b, 0xc3, 0x80]),
         ("imul rax, rbx, 127", vec![0x48, 0x6b, 0xc3, 0x7f]),
-        (
-            "imul rax, rbx, -129",
-            vec![0x48, 0x69, 0xc3, 0x7f, 0xff, 0xff, 0xff],
-        ),
+        ("imul rax, rbx, -129", vec![0x48, 0x69, 0xc3, 0x7f, 0xff, 0xff, 0xff]),
         ("imul rax, rbx, 128", vec![0x48, 0x69, 0xc3, 0x80, 0, 0, 0]),
-        (
-            "imul rax, rbx, -2147483648",
-            vec![0x48, 0x69, 0xc3, 0, 0, 0, 0x80],
-        ),
-        (
-            "imul rax, rbx, 2147483647",
-            vec![0x48, 0x69, 0xc3, 0xff, 0xff, 0xff, 0x7f],
-        ),
+        ("imul rax, rbx, -2147483648", vec![0x48, 0x69, 0xc3, 0, 0, 0, 0x80]),
+        ("imul rax, rbx, 2147483647", vec![0x48, 0x69, 0xc3, 0xff, 0xff, 0xff, 0x7f]),
         ("imul ax, bx, -32768", vec![0x66, 0x69, 0xc3, 0, 0x80]),
         ("imul ax, bx, 65535", vec![0x66, 0x69, 0xc3, 0xff, 0xff]),
-        (
-            "imul eax, ebx, 4294967295",
-            vec![0x69, 0xc3, 0xff, 0xff, 0xff, 0xff],
-        ),
+        ("imul eax, ebx, 4294967295", vec![0x69, 0xc3, 0xff, 0xff, 0xff, 0xff]),
         ("imul r8w, r9w, 127", vec![0x66, 0x45, 0x6b, 0xc1, 0x7f]),
         ("imul r8d, r9d, 128", vec![0x45, 0x69, 0xc1, 0x80, 0, 0, 0]),
         ("imul r8, r9, -1", vec![0x4d, 0x6b, 0xc1, 0xff]),
@@ -295,17 +255,12 @@ const CONDITIONS: &[(&str, u8)] = &[
     ("jg", 15),
     ("jnle", 15),
 ];
+
 #[test]
 fn every_condition_alias_encodes_short_near_and_external_transfers() {
     for (mnemonic, code) in CONDITIONS {
-        assert_eq!(
-            bytes(&format!("{mnemonic} end\nnop\nend: ret")),
-            [0x70 + code, 1, 0x90, 0xc3]
-        );
-        assert_eq!(
-            bytes(&format!("start: nop\n{mnemonic} start")),
-            [0x90, 0x70 + code, 0xfd]
-        );
+        assert_eq!(bytes(&format!("{mnemonic} end\nnop\nend: ret")), [0x70 + code, 1, 0x90, 0xc3]);
+        assert_eq!(bytes(&format!("start: nop\n{mnemonic} start")), [0x90, 0x70 + code, 0xfd]);
         let boundary = bytes(&format!("{mnemonic} end\nresb 127\nend: ret"));
         assert_eq!(&boundary[..2], &[0x70 + code, 127]);
         assert_eq!(2 + boundary[1] as usize, boundary.len() - 1);
@@ -329,11 +284,8 @@ fn every_condition_alias_encodes_short_near_and_external_transfers() {
         assert_eq!((reloc.offset, reloc.addend), (2, -4));
         assert_eq!(reloc.symbol, "ext");
         assert!(matches!(reloc.kind, RelocKind::Branch32));
-        let cross = assemble(
-            &format!("{mnemonic} other\nsection .other\nother: ret"),
-            &AMD64,
-        )
-        .unwrap();
+        let cross =
+            assemble(&format!("{mnemonic} other\nsection .other\nother: ret"), &AMD64).unwrap();
         assert_eq!(cross.sections[0].data, [0x0f, 0x80 + code, 0, 0, 0, 0]);
         let reloc = &cross.sections[0].relocs[0];
         assert_eq!((reloc.offset, reloc.addend), (2, -4));
@@ -351,21 +303,14 @@ fn mixed_forward_backward_branches_decode_against_final_symbols_deterministicall
     for n in 0..90 {
         let mnemonic = CONDITIONS[n % CONDITIONS.len()].0;
         let target = (n * 13 + 7) % 90;
-        source.push_str(&format!(
-            "label{n}: {mnemonic} label{target}\nresb {}\n",
-            (n % 7) * 21
-        ));
+        source.push_str(&format!("label{n}: {mnemonic} label{target}\nresb {}\n", (n % 7) * 21));
     }
     let out = assemble(&source, &AMD64).unwrap();
     let code = &out.sections[0].data;
     assert!(out.sections[0].relocs.is_empty());
     for n in 0..90 {
-        let at = out
-            .symbols
-            .iter()
-            .find(|s| s.name == format!("label{n}"))
-            .unwrap()
-            .offset as usize;
+        let at =
+            out.symbols.iter().find(|s| s.name == format!("label{n}")).unwrap().offset as usize;
         let target = out
             .symbols
             .iter()

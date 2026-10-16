@@ -2,6 +2,7 @@
 
 //! Storage layout for an explicit output target; no host `size_of`/`align_of`.
 use crate::{Target, Type};
+
 use std::fmt;
 
 /// Natural type layout in bytes. Tail padding is included in `size`.
@@ -33,6 +34,7 @@ impl fmt::Display for LayoutError {
         })
     }
 }
+
 impl std::error::Error for LayoutError {}
 
 /// Compute natural storage layout, with at most 128 nested aggregate levels.
@@ -48,15 +50,11 @@ pub fn layout_of_with_limit(
     max_depth: usize,
 ) -> Result<TypeLayout, LayoutError> {
     let max_depth = max_depth.min(crate::MAX_IR_NESTING);
-    let scalar = |size, align| TypeLayout {
-        size,
-        align,
-        field_offsets: Vec::new(),
-        element_stride: None,
-    };
+    let scalar =
+        |size, align| TypeLayout { size, align, field_offsets: Vec::new(), element_stride: None };
     // A new target must select its own rules rather than inheriting host layout.
     match target {
-        Target::X86_64WhaleLinux => {}
+        Target::X86_64WhaleLinux => {},
     }
     Ok(match ty {
         Type::Void => return Err(LayoutError::Void),
@@ -68,20 +66,17 @@ pub fn layout_of_with_limit(
         Type::Ptr(_) | Type::FnPtr(_) => {
             let bytes = target.data_layout().ptr_bits / 8;
             scalar(u64::from(bytes), bytes)
-        }
+        },
         Type::Array(element, count) => {
             let remaining = max_depth.checked_sub(1).ok_or(LayoutError::DepthLimit)?;
             let element = layout_of_with_limit(element, target, remaining)?;
             TypeLayout {
-                size: element
-                    .size
-                    .checked_mul(*count)
-                    .ok_or(LayoutError::Overflow)?,
+                size: element.size.checked_mul(*count).ok_or(LayoutError::Overflow)?,
                 align: element.align,
                 field_offsets: Vec::new(),
                 element_stride: Some(element.size),
             }
-        }
+        },
         Type::Struct(fields) | Type::Tuple(fields) => {
             let remaining = max_depth.checked_sub(1).ok_or(LayoutError::DepthLimit)?;
             let mut result = scalar(0, 1);
@@ -90,14 +85,11 @@ pub fn layout_of_with_limit(
                 result.align = result.align.max(field.align);
                 result.size = align_up(result.size, field.align)?;
                 result.field_offsets.push(result.size);
-                result.size = result
-                    .size
-                    .checked_add(field.size)
-                    .ok_or(LayoutError::Overflow)?;
+                result.size = result.size.checked_add(field.size).ok_or(LayoutError::Overflow)?;
             }
             result.size = align_up(result.size, result.align)?;
             result
-        }
+        },
     })
 }
 

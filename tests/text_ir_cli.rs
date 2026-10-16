@@ -1,75 +1,38 @@
 use std::{fs, process::Command};
+
 fn run(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_whale"))
-        .args(args)
-        .output()
-        .unwrap()
+    Command::new(env!("CARGO_BIN_EXE_whale")).args(args).output().unwrap()
 }
+
 #[test]
 fn run_tracked_memory_reports_initialization_and_validates_byte_budgets() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("tracked memory.wir");
-    fs::write(
-        &path,
-        include_str!("../ir/tests/fixtures/tracked-memory-v4.wir"),
-    )
-    .unwrap();
+    fs::write(&path, include_str!("../ir/tests/fixtures/tracked-memory-v4.wir")).unwrap();
     let input = path.to_str().unwrap();
-    let r = run(&[
-        "ir",
-        "run",
-        input,
-        "--function",
-        "@f0",
-        "--max-memory",
-        "20",
-    ]);
+    let r = run(&["ir", "run", input, "--function", "@f0", "--max-memory", "20"]);
     assert!(r.status.success(), "{r:?}");
     assert_eq!(r.stdout, b"u32 42\n");
     for (args, diagnostic) in [
+        (vec!["--function", "@f0", "--max-memory", "3"], "memory Bytes limit 3"),
+        (vec!["--function", "@f1"], "uninitialized byte at allocation offset 0"),
+        (vec!["--function", "@f0", "--max-memory", "-1"], "decimal u64"),
+        (vec!["--function", "@f0", "--max-memory", "18446744073709551616"], "decimal u64"),
         (
-            vec!["--function", "@f0", "--max-memory", "3"],
-            "memory Bytes limit 3",
-        ),
-        (
-            vec!["--function", "@f1"],
-            "uninitialized byte at allocation offset 0",
-        ),
-        (
-            vec!["--function", "@f0", "--max-memory", "-1"],
-            "decimal u64",
-        ),
-        (
-            vec!["--function", "@f0", "--max-memory", "18446744073709551616"],
-            "decimal u64",
-        ),
-        (
-            vec![
-                "--function",
-                "@f0",
-                "--max-memory",
-                "20",
-                "--max-memory",
-                "20",
-            ],
+            vec!["--function", "@f0", "--max-memory", "20", "--max-memory", "20"],
             "duplicate --max-memory",
         ),
-        (
-            vec!["--function", "@f0", "--max-memory"],
-            "requires a u64 byte count",
-        ),
+        (vec!["--function", "@f0", "--max-memory"], "requires a u64 byte count"),
     ] {
         let mut command = vec!["ir", "run", input];
         command.extend(args);
         let r = run(&command);
         assert_eq!(r.status.code(), Some(1), "{r:?}");
-        assert!(
-            String::from_utf8_lossy(&r.stderr).contains(diagnostic),
-            "{r:?}"
-        );
+        assert!(String::from_utf8_lossy(&r.stderr).contains(diagnostic), "{r:?}");
         assert!(r.stdout.is_empty());
     }
 }
+
 #[test]
 fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
     let tmp = tempfile::tempdir().unwrap();
@@ -83,11 +46,7 @@ fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
     assert!(result.status.success(), "{result:?}");
     let result = run(&["ir", "print", input]);
     assert!(result.status.success(), "{result:?}");
-    assert_eq!(
-        result.stdout,
-        good.replace("format_version 3", "format_version 7")
-            .as_bytes()
-    );
+    assert_eq!(result.stdout, good.replace("format_version 3", "format_version 7").as_bytes());
     let result = run(&["ir", "print", input, "-o", output]);
     assert!(result.status.success(), "{result:?}");
     assert_eq!(
@@ -100,10 +59,7 @@ fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
             good.replace("format_version 3", "format_version 2"),
             vec!["ir", "print", input, "-o", output],
         ),
-        (
-            good.replace("cbr bool", "unknown bool"),
-            vec!["ir", "print", input, "-o", output],
-        ),
+        (good.replace("cbr bool", "unknown bool"), vec!["ir", "print", input, "-o", output]),
     ] {
         fs::write(input, &source).unwrap();
         fs::write(output, "previous").unwrap();
@@ -122,6 +78,7 @@ fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
         assert!(!run(&args).status.success());
     }
 }
+
 #[test]
 fn hardlink_output_cannot_overwrite_ir_input() {
     let tmp = tempfile::tempdir().unwrap();
@@ -130,15 +87,9 @@ fn hardlink_output_cannot_overwrite_ir_input() {
     let good = include_str!("../ir/tests/fixtures/calls-v3.wir");
     fs::write(&input, good).unwrap();
     fs::hard_link(&input, &alias).unwrap();
-    assert!(!run(&[
-        "ir",
-        "print",
-        input.to_str().unwrap(),
-        "-o",
-        alias.to_str().unwrap()
-    ])
-    .status
-    .success());
+    assert!(!run(&["ir", "print", input.to_str().unwrap(), "-o", alias.to_str().unwrap()])
+        .status
+        .success());
     assert_eq!(fs::read_to_string(input).unwrap(), good);
 }
 
@@ -154,37 +105,19 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
     assert_eq!(result.stdout, b"i32 22\n");
     assert!(result.stderr.is_empty());
     for (args, message) in [
-        (
-            vec!["--function", "@f7", "--arg", "0", "--max-steps", "0"],
-            "step limit 0",
-        ),
+        (vec!["--function", "@f7", "--arg", "0", "--max-steps", "0"], "step limit 0"),
         (vec!["--function", "@f7", "--arg", "-1"], "argument 0"),
-        (
-            vec!["--function", "@f7", "--arg", "4294967296"],
-            "argument 0",
-        ),
+        (vec!["--function", "@f7", "--arg", "4294967296"], "argument 0"),
         (vec!["--function", "@f7"], "expected 1 arguments"),
         (vec!["--function", "@f9"], "no body"),
         (vec![], "requires --function"),
         (vec!["--function", "@f7", "--function", "@f7"], "duplicate"),
-        (
-            vec!["--function", "@f7", "--max-steps", "1", "--max-steps", "1"],
-            "duplicate",
-        ),
-        (
-            vec!["--function", "@f7", "--max-steps", "+1"],
-            "decimal u64",
-        ),
+        (vec!["--function", "@f7", "--max-steps", "1", "--max-steps", "1"], "duplicate"),
+        (vec!["--function", "@f7", "--max-steps", "+1"], "decimal u64"),
         (vec!["--function", "7"], "requires @fN"),
         (vec!["--function", "@f4294967296"], "u32 ID"),
-        (
-            vec!["--function", "@f7", "-o", input],
-            "unexpected argument",
-        ),
-        (
-            vec!["--function", "@f7", "--no-verify"],
-            "unexpected argument",
-        ),
+        (vec!["--function", "@f7", "-o", input], "unexpected argument"),
+        (vec!["--function", "@f7", "--no-verify"], "unexpected argument"),
         (vec!["--function", "@f7", "--arg"], "requires a literal"),
     ] {
         let mut arguments = vec!["ir", "run", input];
@@ -192,10 +125,7 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
         let result = run(&arguments);
         assert!(!result.status.success(), "{arguments:?}");
         assert!(result.stdout.is_empty());
-        assert!(
-            String::from_utf8_lossy(&result.stderr).contains(message),
-            "{result:?}"
-        );
+        assert!(String::from_utf8_lossy(&result.stderr).contains(message), "{result:?}");
         assert_eq!(fs::read_to_string(input).unwrap(), source);
     }
     let trap = "module { format_version 3 semantics_version 1 target \"x86_64-whale-linux\" datalayout { ptr=64, endian=little } declare @f7 \"div\": whale (i128, i128) -> i128, linkage internal fn @f7 \"div\"(%v0 \"a\": i128, %v1 \"b\": i128) -> i128, entry %b11 { %b11 \"entry\": %v8: i128 = sdiv i128 %v0, %v1 ret i128 %v8 } }";
@@ -212,21 +142,8 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
         "-1",
     ]);
     assert!(result.status.success(), "{result:?}");
-    assert_eq!(
-        result.stdout,
-        b"i128 -170141183460469231731687303715884105728\n"
-    );
-    let result = run(&[
-        "ir",
-        "run",
-        input,
-        "--function",
-        "@f7",
-        "--arg",
-        "1",
-        "--arg",
-        "0",
-    ]);
+    assert_eq!(result.stdout, b"i128 -170141183460469231731687303715884105728\n");
+    let result = run(&["ir", "run", input, "--function", "@f7", "--arg", "1", "--arg", "0"]);
     assert_eq!(result.status.code(), Some(1));
     let error = String::from_utf8_lossy(&result.stderr);
     assert!(
@@ -234,11 +151,7 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
         "{error}"
     );
     assert!(error.contains(input));
-    fs::write(
-        input,
-        include_str!("../ir/tests/fixtures/wave-casts-v3.wir"),
-    )
-    .unwrap();
+    fs::write(input, include_str!("../ir/tests/fixtures/wave-casts-v3.wir")).unwrap();
     let result = run(&["ir", "run", input, "--function", "@f0"]);
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr)

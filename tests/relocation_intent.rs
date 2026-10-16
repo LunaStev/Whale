@@ -3,6 +3,7 @@ use std::{fs, process::Command};
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
 }
+
 fn u64_at(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
@@ -48,16 +49,7 @@ fn relocations(source: &str) -> Vec<(u64, u32, i64)> {
 fn undefined_data_references_are_pc_relative_and_branches_keep_plt_intent() {
     let entries =
         relocations("extern ext\nmov rax, [ext]\nmov [ext], rax\ncall ext\njmp ext\nje ext");
-    assert_eq!(
-        entries,
-        vec![
-            (3, 2, -4),
-            (10, 2, -4),
-            (15, 4, -4),
-            (20, 4, -4),
-            (26, 4, -4)
-        ]
-    );
+    assert_eq!(entries, vec![(3, 2, -4), (10, 2, -4), (15, 4, -4), (20, 4, -4), (26, 4, -4)]);
 }
 
 #[test]

@@ -2,19 +2,23 @@
 //! The host validates/copies buffers; Wave owns decoding, reachability, overlaps,
 //! relocation target selection, cross references and block formation.
 use crate::{DecodeError, Instruction};
+
 use std::fmt;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CfgTarget {
     Address(u64),
     Symbol(u64),
     Unresolved,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlowOverride {
     pub field_offset: usize,
     pub width: u8,
     pub target: CfgTarget,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CfgLimits {
     pub max_input_bytes: usize,
@@ -27,6 +31,7 @@ pub struct CfgLimits {
     pub max_workspace_bytes: usize,
     pub follow_calls: bool,
 }
+
 impl Default for CfgLimits {
     fn default() -> Self {
         Self {
@@ -41,6 +46,7 @@ impl Default for CfgLimits {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CfgResource {
     InputBytes,
@@ -51,6 +57,7 @@ pub enum CfgResource {
     Work,
     Memory,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CfgError {
     CoreUnavailable,
@@ -59,21 +66,23 @@ pub enum CfgError {
     Allocation,
     DecodeOutput(DecodeError),
 }
+
 impl fmt::Display for CfgError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CoreUnavailable => {
                 f.write_str("Wave CFG core unavailable; enable the linked Wave reverse core")
-            }
+            },
             Self::Invalid(reason) => write!(f, "invalid Wave CFG input/result: {reason}"),
             Self::Limit { resource, limit } => {
                 write!(f, "Wave CFG {resource:?} limit exceeded ({limit})")
-            }
+            },
             Self::Allocation => f.write_str("unable to allocate bounded Wave CFG buffers"),
             Self::DecodeOutput(error) => write!(f, "Wave CFG decode record: {error}"),
         }
     }
 }
+
 impl std::error::Error for CfgError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         if let Self::DecodeOutput(e) = self {
@@ -83,6 +92,7 @@ impl std::error::Error for CfgError {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EdgeKind {
     FallThrough,
@@ -98,12 +108,14 @@ pub enum EdgeKind {
     Memory,
     Address,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Edge {
     pub from: usize,
     pub kind: EdgeKind,
     pub target: CfgTarget,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StopKind {
     Invalid,
@@ -116,18 +128,21 @@ pub enum StopKind {
     Syscall,
     AddressOverflow,
 }
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stop {
     pub offset: usize,
     pub kind: StopKind,
     pub conflict: Option<usize>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock {
     pub offset: usize,
     pub end: usize,
     pub instruction_indices: Vec<usize>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ControlFlowGraph {
     pub base: u64,
@@ -138,6 +153,7 @@ pub struct ControlFlowGraph {
     pub stops: Vec<Stop>,
     pub work: u64,
 }
+
 /// Analyze one explicitly scoped byte region. Addresses outside it remain edges,
 /// never guessed code. Seeds are region offsets. Symbol IDs belong to the host.
 /// Overlays name encoded fields; intersections of a different width resolve to
@@ -159,13 +175,18 @@ pub fn analyze(
         native::analyze(input, base, seeds, overlays, limits)
     }
 }
+
 #[cfg(whale_wave_reverse)]
 mod native {
     use super::*;
+
     use crate::{ABI_VERSION, DECODE_WORDS};
+
     use std::collections::HashSet;
+
     extern "C" {
         fn whale_wave_reverse_abi() -> u64;
+
         fn whale_wave_reverse_cfg(
             abi: u64,
             data: *const u8,
@@ -183,23 +204,23 @@ mod native {
             output_words: u64,
         ) -> i32;
     }
+
     fn limit(resource: CfgResource, limit: usize) -> CfgError {
-        CfgError::Limit {
-            resource,
-            limit: limit as u64,
-        }
+        CfgError::Limit { resource, limit: limit as u64 }
     }
+
     fn allocated<T>(capacity: usize) -> Result<Vec<T>, CfgError> {
         let mut v = Vec::new();
-        v.try_reserve_exact(capacity)
-            .map_err(|_| CfgError::Allocation)?;
+        v.try_reserve_exact(capacity).map_err(|_| CfgError::Allocation)?;
         Ok(v)
     }
+
     fn words(count: usize) -> Result<Vec<u64>, CfgError> {
         let mut v = allocated(count)?;
         v.resize(count, 0);
         Ok(v)
     }
+
     pub(super) fn analyze(
         input: &[u8],
         base: u64,
@@ -248,10 +269,7 @@ mod native {
         };
         let host_work = sort_work(seeds.len()) + sort_work(overlays.len());
         if host_work > l.max_work {
-            return Err(CfgError::Limit {
-                resource: CfgResource::Work,
-                limit: l.max_work,
-            });
+            return Err(CfgError::Limit { resource: CfgResource::Work, limit: l.max_work });
         }
         if seeds.iter().any(|offset| *offset >= input.len()) {
             return Err(CfgError::Invalid("seed outside region"));
@@ -352,9 +370,7 @@ mod native {
         let stop_count = count(5, l.max_stops)?;
         let mut instructions = allocated(instruction_count)?;
         let mut starts = HashSet::new();
-        starts
-            .try_reserve(instruction_count)
-            .map_err(|_| CfgError::Allocation)?;
+        starts.try_reserve(instruction_count).map_err(|_| CfgError::Allocation)?;
         for index in 0..instruction_count {
             let at = 16 + index * 97;
             let offset =
@@ -404,11 +420,7 @@ mod native {
             covered += count;
             let mut instruction_indices = allocated(count)?;
             instruction_indices.extend(first..last);
-            blocks.push(BasicBlock {
-                offset,
-                end,
-                instruction_indices,
-            });
+            blocks.push(BasicBlock { offset, end, instruction_indices });
         }
         if covered != instructions.len() {
             return Err(CfgError::Invalid("incomplete block partition"));
@@ -472,11 +484,7 @@ mod native {
             } else {
                 None
             };
-            stops.push(Stop {
-                offset,
-                kind,
-                conflict,
-            });
+            stops.push(Stop { offset, kind, conflict });
         }
         Ok(ControlFlowGraph {
             base,

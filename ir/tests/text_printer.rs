@@ -12,16 +12,8 @@ fn flow(id: u32, name: &str) -> (FunctionDecl, Function) {
         id: FunctionId(id),
         name: name.into(),
         params: vec![
-            Param {
-                id: ValueId(40),
-                name: "x".into(),
-                ty: ty.clone(),
-            },
-            Param {
-                id: ValueId(41),
-                name: "c".into(),
-                ty: Type::Bool,
-            },
+            Param { id: ValueId(40), name: "x".into(), ty: ty.clone() },
+            Param { id: ValueId(41), name: "c".into(), ty: Type::Bool },
         ],
         ret_ty: ty.clone(),
         entry: BlockId(10),
@@ -45,43 +37,14 @@ fn flow(id: u32, name: &str) -> (FunctionDecl, Function) {
                     cases: vec![(ConstValue::I(0), BlockId(50))],
                 },
             ),
-            block(
-                50,
-                vec![],
-                Terminator::Trap {
-                    reason: "zero".into(),
-                },
-            ),
-            block(
-                60,
-                vec![],
-                Terminator::Ret {
-                    ty: ty.clone(),
-                    value: Some(ValueId(42)),
-                },
-            ),
-            block(
-                30,
-                vec![],
-                Terminator::Br {
-                    target: BlockId(40),
-                },
-            ),
-            block(
-                20,
-                vec![],
-                Terminator::Br {
-                    target: BlockId(40),
-                },
-            ),
+            block(50, vec![], Terminator::Trap { reason: "zero".into() }),
+            block(60, vec![], Terminator::Ret { ty: ty.clone(), value: Some(ValueId(42)) }),
+            block(30, vec![], Terminator::Br { target: BlockId(40) }),
+            block(20, vec![], Terminator::Br { target: BlockId(40) }),
             block(
                 10,
                 vec![],
-                Terminator::CBr {
-                    cond: ValueId(41),
-                    then_bb: BlockId(20),
-                    else_bb: BlockId(30),
-                },
+                Terminator::CBr { cond: ValueId(41), then_bb: BlockId(20), else_bb: BlockId(30) },
             ),
         ],
     };
@@ -96,6 +59,7 @@ fn flow(id: u32, name: &str) -> (FunctionDecl, Function) {
         f,
     )
 }
+
 fn module() -> Module {
     let mut m = Module::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     for (id, name) in [(21, "flow"), (22, "other")] {
@@ -144,21 +108,16 @@ fn all_string_fields_share_escaping_without_changing_printable_unicode() {
     }
     m.globals[0].name = raw.into();
     m.functions[0].blocks[1].terminator = Some(Terminator::Trap { reason: raw.into() });
-    m.functions[0].blocks[0]
-        .instructions
-        .push(Instruction::ConstDecl {
-            dst: ValueId(43),
-            name: raw.into(),
-            expression: ConstExpr::literal(Type::I32, ConstValue::I(1)),
-            value: ConstValue::I(1),
-        });
+    m.functions[0].blocks[0].instructions.push(Instruction::ConstDecl {
+        dst: ValueId(43),
+        name: raw.into(),
+        expression: ConstExpr::literal(Type::I32, ConstValue::I(1)),
+        value: ConstValue::I(1),
+    });
     m.functions[0].value_types.push((ValueId(43), Type::I32));
     m.functions[0].blocks[0]
         .instructions
-        .push(Instruction::TrapIf {
-            cond: ValueId(41),
-            reason: raw.into(),
-        });
+        .push(Instruction::TrapIf { cond: ValueId(41), reason: raw.into() });
     m.declarations.push(FunctionDecl {
         id: FunctionId(23),
         name: "external".into(),
@@ -182,15 +141,10 @@ fn all_string_fields_share_escaping_without_changing_printable_unicode() {
         "const_decl ",
         "reason=",
     ] {
-        assert!(
-            text.contains(&format!("{prefix}\"{escaped}\"")),
-            "{prefix}: {text}"
-        );
+        assert!(text.contains(&format!("{prefix}\"{escaped}\"")), "{prefix}: {text}");
     }
     assert!(text.contains(&format!("link_name \"{}\"", escaped.replace(r"\0", ""))));
-    for ch in [
-        '\0', '\r', '\t', '\u{1}', '\u{7f}', '\u{85}', '\u{2028}', '\u{2029}',
-    ] {
+    for ch in ['\0', '\r', '\t', '\u{1}', '\u{7f}', '\u{85}', '\u{2028}', '\u{2029}'] {
         assert!(!text.contains(ch));
     }
 }

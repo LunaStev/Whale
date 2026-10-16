@@ -1,13 +1,10 @@
 #[path = "../fuzz/support.rs"]
 mod fuzz;
+
 #[test]
 fn deterministic_seed_and_mutation_smoke_is_bounded() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz/corpus");
-    let targets = [
-        fuzz::Target::Assembler,
-        fuzz::Target::Ir,
-        fuzz::Target::Object,
-    ];
+    let targets = [fuzz::Target::Assembler, fuzz::Target::Ir, fuzz::Target::Object];
     for target in targets {
         let seeds = fuzz::seeds(&root, target);
         let mut rng = fuzz::Rng::new(0x5748414c45);
@@ -35,10 +32,10 @@ fn deterministic_seed_and_mutation_smoke_is_bounded() {
         assert!(valid > 0);
     }
 }
+
 #[test]
 fn minimized_failure_bytes_are_replayable_and_redundant_input_is_removed() {
-    let result = fuzz::minimize(b"prefix BUG suffix".to_vec(), |b| {
-        b.windows(3).any(|v| v == b"BUG")
-    });
+    let result =
+        fuzz::minimize(b"prefix BUG suffix".to_vec(), |b| b.windows(3).any(|v| v == b"BUG"));
     assert_eq!(result, b"BUG");
 }

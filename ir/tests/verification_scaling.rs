@@ -23,17 +23,10 @@ fn module(ret: Type, blocks: Vec<BasicBlock>, value_types: Vec<(ValueId, Type)>)
 
 fn moves(count: u32) -> Module {
     let id = |n: u32| ValueId(n * 17 + 7);
-    let mut instructions = vec![Instruction::Const {
-        dst: id(0),
-        ty: Type::I32,
-        value: ConstValue::I(42),
-    }];
+    let mut instructions =
+        vec![Instruction::Const { dst: id(0), ty: Type::I32, value: ConstValue::I(42) }];
     for n in 1..count {
-        instructions.push(Instruction::Mov {
-            dst: id(n),
-            ty: Type::I32,
-            src: id(n - 1),
-        });
+        instructions.push(Instruction::Mov { dst: id(n), ty: Type::I32, src: id(n - 1) });
     }
     let mut types: Vec<_> = (0..count).map(|n| (id(n), Type::I32)).collect();
     types.reverse();
@@ -43,10 +36,7 @@ fn moves(count: u32) -> Module {
             id: BlockId(0),
             name: "entry".into(),
             instructions,
-            terminator: Some(Terminator::Ret {
-                ty: Type::I32,
-                value: Some(id(count - 1)),
-            }),
+            terminator: Some(Terminator::Ret { ty: Type::I32, value: Some(id(count - 1)) }),
         }],
         types,
     )
@@ -68,10 +58,7 @@ fn chain(count: u32) -> Module {
                 vec![]
             },
             terminator: Some(if n + 1 == count {
-                Terminator::Ret {
-                    ty: Type::Void,
-                    value: None,
-                }
+                Terminator::Ret { ty: Type::Void, value: None }
             } else {
                 Terminator::CBr {
                     cond: ValueId(7),
@@ -106,13 +93,7 @@ fn lookup_and_dominance_work_grow_linearly_without_reordering_ir() {
 fn cfg_work_budget_is_shared_and_returns_a_resource_error() {
     let m = chain(100);
     assert!(matches!(
-        verify_module_with_limits(
-            &m,
-            IrLimits {
-                max_analysis_work: 100,
-                ..IrLimits::default()
-            }
-        ),
+        verify_module_with_limits(&m, IrLimits { max_analysis_work: 100, ..IrLimits::default() }),
         Err(VerifyError::ResourceLimit(LimitError {
             resource: Resource::AnalysisWork,
             limit: 100
@@ -130,17 +111,8 @@ fn cfg_work_budget_is_shared_and_returns_a_resource_error() {
         m.declarations.push(d);
     }
     assert!(matches!(
-        verify_module_with_limits(
-            &m,
-            IrLimits {
-                max_analysis_work: 30,
-                ..IrLimits::default()
-            }
-        ),
-        Err(VerifyError::ResourceLimit(LimitError {
-            resource: Resource::AnalysisWork,
-            ..
-        }))
+        verify_module_with_limits(&m, IrLimits { max_analysis_work: 30, ..IrLimits::default() }),
+        Err(VerifyError::ResourceLimit(LimitError { resource: Resource::AnalysisWork, .. }))
     ));
 }
 

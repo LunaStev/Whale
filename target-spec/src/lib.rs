@@ -88,10 +88,7 @@ impl Target {
 
     pub const fn data_layout(self) -> DataLayout {
         match self {
-            Self::X86_64WhaleLinux => DataLayout {
-                ptr_bits: 64,
-                endian: Endian::Little,
-            },
+            Self::X86_64WhaleLinux => DataLayout { ptr_bits: 64, endian: Endian::Little },
         }
     }
 
@@ -110,10 +107,7 @@ impl Target {
         if actual == self.data_layout() {
             Ok(())
         } else {
-            Err(TargetError::LayoutMismatch {
-                target: self,
-                actual,
-            })
+            Err(TargetError::LayoutMismatch { target: self, actual })
         }
     }
 }
@@ -137,7 +131,7 @@ impl fmt::Display for TargetError {
                     write!(f, "{}", target.name())?;
                 }
                 Ok(())
-            }
+            },
             Self::LayoutMismatch { target, actual } => write!(
                 f,
                 "data layout {actual:?} does not match target {} (expected {:?})",

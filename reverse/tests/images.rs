@@ -1,14 +1,18 @@
 use object::*;
+
 use reverse::image::Image;
+
 fn executable() -> Vec<u8> {
     let mut b = vec![0; 121];
     b[..7].copy_from_slice(b"\x7fELF\x02\x01\x01");
     fn u16w(b: &mut [u8], at: usize, v: u16) {
         b[at..at + 2].copy_from_slice(&v.to_le_bytes());
     }
+
     fn u32w(b: &mut [u8], at: usize, v: u32) {
         b[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
+
     fn u64w(b: &mut [u8], at: usize, v: u64) {
         b[at..at + 8].copy_from_slice(&v.to_le_bytes());
     }
@@ -29,6 +33,7 @@ fn executable() -> Vec<u8> {
     b[120] = 0xc3;
     b
 }
+
 #[test]
 fn executable_without_section_table_preserves_file_and_virtual_offsets() {
     let bytes = executable();
@@ -42,31 +47,25 @@ fn executable_without_section_table_preserves_file_and_virtual_offsets() {
     assert_eq!(image.entry_offset(r), 120);
     assert_eq!(r.bytes[120], 0xc3);
 }
+
 #[test]
 fn malformed_executable_ranges_sizes_and_entry_are_rejected() {
     let bytes = executable();
     for end in 0..bytes.len() {
         assert!(Image::elf(&bytes[..end], ObjectReadLimits::default()).is_err());
     }
-    for (at, value) in [
-        (24, 0x500000u64),
-        (72, u64::MAX),
-        (80, u64::MAX - 1),
-        (96, 122),
-        (104, 120),
-        (112, 3),
-    ] {
+    for (at, value) in
+        [(24, 0x500000u64), (72, u64::MAX), (80, u64::MAX - 1), (96, 122), (104, 120), (112, 3)]
+    {
         let mut bad = bytes.clone();
         bad[at..at + 8].copy_from_slice(&value.to_le_bytes());
-        assert!(
-            Image::elf(&bad, ObjectReadLimits::default()).is_err(),
-            "at {at}"
-        );
+        assert!(Image::elf(&bad, ObjectReadLimits::default()).is_err(), "at {at}");
     }
     let mut bad = bytes.clone();
     bad[16] = 3;
     assert!(Image::elf(&bad, ObjectReadLimits::default()).is_err());
 }
+
 #[test]
 fn relocatable_code_regions_and_symbolic_call_annotations_preserve_identity() {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
@@ -108,19 +107,23 @@ fn relocatable_code_regions_and_symbolic_call_annotations_preserve_identity() {
         assert!(!text.contains("call 0x5"));
     }
 }
+
 #[test]
 fn raw_address_overflow_is_rejected() {
     assert!(Image::raw(&[0, 1], u64::MAX).is_err());
     let image = Image::raw(&[], 42).unwrap();
     assert_eq!(image.regions[0].address, 42);
 }
+
 fn symbol_executable(owner: u16) -> Vec<u8> {
     fn w16(b: &mut [u8], at: usize, v: u16) {
         b[at..at + 2].copy_from_slice(&v.to_le_bytes());
     }
+
     fn w32(b: &mut [u8], at: usize, v: u32) {
         b[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
+
     fn w64(b: &mut [u8], at: usize, v: u64) {
         b[at..at + 8].copy_from_slice(&v.to_le_bytes());
     }
@@ -169,6 +172,7 @@ fn symbol_executable(owner: u16) -> Vec<u8> {
     w64(&mut b, 0x1038, 1);
     b
 }
+
 #[test]
 fn executable_symbol_ownership_and_work_budgets_are_validated() {
     let good = symbol_executable(1);
@@ -178,14 +182,10 @@ fn executable_symbol_ownership_and_work_budgets_are_validated() {
     assert!(Image::elf(&bad, ObjectReadLimits::default())
         .unwrap_err()
         .contains("defining section"));
-    let limits = ObjectReadLimits {
-        max_work: 0,
-        ..Default::default()
-    };
-    assert!(Image::elf(&good, limits)
-        .unwrap_err()
-        .contains("work limit"));
+    let limits = ObjectReadLimits { max_work: 0, ..Default::default() };
+    assert!(Image::elf(&good, limits).unwrap_err().contains("work limit"));
 }
+
 #[test]
 fn high_half_symbol_file_mapping_uses_checked_relative_offsets() {
     let mut bytes = symbol_executable(1);
@@ -225,20 +225,12 @@ fn relocatable_inspection_shares_actual_reader_work_instead_of_reserving_half() 
     let (_, usage) = ObjectFile::read_with_usage(&bytes, ObjectReadLimits::default()).unwrap();
     // Reading alone fits, but image construction still needs a share of the
     // same allowance. It must not silently start a fresh work budget.
-    let reader_only = ObjectReadLimits {
-        max_work: usage.work,
-        ..Default::default()
-    };
+    let reader_only = ObjectReadLimits { max_work: usage.work, ..Default::default() };
     ObjectFile::read_with_usage(&bytes, reader_only).unwrap();
-    assert!(Image::elf(&bytes, reader_only)
-        .unwrap_err()
-        .contains("inspection work limit"));
+    assert!(Image::elf(&bytes, reader_only).unwrap_err().contains("inspection work limit"));
     // A small metadata allowance is enough even when name inspection dominates
     // reader work. Splitting the total in half would reject this valid object.
-    let shared = ObjectReadLimits {
-        max_work: usage.work + 128,
-        ..Default::default()
-    };
+    let shared = ObjectReadLimits { max_work: usage.work + 128, ..Default::default() };
     assert!(usage.work > shared.max_work / 2);
     let image = Image::elf(&bytes, shared).unwrap();
     assert_eq!(image.regions[0].bytes, [0xe8, 0, 0, 0, 0, 0xc3]);

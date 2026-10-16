@@ -23,7 +23,7 @@ pub(crate) fn valid_constant(ty: &Type, value: &ConstValue) -> bool {
             };
             let limit = 1i128 << (bits - 1);
             (-limit..limit).contains(v)
-        }
+        },
         (U1 | U8 | U16 | U32 | U64, ConstValue::U(v)) => {
             let bits = match ty {
                 U1 => 1,
@@ -34,7 +34,7 @@ pub(crate) fn valid_constant(ty: &Type, value: &ConstValue) -> bool {
                 _ => unreachable!(),
             };
             *v < (1u128 << bits)
-        }
+        },
         _ => false,
     }
 }

@@ -77,7 +77,7 @@ impl fmt::Display for Type {
                     write!(f, "{t}")?;
                 }
                 write!(f, "}}")
-            }
+            },
             Type::Tuple(items) => {
                 write!(f, "tuple<")?;
                 for (i, t) in items.iter().enumerate() {
@@ -87,7 +87,7 @@ impl fmt::Display for Type {
                     write!(f, "{t}")?;
                 }
                 write!(f, ">")
-            }
+            },
         }
     }
 }

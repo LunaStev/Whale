@@ -1,10 +1,13 @@
 use std::process;
+
 use std::time::Instant;
 
 use super::debug::dump_bytes;
 
 use assembler::isa::amd64::parser::parse;
+
 use assembler::tokens::tokenize;
+
 use assembler::{isa::AMD64, AssemblerOutput};
 
 use object::{
@@ -41,35 +44,28 @@ pub fn run(args: Vec<String>) {
             "--help" => {
                 print_help();
                 return;
-            }
+            },
 
             flag @ ("--amd64" | "--aarch64") => {
                 if arch.is_some() {
                     eprintln!("Error: architecture must be specified only once");
                     process::exit(1);
                 }
-                arch = Some(if flag == "--amd64" {
-                    "amd64"
-                } else {
-                    "aarch64"
-                });
-            }
+                arch = Some(if flag == "--amd64" { "amd64" } else { "aarch64" });
+            },
 
             "-o" => {
                 if output.is_some() {
                     eprintln!("Error: duplicate -o option");
                     process::exit(1);
                 }
-                let path = args
-                    .get(i + 1)
-                    .filter(|s| !s.starts_with('-'))
-                    .unwrap_or_else(|| {
-                        eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
-                        process::exit(1);
-                    });
+                let path = args.get(i + 1).filter(|s| !s.starts_with('-')).unwrap_or_else(|| {
+                    eprintln!("Error: -o requires a path (use ./ for paths starting with '-')");
+                    process::exit(1);
+                });
                 output = Some(path.clone());
                 i += 1;
-            }
+            },
             "--max-input" => {
                 if max_input.is_some() {
                     eprintln!("Error: duplicate --max-input option");
@@ -84,7 +80,7 @@ pub fn run(args: Vec<String>) {
                     process::exit(1);
                 }));
                 i += 1;
-            }
+            },
 
             "--debug-whale" => debug_mode = true,
             "--ast" => show_ast = true,
@@ -100,14 +96,11 @@ pub fn run(args: Vec<String>) {
 
             s if input.is_none() && !s.starts_with('-') => input = Some(s.to_string()),
             s => {
-                let kind = if s.starts_with('-') {
-                    "unknown option"
-                } else {
-                    "unexpected argument"
-                };
+                let kind =
+                    if s.starts_with('-') { "unknown option" } else { "unexpected argument" };
                 eprintln!("Error: {kind}: {s}");
                 process::exit(1);
-            }
+            },
         }
         i += 1;
     }
@@ -140,14 +133,12 @@ pub fn run(args: Vec<String>) {
     if trace_enable {
         println!("[trace] reading input file: {}", input);
     }
-    let bytes = super::input::read(
-        input.as_ref(),
-        max_input.unwrap_or(super::input::ASM_INPUT_BYTES),
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("Failed to read {}: {}", input, e);
-        process::exit(1);
-    });
+    let bytes =
+        super::input::read(input.as_ref(), max_input.unwrap_or(super::input::ASM_INPUT_BYTES))
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to read {}: {}", input, e);
+                process::exit(1);
+            });
     let src = String::from_utf8(bytes).unwrap_or_else(|e| {
         eprintln!("Failed to read {input}: assembly must be UTF-8: {e}");
         process::exit(1);
@@ -211,14 +202,7 @@ pub fn run(args: Vec<String>) {
     });
 
     if debug_mode && (show_bytes || dump_hex || dump_bin || dump_json) {
-        dump_bytes(
-            "object",
-            &final_bytes,
-            show_bytes,
-            dump_hex,
-            dump_bin,
-            dump_json,
-        );
+        dump_bytes("object", &final_bytes, show_bytes, dump_hex, dump_bin, dump_json);
     }
 
     if debug_mode && show_stats {
@@ -253,9 +237,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
     }
 
     for sym in &out.symbols {
-        let section_index = sym
-            .section_index
-            .and_then(|idx| section_map.get(idx).copied());
+        let section_index = sym.section_index.and_then(|idx| section_map.get(idx).copied());
 
         obj.symbols.push(ObjectSymbol {
             kind: match sym.kind {
@@ -267,11 +249,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
             section_index,
             value: sym.offset,
             size: sym.size,
-            binding: if sym.is_global {
-                SymbolBinding::Global
-            } else {
-                SymbolBinding::Local
-            },
+            binding: if sym.is_global { SymbolBinding::Global } else { SymbolBinding::Local },
             visibility: match sym.visibility {
                 assembler::SymbolVisibility::Default => SymbolVisibility::Default,
                 assembler::SymbolVisibility::Hidden => SymbolVisibility::Hidden,
@@ -297,7 +275,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
                 assembler::assembler::RelocKind::Absolute32 => ObjectRelocKind::Absolute32,
                 assembler::assembler::RelocKind::SignedAbsolute32 => {
                     ObjectRelocKind::SignedAbsolute32
-                }
+                },
                 assembler::assembler::RelocKind::Relative32 => ObjectRelocKind::Relative32,
                 assembler::assembler::RelocKind::Branch32 => {
                     if is_undefined_symbol {
@@ -305,7 +283,7 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
                     } else {
                         ObjectRelocKind::Relative32
                     }
-                }
+                },
                 assembler::assembler::RelocKind::Relative8 => ObjectRelocKind::Relative8,
             };
 

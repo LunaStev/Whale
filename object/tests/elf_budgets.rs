@@ -1,10 +1,12 @@
 use object::*;
+
 fn object() -> ObjectFile {
     let mut obj = ObjectFile::new(ObjectFormat::ELF64);
     obj.add_section(".text", SectionKind::Text, 1);
     obj.sections[0].data = vec![0; 8];
     obj
 }
+
 fn sym(name: String) -> ObjectSymbol {
     ObjectSymbol {
         kind: object::SymbolKind::NoType,
@@ -34,10 +36,7 @@ fn complete_metadata_and_alignment_have_exact_output_budget_boundaries() {
     });
     let bytes = obj.write().unwrap();
     assert_eq!(obj.write_with_limit(bytes.len() as u64).unwrap(), bytes);
-    assert!(obj
-        .write_with_limit(bytes.len() as u64 - 1)
-        .unwrap_err()
-        .contains("size limit"));
+    assert!(obj.write_with_limit(bytes.len() as u64 - 1).unwrap_err().contains("size limit"));
     assert!(bytes.len() < 4096, "BSS memory remains sparse");
 }
 
@@ -58,10 +57,7 @@ fn each_name_source_is_preflighted_before_proportional_copies() {
             }),
             _ => unreachable!(),
         }
-        assert!(obj
-            .write_with_limit(512)
-            .unwrap_err()
-            .contains("size limit"));
+        assert!(obj.write_with_limit(512).unwrap_err().contains("size limit"));
         assert!(obj.write().is_ok());
     }
 }
@@ -73,10 +69,7 @@ fn huge_name_budget_child() {
     }
     let mut obj = object();
     obj.symbols.push(sym("a".repeat(28 * 1024 * 1024)));
-    assert!(obj
-        .write_with_limit(512)
-        .unwrap_err()
-        .contains("size limit"));
+    assert!(obj.write_with_limit(512).unwrap_err().contains("size limit"));
 }
 
 #[cfg(target_os = "linux")]
@@ -93,9 +86,5 @@ fn huge_names_reject_before_copying_in_a_capped_child_process() {
         .env("WHALE_ELF_BUDGET_CHILD", "1")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
 }

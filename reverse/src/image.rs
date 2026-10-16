@@ -3,6 +3,7 @@ use object::{
     formats::elf_read::{ElfView, ObjectReadLimits},
     ObjectFile, RelocKind, SectionKind,
 };
+
 #[derive(Debug)]
 pub struct CodeRegion<'a> {
     pub id: usize,
@@ -12,6 +13,7 @@ pub struct CodeRegion<'a> {
     pub address: u64,
     pub bytes: &'a [u8],
 }
+
 #[derive(Debug, Clone)]
 pub struct ImageSymbol {
     pub name: String,
@@ -19,6 +21,7 @@ pub struct ImageSymbol {
     pub offset: u64,
     pub address: Option<u64>,
 }
+
 #[derive(Debug, Clone)]
 pub struct Annotation {
     pub region: usize,
@@ -28,6 +31,7 @@ pub struct Annotation {
     pub kind: RelocKind,
     pub width: usize,
 }
+
 #[derive(Debug)]
 pub struct Image<'a> {
     pub kind: &'static str,
@@ -36,10 +40,10 @@ pub struct Image<'a> {
     pub symbols: Vec<ImageSymbol>,
     pub relocations: Vec<Annotation>,
 }
+
 impl<'a> Image<'a> {
     pub fn raw(bytes: &'a [u8], base: u64) -> Result<Self, String> {
-        base.checked_add(bytes.len() as u64)
-            .ok_or("raw address range overflow")?;
+        base.checked_add(bytes.len() as u64).ok_or("raw address range overflow")?;
         Ok(Self {
             kind: "raw-amd64",
             entry: Some(base),
@@ -55,6 +59,7 @@ impl<'a> Image<'a> {
             relocations: Vec::new(),
         })
     }
+
     pub fn elf(bytes: &'a [u8], limits: ObjectReadLimits) -> Result<Self, String> {
         let view = ElfView::parse(bytes, limits).map_err(|e| e.to_string())?;
         match view.header.kind {
@@ -63,16 +68,15 @@ impl<'a> Image<'a> {
             _ => Err("reverse supports ELF64 AMD64 ET_REL and static ET_EXEC only".into()),
         }
     }
+
     fn relocatable(view: ElfView<'a>, limits: ObjectReadLimits) -> Result<Self, String> {
         let (object, usage) =
             ObjectFile::read_with_usage(view.bytes(), limits).map_err(|e| e.to_string())?;
         // Reader and image projection consume one allowance. Successful reads
         // report actual charges so string-heavy objects can use their budget
         // without reserving half for the much smaller image metadata pass.
-        let mut work = limits
-            .max_work
-            .checked_sub(usage.work)
-            .ok_or("ELF inspection work limit exceeded")?;
+        let mut work =
+            limits.max_work.checked_sub(usage.work).ok_or("ELF inspection work limit exceeded")?;
         let mut image = Self {
             kind: "elf64-amd64-relocatable",
             entry: None,
@@ -138,6 +142,7 @@ impl<'a> Image<'a> {
         image.relocations.sort_by_key(|r| (r.region, r.offset));
         Ok(image)
     }
+
     fn executable(view: ElfView<'a>, limits: ObjectReadLimits) -> Result<Self, String> {
         let mut image = Self {
             kind: "elf64-amd64-executable",
@@ -169,14 +174,9 @@ impl<'a> Image<'a> {
                 .virtual_address
                 .checked_add(p.memory_size)
                 .ok_or("PT_LOAD virtual address overflow")?;
-            let bytes = view
-                .range(p.offset, p.file_size)
-                .map_err(|e| e.to_string())?;
+            let bytes = view.range(p.offset, p.file_size).map_err(|e| e.to_string())?;
             charge(&mut work, mappings.len())?;
-            if mappings
-                .iter()
-                .any(|&(start, stop)| p.virtual_address < stop && start < end)
-            {
+            if mappings.iter().any(|&(start, stop)| p.virtual_address < stop && start < end) {
                 return Err("overlapping PT_LOAD virtual ranges are unsupported".into());
             }
             mappings.push((p.virtual_address, end));
@@ -209,15 +209,11 @@ impl<'a> Image<'a> {
         let section_names = if view.header.string_section == 0 {
             None
         } else {
-            let table = view
-                .section(view.header.string_section)
-                .map_err(|e| e.to_string())?;
+            let table = view.section(view.header.string_section).map_err(|e| e.to_string())?;
             if table.kind != 3 {
                 return Err("section names require a string table".into());
             }
-            let names = view
-                .range(table.offset, table.size)
-                .map_err(|e| e.to_string())?;
+            let names = view.range(table.offset, table.size).map_err(|e| e.to_string())?;
             if names.first() != Some(&0) {
                 return Err("invalid section-name string table".into());
             }
@@ -230,24 +226,15 @@ impl<'a> Image<'a> {
             let s = view.section(index).map_err(|e| e.to_string())?;
             if s.name != 0 {
                 let names = section_names.ok_or("section name without string table")?;
-                let tail = names
-                    .get(s.name as usize..)
-                    .ok_or("section name offset outside table")?;
-                let remaining = limits
-                    .max_string_bytes
-                    .saturating_sub(string_work)
-                    .min(work / 2);
+                let tail =
+                    names.get(s.name as usize..).ok_or("section name offset outside table")?;
+                let remaining = limits.max_string_bytes.saturating_sub(string_work).min(work / 2);
                 let end = tail
                     .iter()
                     .take(remaining.saturating_add(1))
                     .position(|b| *b == 0)
                     .ok_or("section-name budget or termination failure")?;
-                charge(
-                    &mut work,
-                    (end + 1)
-                        .checked_mul(2)
-                        .ok_or("section-name work overflow")?,
-                )?;
+                charge(&mut work, (end + 1).checked_mul(2).ok_or("section-name work overflow")?)?;
                 string_work = string_work
                     .checked_add(end + 1)
                     .filter(|n| *n <= limits.max_string_bytes)
@@ -258,9 +245,7 @@ impl<'a> Image<'a> {
             if s.align != 0 && !s.align.is_power_of_two() {
                 return Err("invalid executable section alignment".into());
             }
-            s.address
-                .checked_add(s.size)
-                .ok_or("executable section address overflow")?;
+            s.address.checked_add(s.size).ok_or("executable section address overflow")?;
             if s.kind != 8 {
                 view.range(s.offset, s.size).map_err(|e| e.to_string())?;
             }
@@ -282,26 +267,19 @@ impl<'a> Image<'a> {
             if strings.kind != 3 {
                 return Err("symbol names require a string table".into());
             }
-            let names = view
-                .range(strings.offset, strings.size)
-                .map_err(|e| e.to_string())?;
+            let names = view.range(strings.offset, strings.size).map_err(|e| e.to_string())?;
             for n in 1..s.size / 24 {
                 charge(&mut work, 1)?;
                 let at = s.offset + n * 24;
                 let name_offset = view.u32(at).map_err(|e| e.to_string())? as usize;
                 let remaining = limits.max_string_bytes.saturating_sub(string_work);
-                let tail = names
-                    .get(name_offset..)
-                    .ok_or("symbol name offset outside table")?;
+                let tail = names.get(name_offset..).ok_or("symbol name offset outside table")?;
                 let end = tail
                     .iter()
                     .take(remaining.min(work / 3).saturating_add(1))
                     .position(|b| *b == 0)
                     .ok_or("unterminated symbol name or string budget exceeded")?;
-                charge(
-                    &mut work,
-                    (end + 1).checked_mul(3).ok_or("symbol work overflow")?,
-                )?;
+                charge(&mut work, (end + 1).checked_mul(3).ok_or("symbol work overflow")?)?;
                 string_work = string_work
                     .checked_add(end + 1)
                     .filter(|n| *n <= limits.max_string_bytes)
@@ -317,9 +295,7 @@ impl<'a> Image<'a> {
                 }
                 let value = view.u64(at + 8).map_err(|e| e.to_string())?;
                 let size = view.u64(at + 16).map_err(|e| e.to_string())?;
-                let symbol_end = value
-                    .checked_add(size)
-                    .ok_or("symbol address range overflow")?;
+                let symbol_end = value.checked_add(size).ok_or("symbol address range overflow")?;
                 let region = if section == 0xfff1 {
                     None
                 } else {
@@ -366,12 +342,14 @@ impl<'a> Image<'a> {
         }
         Ok(image)
     }
+
     pub fn entry_offset(&self, region: &CodeRegion<'_>) -> usize {
         self.entry
             .and_then(|entry| entry.checked_sub(region.address))
             .filter(|n| *n < region.bytes.len() as u64)
             .map_or(0, |n| n as usize)
     }
+
     pub fn annotations(&self, region: usize, offset: usize, length: usize) -> Vec<&Annotation> {
         let start = self
             .relocations
@@ -386,8 +364,6 @@ impl<'a> Image<'a> {
 }
 
 fn charge(work: &mut usize, count: usize) -> Result<(), String> {
-    *work = work
-        .checked_sub(count)
-        .ok_or("ELF inspection work limit exceeded")?;
+    *work = work.checked_sub(count).ok_or("ELF inspection work limit exceeded")?;
     Ok(())
 }

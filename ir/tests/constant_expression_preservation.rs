@@ -1,27 +1,19 @@
 #![cfg(feature = "socket")]
 
 use ir::lower_ast::{frontend as ast, lower_o0};
+
 use ir::{DataLayout, Instruction};
 
 fn int(value: i128) -> ast::Expr {
-    ast::Expr::Lit(ast::Lit::Int {
-        bits: 32,
-        signed: true,
-        value: value.to_string(),
-    })
+    ast::Expr::Lit(ast::Lit::Int { bits: 32, signed: true, value: value.to_string() })
 }
+
 fn sum(left: ast::Expr, right: ast::Expr) -> ast::Expr {
-    ast::Expr::Binary {
-        left: Box::new(left),
-        op: ast::BinOpRef::Add,
-        right: Box::new(right),
-    }
+    ast::Expr::Binary { left: Box::new(left), op: ast::BinOpRef::Add, right: Box::new(right) }
 }
+
 fn ty() -> ast::TypeRef {
-    ast::TypeRef::Int {
-        bits: 32,
-        signed: true,
-    }
+    ast::TypeRef::Int { bits: 32, signed: true }
 }
 
 #[test]
@@ -41,11 +33,7 @@ fn unused_and_unreachable_constant_declarations_keep_their_expressions() {
             parameters: vec![],
             return_type: ast::TypeRef::Void,
             body: vec![
-                ast::Stmt::ConstDecl {
-                    name: "unused".into(),
-                    ty: ty(),
-                    init: sum(int(4), int(5)),
-                },
+                ast::Stmt::ConstDecl { name: "unused".into(), ty: ty(), init: sum(int(4), int(5)) },
                 ast::Stmt::Return(None),
                 ast::Stmt::ConstDecl {
                     name: "dead".into(),
@@ -55,12 +43,7 @@ fn unused_and_unreachable_constant_declarations_keep_their_expressions() {
             ],
         }],
     };
-    let m = lower_o0(
-        &program,
-        "x86_64-whale-linux",
-        DataLayout::default_64bit_le(),
-    )
-    .unwrap();
+    let m = lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
     ir::verify_module(&m).unwrap();
     let text = ir::print_module(&m);
     assert!(text.contains("const_decl \"unused\""), "{text}");
@@ -81,11 +64,7 @@ fn unused_and_unreachable_constant_declarations_keep_their_expressions() {
 fn shadowed_names_keep_distinct_declarations_and_resolved_references() {
     let program = ast::Program {
         declarations: vec![],
-        globals: vec![ast::GlobalConst {
-            name: "value".into(),
-            ty: ty(),
-            init: int(10),
-        }],
+        globals: vec![ast::GlobalConst { name: "value".into(), ty: ty(), init: int(10) }],
         functions: vec![ast::Function {
             convention: ir::CallingConvention::Whale,
             linkage: ir::Linkage::Internal,
@@ -117,39 +96,22 @@ fn shadowed_names_keep_distinct_declarations_and_resolved_references() {
             ],
         }],
     };
-    let m = lower_o0(
-        &program,
-        "x86_64-whale-linux",
-        DataLayout::default_64bit_le(),
-    )
-    .unwrap();
+    let m = lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le()).unwrap();
     ir::verify_module(&m).unwrap();
     let declarations = m.functions[0].blocks[0]
         .instructions
         .iter()
         .filter_map(|i| match i {
-            Instruction::ConstDecl {
-                dst,
-                expression,
-                value,
-                ..
-            } => Some((*dst, expression, value)),
+            Instruction::ConstDecl { dst, expression, value, .. } => {
+                Some((*dst, expression, value))
+            },
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(declarations.len(), 3);
-    assert_eq!(
-        declarations[0].1.references(),
-        vec![ir::ConstRef::Global(m.globals[0].id)]
-    );
-    assert_eq!(
-        declarations[1].1.references(),
-        vec![ir::ConstRef::Local(declarations[0].0)]
-    );
-    assert_eq!(
-        declarations[2].1.references(),
-        vec![ir::ConstRef::Local(declarations[1].0)]
-    );
+    assert_eq!(declarations[0].1.references(), vec![ir::ConstRef::Global(m.globals[0].id)]);
+    assert_eq!(declarations[1].1.references(), vec![ir::ConstRef::Local(declarations[0].0)]);
+    assert_eq!(declarations[2].1.references(), vec![ir::ConstRef::Local(declarations[1].0)]);
     assert_eq!(declarations[0].2, &ir::ConstValue::I(11));
     assert_eq!(declarations[1].2, &ir::ConstValue::I(12));
     assert_eq!(declarations[2].2, &ir::ConstValue::Bool(true));

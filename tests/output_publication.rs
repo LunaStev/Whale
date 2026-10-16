@@ -5,13 +5,13 @@ fn run(mode: &str, input: &Path, output: &Path) -> std::process::Output {
     match mode {
         "asm" => {
             command.args(["asm", "--amd64"]);
-        }
+        },
         "ir" => {
             command.args(["ir", "lower"]);
-        }
+        },
         _ => {
             command.arg("object");
-        }
+        },
     }
     command.arg(input).arg("-o").arg(output).output().unwrap()
 }
@@ -43,10 +43,7 @@ fn every_writer_rejects_source_aliases_and_preserves_source_bytes() {
         for output in outputs {
             let result = run(mode, &input, &output);
             assert!(!result.status.success(), "{mode}: accepted source alias");
-            assert!(
-                String::from_utf8_lossy(&result.stderr).contains("same file"),
-                "{result:?}"
-            );
+            assert!(String::from_utf8_lossy(&result.stderr).contains("same file"), "{result:?}");
             assert_eq!(fs::read(&input).unwrap(), source);
             assert_eq!(fs::read(&output).unwrap(), source);
         }

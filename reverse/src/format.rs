@@ -1,6 +1,8 @@
 //! Deterministic human and structured rendering of decoded facts.
 use crate::{image::Annotation, Instruction, Operand};
+
 use serde_json::{json, Value};
+
 pub fn operand_text(operand: &Operand, inst: &Instruction, base: u64) -> String {
     match operand {
         Operand::Register(r) => r.name(),
@@ -10,11 +12,10 @@ pub fn operand_text(operand: &Operand, inst: &Instruction, base: u64) -> String 
             } else {
                 format!("0x{:x}", i.value)
             }
-        }
-        Operand::Relative(r) => inst.relative_target(base).map_or_else(
-            || format!("relative({})", r.displacement),
-            |v| format!("0x{v:x}"),
-        ),
+        },
+        Operand::Relative(r) => inst
+            .relative_target(base)
+            .map_or_else(|| format!("relative({})", r.displacement), |v| format!("0x{v:x}")),
         Operand::Memory(m) => {
             let mut parts = Vec::new();
             if m.rip_relative {
@@ -50,25 +51,19 @@ pub fn operand_text(operand: &Operand, inst: &Instruction, base: u64) -> String 
                 },
                 expression
             )
-        }
+        },
     }
 }
+
 pub fn instruction_text(inst: &Instruction, base: u64, annotations: &[&Annotation]) -> String {
-    let bytes = inst
-        .original_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let bytes =
+        inst.original_bytes().iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
     let operands = inst
         .operands
         .iter()
         .map(|o| {
             if matches!(o, Operand::Relative(_)) && !annotations.is_empty() {
-                format!(
-                    "reloc({}{:+})",
-                    annotations[0].symbol, annotations[0].addend
-                )
+                format!("reloc({}{:+})", annotations[0].symbol, annotations[0].addend)
             } else {
                 operand_text(o, inst, base)
             }
@@ -85,13 +80,12 @@ pub fn instruction_text(inst: &Instruction, base: u64, annotations: &[&Annotatio
         operands
     );
     for a in annotations {
-        result.push_str(&format!(
-            " ; {:?} {}{:+} @section+{}",
-            a.kind, a.symbol, a.addend, a.offset
-        ));
+        result
+            .push_str(&format!(" ; {:?} {}{:+} @section+{}", a.kind, a.symbol, a.addend, a.offset));
     }
     result
 }
+
 pub fn instruction_json(inst: &Instruction, base: u64, annotations: &[&Annotation]) -> Value {
     let operands=inst.operands.iter().map(|o|match o{
   Operand::Register(r)=>json!({"kind":"register","name":r.name(),"class":format!("{:?}",r.class),"index":r.index,"width":r.width,"high8":r.high8}),

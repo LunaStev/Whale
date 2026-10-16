@@ -23,18 +23,10 @@ fn invalid_artifact_arguments_fail_without_publishing_output() {
                 if command == "asm" {
                     invocation.arg("--amd64");
                 }
-                let result = invocation
-                    .arg(&input)
-                    .arg("-o")
-                    .arg(&output)
-                    .args(&extra)
-                    .output()
-                    .unwrap();
+                let result =
+                    invocation.arg(&input).arg("-o").arg(&output).args(&extra).output().unwrap();
                 assert!(!result.status.success(), "accepted {command} {extra:?}");
-                assert!(
-                    String::from_utf8_lossy(&result.stderr).contains(diagnostic),
-                    "{result:?}"
-                );
+                assert!(String::from_utf8_lossy(&result.stderr).contains(diagnostic), "{result:?}");
                 if existing {
                     assert_eq!(fs::read(&output).unwrap(), b"previous artifact");
                     fs::remove_file(&output).unwrap();
@@ -60,11 +52,9 @@ fn invalid_artifact_arguments_fail_without_publishing_output() {
 
 #[test]
 fn repeated_or_conflicting_architecture_options_fail_before_reading_input() {
-    for architectures in [
-        ["--amd64", "--amd64"],
-        ["--amd64", "--aarch64"],
-        ["--aarch64", "--amd64"],
-    ] {
+    for architectures in
+        [["--amd64", "--amd64"], ["--amd64", "--aarch64"], ["--aarch64", "--amd64"]]
+    {
         let result = Command::new(env!("CARGO_BIN_EXE_whale"))
             .arg("asm")
             .args(architectures)
@@ -78,10 +68,7 @@ fn repeated_or_conflicting_architecture_options_fail_before_reading_input() {
 #[test]
 fn help_describes_available_commands_and_object_options() {
     for args in [vec![], vec!["--help"], vec!["-h"]] {
-        let result = Command::new(env!("CARGO_BIN_EXE_whale"))
-            .args(args)
-            .output()
-            .unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_whale")).args(args).output().unwrap();
         assert!(result.status.success());
         let text = String::from_utf8(result.stdout).unwrap();
         assert!(text.contains("whale asm --amd64"));
@@ -91,10 +78,7 @@ fn help_describes_available_commands_and_object_options() {
         assert!(!text.contains("--aarch64"));
     }
     for args in [vec!["object"], vec!["object", "--help"]] {
-        let result = Command::new(env!("CARGO_BIN_EXE_whale"))
-            .args(args)
-            .output()
-            .unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_whale")).args(args).output().unwrap();
         assert!(result.status.success());
         let text = String::from_utf8(result.stdout).unwrap();
         assert!(text.contains("whale object <input> -o <output>"));
@@ -129,19 +113,10 @@ fn object_debug_formats_dump_the_published_elf_with_a_bounded_head() {
         assert_eq!(&fs::read(&output).unwrap()[..4], b"\x7fELF");
         assert!(!text.contains("0100:"), "dump exceeded 256 bytes");
         if option == "--dump-json" {
-            let head = text
-                .split("\"head\": [")
-                .nth(1)
-                .unwrap()
-                .split(']')
-                .next()
-                .unwrap();
+            let head = text.split("\"head\": [").nth(1).unwrap().split(']').next().unwrap();
             let dumped: Vec<u8> = head.split(',').map(|s| s.trim().parse().unwrap()).collect();
             assert_eq!(dumped, fs::read(&output).unwrap()[..256]);
-            assert!(text.contains(&format!(
-                "\"len\": {}",
-                fs::metadata(&output).unwrap().len()
-            )));
+            assert!(text.contains(&format!("\"len\": {}", fs::metadata(&output).unwrap().len())));
         }
     }
     let result = Command::new(env!("CARGO_BIN_EXE_whale"))

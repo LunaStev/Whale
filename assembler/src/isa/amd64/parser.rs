@@ -1,5 +1,7 @@
 use crate::ast::*;
+
 use crate::error::AsmError;
+
 use crate::tokens::{Token, TokenKind};
 
 fn parser_err(tokens: &[Token], pos: usize, msg: &str) -> AsmError {
@@ -13,12 +15,7 @@ fn parser_err(tokens: &[Token], pos: usize, msg: &str) -> AsmError {
             column: token.end_column,
         }
     } else {
-        crate::error::SourceSpan {
-            start: 0,
-            end: 0,
-            line: 1,
-            column: 1,
-        }
+        crate::error::SourceSpan { start: 0, end: 0, line: 1, column: 1 }
     };
     AsmError::ParserError(msg.into()).at("<input>", span, None)
 }
@@ -47,7 +44,7 @@ pub fn parse(tokens: &[Token]) -> Result<AST, AsmError> {
                 } else {
                     parse_instruction(tokens, &mut pos)?
                 }
-            }
+            },
             _ => return Err(parser_err(tokens, pos, "Unexpected token at top level")),
         };
         let last = tokens[start..pos]
@@ -60,11 +57,7 @@ pub fn parse(tokens: &[Token]) -> Result<AST, AsmError> {
         spans.push(span);
         items.push(node);
     }
-    Ok(AST {
-        items,
-        spans,
-        source_name: "<input>".into(),
-    })
+    Ok(AST { items, spans, source_name: "<input>".into() })
 }
 
 fn parse_const_definition(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmError> {
@@ -77,7 +70,7 @@ fn parse_const_definition(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, 
     match tokens.get(*pos).map(|t| &t.kind) {
         Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("equ") => {
             *pos += 1;
-        }
+        },
         _ => return Err(parser_err(tokens, *pos, "Expected 'equ'")),
     }
 
@@ -95,11 +88,7 @@ fn parse_instruction(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmEr
         && *pos < tokens.len()
         && !matches!(tokens[*pos].kind, TokenKind::Newline)
     {
-        return Err(parser_err(
-            tokens,
-            *pos,
-            &format!("{mnemonic} expects 0 operands"),
-        ));
+        return Err(parser_err(tokens, *pos, &format!("{mnemonic} expects 0 operands")));
     }
     let operands = parse_operand_list(tokens, pos)?;
     Ok(ASTNode::Instruction(Instruction { mnemonic, operands }))
@@ -110,7 +99,7 @@ fn parse_mnemonic(tokens: &[Token], pos: &mut usize) -> Result<String, AsmError>
         TokenKind::Identifier(s) => {
             *pos += 1;
             Ok(s.to_ascii_lowercase())
-        }
+        },
         _ => Err(parser_err(tokens, *pos, "Expected mnemonic")),
     }
 }
@@ -151,11 +140,7 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
         if let Some(width) = memory_width(name) {
             *pos += 1;
             if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::LBracket)) {
-                return Err(parser_err(
-                    tokens,
-                    *pos,
-                    "Width qualifier requires memory operand",
-                ));
+                return Err(parser_err(tokens, *pos, "Width qualifier requires memory operand"));
             }
             let Operand::Memory(mut mem) = parse_memory_operand(tokens, pos)? else {
                 unreachable!()
@@ -178,9 +163,7 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
         }
     }
 
-    let expr = parse_expr(tokens, pos, |k| {
-        matches!(k, TokenKind::Comma | TokenKind::Newline)
-    })?;
+    let expr = parse_expr(tokens, pos, |k| matches!(k, TokenKind::Comma | TokenKind::Newline))?;
     match expr {
         ExprValue::Number(n) => Ok(Operand::Immediate(n)),
         ExprValue::Symbol { name, addend } => {
@@ -189,7 +172,7 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
             } else {
                 Ok(Operand::SymbolExpr { name, addend })
             }
-        }
+        },
     }
 }
 
@@ -230,8 +213,8 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
         Some(TokenKind::Minus) => {
             sign = -1;
             *pos += 1;
-        }
-        _ => {}
+        },
+        _ => {},
     }
 
     loop {
@@ -239,12 +222,8 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
         let kind = tokens.get(*pos).map(|t| &t.kind);
         match kind {
             None | Some(TokenKind::Newline) => {
-                return Err(parser_err(
-                    tokens,
-                    *pos,
-                    "Missing closing ']' in memory operand",
-                ));
-            }
+                return Err(parser_err(tokens, *pos, "Missing closing ']' in memory operand"));
+            },
             Some(TokenKind::Identifier(name)) => {
                 if sign < 0 {
                     return Err(parser_err(
@@ -255,10 +234,8 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                 }
                 let lower = name.to_ascii_lowercase();
                 if is_register(&lower) {
-                    let scaled = matches!(
-                        tokens.get(*pos + 1).map(|t| &t.kind),
-                        Some(TokenKind::Multiply)
-                    );
+                    let scaled =
+                        matches!(tokens.get(*pos + 1).map(|t| &t.kind), Some(TokenKind::Multiply));
                     if base.is_none() && !scaled {
                         base = Some(lower);
                         *pos += 1;
@@ -271,7 +248,7 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                                 Some(TokenKind::Number(n)) if matches!(*n, 1 | 2 | 4 | 8) => {
                                     scale = *n as u8;
                                     *pos += 1;
-                                }
+                                },
                                 _ => return Err(parser_err(tokens, *pos, "Scale must be 1/2/4/8")),
                             }
                         }
@@ -286,13 +263,9 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                     symbol = Some(name.clone());
                     *pos += 1;
                 } else {
-                    return Err(parser_err(
-                        tokens,
-                        term_pos,
-                        "Multiple symbols in memory operand",
-                    ));
+                    return Err(parser_err(tokens, term_pos, "Multiple symbols in memory operand"));
                 }
-            }
+            },
             Some(TokenKind::Number(n)) => {
                 disp = n
                     .checked_mul(sign as i128)
@@ -300,7 +273,7 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                     .and_then(|n| disp.checked_add(n))
                     .ok_or_else(|| parser_err(tokens, term_pos, "Memory displacement overflow"))?;
                 *pos += 1;
-            }
+            },
             _ => return Err(parser_err(tokens, *pos, "Expected term in memory operand")),
         }
 
@@ -320,29 +293,21 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
                     disp,
                     symbol,
                 }));
-            }
+            },
             Some(TokenKind::Plus) => {
                 sign = 1;
                 *pos += 1;
-            }
+            },
             Some(TokenKind::Minus) => {
                 sign = -1;
                 *pos += 1;
-            }
+            },
             None | Some(TokenKind::Newline) => {
-                return Err(parser_err(
-                    tokens,
-                    *pos,
-                    "Missing closing ']' in memory operand",
-                ));
-            }
+                return Err(parser_err(tokens, *pos, "Missing closing ']' in memory operand"));
+            },
             _ => {
-                return Err(parser_err(
-                    tokens,
-                    *pos,
-                    "Expected '+', '-' or ']' in memory operand",
-                ))
-            }
+                return Err(parser_err(tokens, *pos, "Expected '+', '-' or ']' in memory operand"))
+            },
         }
     }
 }
@@ -362,11 +327,7 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
         *pos += 1;
         let comma = |pos: &mut usize| -> Result<(), AsmError> {
             if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma)) {
-                return Err(parser_err(
-                    tokens,
-                    *pos,
-                    "Expected comma in symbol declaration",
-                ));
+                return Err(parser_err(tokens, *pos, "Expected comma in symbol declaration"));
             }
             *pos += 1;
             Ok(())
@@ -375,50 +336,43 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
         let kind = match tokens.get(*pos).map(|t| &t.kind) {
             Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("function") => {
                 crate::SymbolKind::Function
-            }
+            },
             Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("object") => {
                 crate::SymbolKind::Object
-            }
+            },
             Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("notype") => {
                 crate::SymbolKind::NoType
-            }
+            },
             _ => {
                 return Err(parser_err(
                     tokens,
                     *pos,
                     "Expected symbol kind function, object or notype",
                 ))
-            }
+            },
         };
         *pos += 1;
         comma(pos)?;
-        let size = parse_expr(tokens, pos, |k| {
-            matches!(k, TokenKind::Comma | TokenKind::Newline)
-        })?;
+        let size = parse_expr(tokens, pos, |k| matches!(k, TokenKind::Comma | TokenKind::Newline))?;
         comma(pos)?;
         let visibility = match tokens.get(*pos).map(|t| &t.kind) {
             Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("default") => {
                 crate::SymbolVisibility::Default
-            }
+            },
             Some(TokenKind::Identifier(s)) if s.eq_ignore_ascii_case("hidden") => {
                 crate::SymbolVisibility::Hidden
-            }
+            },
             _ => {
                 return Err(parser_err(
                     tokens,
                     *pos,
                     "Expected symbol visibility default or hidden",
                 ))
-            }
+            },
         };
         *pos += 1;
         finish_statement(tokens, pos)?;
-        return Ok(ASTNode::SymbolMetadata {
-            name: symbol,
-            kind,
-            size,
-            visibility,
-        });
+        return Ok(ASTNode::SymbolMetadata { name: symbol, kind, size, visibility });
     }
     if matches!(name.as_str(), "section" | "global" | "extern") {
         let argument = match tokens.get(*pos).map(|t| &t.kind) {
@@ -441,7 +395,7 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
                             *pos,
                             "Expected section kind text/data/rodata/bss",
                         ))
-                    }
+                    },
                 },
                 _ => {
                     return Err(parser_err(
@@ -449,14 +403,11 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
                         *pos,
                         "Expected section kind text/data/rodata/bss",
                     ))
-                }
+                },
             };
             *pos += 1;
             finish_statement(tokens, pos)?;
-            return Ok(ASTNode::SectionAttributes {
-                name: argument,
-                kind,
-            });
+            return Ok(ASTNode::SectionAttributes { name: argument, kind });
         }
         finish_statement(tokens, pos)?;
         return Ok(match name.as_str() {
@@ -475,13 +426,13 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
             TokenKind::StringLiteral(s) => {
                 values.push(DirectiveValue::StringLiteral(s.clone()));
                 *pos += 1;
-            }
+            },
             _ => {
                 let expr = parse_expr(tokens, pos, |k| {
                     matches!(k, TokenKind::Comma | TokenKind::Newline)
                 })?;
                 values.push(DirectiveValue::Expr(expr));
-            }
+            },
         }
         if !matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma)) {
             break;
@@ -489,11 +440,7 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
         let comma = *pos;
         *pos += 1;
         if *pos >= tokens.len() || matches!(tokens[*pos].kind, TokenKind::Newline) {
-            return Err(parser_err(
-                tokens,
-                comma,
-                "Expected directive value after comma",
-            ));
+            return Err(parser_err(tokens, comma, "Expected directive value after comma"));
         }
     }
     finish_statement(tokens, pos)?;
@@ -518,11 +465,11 @@ where
             match kind {
                 TokenKind::Plus => {
                     *pos += 1;
-                }
+                },
                 TokenKind::Minus => {
                     sign = -sign;
                     *pos += 1;
-                }
+                },
                 TokenKind::Number(n) => {
                     let term = ExprValue::Number(sign.checked_mul(*n).ok_or_else(|| {
                         parser_err(tokens, *pos, "Expression arithmetic overflow")
@@ -531,7 +478,7 @@ where
                     *pos += 1;
                     sign = 1;
                     expect_term = false;
-                }
+                },
                 TokenKind::Identifier(s) => {
                     if sign < 0 {
                         return Err(parser_err(
@@ -540,15 +487,12 @@ where
                             "Unary '-' before symbol is not supported",
                         ));
                     }
-                    let term = ExprValue::Symbol {
-                        name: s.clone(),
-                        addend: 0,
-                    };
+                    let term = ExprValue::Symbol { name: s.clone(), addend: 0 };
                     acc = Some(combine_expr(tokens, *pos, acc, term)?);
                     *pos += 1;
                     sign = 1;
                     expect_term = false;
-                }
+                },
                 _ => return Err(parser_err(tokens, *pos, "Expected expression term")),
             }
         } else {
@@ -557,29 +501,19 @@ where
                     sign = 1;
                     expect_term = true;
                     *pos += 1;
-                }
+                },
                 TokenKind::Minus => {
                     sign = -1;
                     expect_term = true;
                     *pos += 1;
-                }
-                _ => {
-                    return Err(parser_err(
-                        tokens,
-                        *pos,
-                        "Expected '+' or '-' in expression",
-                    ))
-                }
+                },
+                _ => return Err(parser_err(tokens, *pos, "Expected '+' or '-' in expression")),
             }
         }
     }
 
     if expect_term && acc.is_some() {
-        return Err(parser_err(
-            tokens,
-            *pos,
-            "Expression cannot end with operator",
-        ));
+        return Err(parser_err(tokens, *pos, "Expression cannot end with operator"));
     }
 
     let expression = acc.ok_or_else(|| parser_err(tokens, *pos, "Expected expression"))?;
@@ -588,11 +522,7 @@ where
     // A symbol's addend is checked only after equ resolution or relocation use.
     if let ExprValue::Number(number) = &expression {
         if !(i64::MIN as i128..=u64::MAX as i128).contains(number) {
-            return Err(parser_err(
-                tokens,
-                pos.saturating_sub(1),
-                "64-bit expression overflow",
-            ));
+            return Err(parser_err(tokens, pos.saturating_sub(1), "64-bit expression overflow"));
         }
     }
     Ok(expression)
@@ -611,7 +541,7 @@ fn combine_expr(
                 .checked_add(b)
                 .ok_or_else(|| parser_err(tokens, pos, "Expression arithmetic overflow"))?;
             Ok(ExprValue::Number(n))
-        }
+        },
         (Some(ExprValue::Number(a)), ExprValue::Symbol { name, addend }) => Ok(ExprValue::Symbol {
             name,
             addend: addend
@@ -624,11 +554,9 @@ fn combine_expr(
                 .checked_add(b)
                 .ok_or_else(|| parser_err(tokens, pos, "Symbol addend overflow"))?,
         }),
-        (Some(ExprValue::Symbol { .. }), ExprValue::Symbol { .. }) => Err(parser_err(
-            tokens,
-            pos,
-            "Expressions with multiple symbols are not supported",
-        )),
+        (Some(ExprValue::Symbol { .. }), ExprValue::Symbol { .. }) => {
+            Err(parser_err(tokens, pos, "Expressions with multiple symbols are not supported"))
+        },
     }
 }
 

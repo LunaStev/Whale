@@ -1,5 +1,7 @@
 use ir::*;
+
 use whale_diagnostic::{Context, ToDiagnostic};
+
 #[test]
 fn parser_and_verifier_keep_typed_categories_and_available_locations() {
     let e = parse_module("not a module").unwrap_err();
@@ -16,11 +18,10 @@ fn parser_and_verifier_keep_typed_categories_and_available_locations() {
     };
     let d = e.diagnostic();
     assert_eq!(d.code, "ir.verify.non-dominating-value");
-    assert!(d
-        .contexts
-        .contains(&Context::Symbol("provided-function".into())));
+    assert!(d.contexts.contains(&Context::Symbol("provided-function".into())));
     assert!(d.contexts.contains(&Context::Block(7)));
 }
+
 #[test]
 fn runtime_conversion_keeps_original_source_and_leaf_operation_from_same_cause() {
     let module = parse_module(include_str!("fixtures/runtime-diagnostics-v7.wir")).unwrap();
@@ -37,6 +38,7 @@ fn runtime_conversion_keeps_original_source_and_leaf_operation_from_same_cause()
         matches!(error.root_cause(),InterpreterError::Trap(t)if t.reason==TrapReason::DivisionByZero)
     );
 }
+
 #[cfg(feature = "socket")]
 #[test]
 fn located_frontend_cause_retains_source_and_original_identity() {

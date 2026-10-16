@@ -3,7 +3,9 @@ use super::{
     executable::write_executable_checked,
     selection::{select, LinkInput},
 };
+
 use crate::diagnostic::{LinkError, LinkErrorKind};
+
 use object::{ObjectFile, ObjectReadLimits};
 
 pub struct Linker {
@@ -12,13 +14,16 @@ pub struct Linker {
     entry: String,
     read_budget: archive::ReadBudget,
 }
+
 pub enum OutputFormat {
     ELF64Executable,
 }
+
 impl Linker {
     pub fn new(format: OutputFormat) -> Self {
         Self::with_read_limits(format, ObjectReadLimits::default())
     }
+
     /// Reader limits are cumulative across every byte-loaded object and archive.
     /// Already-owned objects passed to `add_object` remain caller allocations.
     pub fn with_read_limits(format: OutputFormat, limits: ObjectReadLimits) -> Self {
@@ -29,9 +34,11 @@ impl Linker {
             read_budget: archive::ReadBudget::new(limits),
         }
     }
+
     pub fn add_object(&mut self, object: ObjectFile) {
         self.inputs.push(LinkInput::Object(object));
     }
+
     pub fn add_object_bytes(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
         let index = self.inputs.len();
         let object = self.read_budget.object(bytes).map_err(|mut error| {
@@ -41,6 +48,7 @@ impl Linker {
         self.inputs.push(LinkInput::Object(object));
         Ok(())
     }
+
     pub fn add_archive(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
         let index = self.inputs.len();
         let members = self.read_budget.archive(bytes).map_err(|mut error| {
@@ -50,15 +58,19 @@ impl Linker {
         self.inputs.push(LinkInput::Archive(members));
         Ok(())
     }
+
     pub fn set_entry(&mut self, entry: impl Into<String>) {
         self.entry = entry.into();
     }
+
     pub fn link(&mut self) -> Result<Vec<u8>, String> {
         self.link_checked().map_err(|e| e.to_string())
     }
+
     pub fn link_checked(&mut self) -> Result<Vec<u8>, LinkError> {
         self.link_with_limit(256 * 1024 * 1024)
     }
+
     pub fn link_with_limit(&mut self, max_bytes: u64) -> Result<Vec<u8>, LinkError> {
         for (index, input) in self.inputs.iter().enumerate() {
             match input {
@@ -82,20 +94,21 @@ impl Linker {
                             )
                         })?;
                     }
-                }
+                },
             }
         }
+
         let objects = select(&self.inputs, &self.entry, max_bytes)
             .map_err(|e| LinkError::new(LinkErrorKind::Selection, e))?;
+
         // Resolve first to preserve the public unresolved-reference diagnostic boundary.
         let mut symbols = super::symbol_table::SymbolTable::new();
-        symbols
-            .resolve(&objects)
-            .map_err(|e| LinkError::new(LinkErrorKind::Symbols, e))?;
+        symbols.resolve(&objects).map_err(|e| LinkError::new(LinkErrorKind::Symbols, e))?;
+
         match self.output_format {
             OutputFormat::ELF64Executable => {
                 write_executable_checked(&objects, &self.entry, max_bytes)
-            }
+            },
         }
     }
 }

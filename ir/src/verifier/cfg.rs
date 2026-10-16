@@ -21,24 +21,15 @@ impl Cfg {
         f: &super::IndexedFunction<'_>,
         budget: &super::AnalysisBudget,
     ) -> Result<Self, VerifyError> {
-        let indices: HashMap<_, _> = f
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, b)| (b.id, i))
-            .collect();
+        let indices: HashMap<_, _> = f.blocks.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
         let mut successors = vec![Vec::new(); f.blocks.len()];
         let mut predecessors = vec![Vec::new(); f.blocks.len()];
         for (index, block) in f.blocks.iter().enumerate() {
             budget.charge()?;
             let targets = match block.terminator.as_ref().unwrap() {
                 Terminator::Br { target } => vec![*target],
-                Terminator::CBr {
-                    then_bb, else_bb, ..
-                } => vec![*then_bb, *else_bb],
-                Terminator::Switch {
-                    default_bb, cases, ..
-                } => std::iter::once(*default_bb)
+                Terminator::CBr { then_bb, else_bb, .. } => vec![*then_bb, *else_bb],
+                Terminator::Switch { default_bb, cases, .. } => std::iter::once(*default_bb)
                     .chain(cases.iter().map(|(_, target)| *target))
                     .collect(),
                 Terminator::Ret { .. } | Terminator::Trap { .. } => vec![],
@@ -111,7 +102,7 @@ impl Cfg {
                                 }
                             }
                             a
-                        }
+                        },
                     });
                 }
                 if next != idom[block] {
@@ -149,17 +140,8 @@ impl Cfg {
                 stack.extend(children[block].iter().rev().map(|&child| (child, false)));
             }
         }
-        let predecessor_sets = predecessors
-            .iter()
-            .map(|ps| ps.iter().copied().collect())
-            .collect();
-        Ok(Self {
-            indices,
-            predecessors,
-            idom,
-            intervals,
-            predecessor_sets,
-        })
+        let predecessor_sets = predecessors.iter().map(|ps| ps.iter().copied().collect()).collect();
+        Ok(Self { indices, predecessors, idom, intervals, predecessor_sets })
     }
 
     fn dominates(
@@ -173,7 +155,7 @@ impl Cfg {
         Ok(match (self.intervals[definition], self.intervals[usage]) {
             (Some((start, end)), Some((use_start, use_end))) => {
                 start <= use_start && use_end <= end
-            }
+            },
             _ => false,
         })
     }
@@ -194,13 +176,9 @@ pub(super) fn verify(
         }
     }
     let available = |value: ValueId, block: usize, position: usize| {
-        let definition =
-            definitions
-                .get(&value)
-                .ok_or_else(|| VerifyError::UseOfUndefinedValue {
-                    func: f.name.clone(),
-                    value,
-                })?;
+        let definition = definitions
+            .get(&value)
+            .ok_or_else(|| VerifyError::UseOfUndefinedValue { func: f.name.clone(), value })?;
         // Unreachable code remains in the module and still undergoes identity,
         // operand/type and CFG checks. No executable entry path exists on which
         // to require a dominating definition for its uses.

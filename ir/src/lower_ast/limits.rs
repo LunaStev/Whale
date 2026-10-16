@@ -18,6 +18,7 @@ pub struct AstLimits {
     /// Work units for optional source mapping during O0 construction.
     pub max_source_work: usize,
 }
+
 impl Default for AstLimits {
     fn default() -> Self {
         Self {
@@ -39,6 +40,7 @@ pub enum AstLimitError {
     Strings,
     Output,
 }
+
 impl std::fmt::Display for AstLimitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -51,6 +53,7 @@ impl std::fmt::Display for AstLimitError {
         })
     }
 }
+
 impl std::error::Error for AstLimitError {}
 
 enum Node<'a> {
@@ -59,6 +62,7 @@ enum Node<'a> {
     Type(&'a TypeRef),
     Signature(&'a SignatureRef),
 }
+
 struct Inspect<'a> {
     limits: AstLimits,
     nodes: usize,
@@ -68,6 +72,7 @@ struct Inspect<'a> {
     source_ids: std::collections::HashSet<u64>,
     wire_numbers: bool,
 }
+
 impl<'a> Inspect<'a> {
     fn source(&mut self, annotation: &crate::SourceAnnotation) -> Result<(), AstLimitError> {
         if !self.source_ids.insert(annotation.id) {
@@ -89,6 +94,7 @@ impl<'a> Inspect<'a> {
         }
         Ok(())
     }
+
     fn count(&mut self) -> Result<(), AstLimitError> {
         self.nodes = self.nodes.checked_add(1).ok_or(AstLimitError::Nodes)?;
         if self.nodes > self.limits.max_nodes {
@@ -96,16 +102,15 @@ impl<'a> Inspect<'a> {
         }
         Ok(())
     }
+
     fn string(&mut self, s: &str) -> Result<(), AstLimitError> {
-        self.strings = self
-            .strings
-            .checked_add(s.len())
-            .ok_or(AstLimitError::Strings)?;
+        self.strings = self.strings.checked_add(s.len()).ok_or(AstLimitError::Strings)?;
         if self.strings > self.limits.max_string_bytes {
             return Err(AstLimitError::Strings);
         }
         Ok(())
     }
+
     fn push(&mut self, node: Node<'a>, depth: usize) -> Result<(), AstLimitError> {
         if depth > self.limits.max_depth.min(MAX_AST_DEPTH) {
             return Err(AstLimitError::Depth);
@@ -191,27 +196,24 @@ fn inspect_program_details(
                 for t in &s.params {
                     i.push(Node::Type(t), next)?;
                 }
-            }
+            },
             Node::Type(t) => match t {
                 TypeRef::Int { bits, .. } => i.wire_numbers &= valid_int_width(*bits),
                 TypeRef::Float { bits } => i.wire_numbers &= matches!(bits, 16 | 32 | 64),
                 TypeRef::Ptr(t) | TypeRef::Array { elem: t, .. } => i.push(Node::Type(t), next)?,
                 TypeRef::FnPtr(s) => i.push(Node::Signature(s), next)?,
                 TypeRef::Opaque(s) => i.string(s)?,
-                _ => {}
+                _ => {},
             },
             Node::Expr(e) => match e {
-                Expr::Located {
-                    annotation,
-                    expression,
-                } => {
+                Expr::Located { annotation, expression } => {
                     i.source(annotation)?;
                     i.push(Node::Expr(expression), next)?;
-                }
+                },
                 Expr::BitNot(value) => {
                     i.extended_ops |= 1;
                     i.push(Node::Expr(value), next)?;
-                }
+                },
                 Expr::FunctionRef(s) | Expr::Var(s) => i.string(s)?,
                 Expr::NullFunction(s) => i.push(Node::Signature(s), next)?,
                 Expr::Call { callee, args } => {
@@ -222,81 +224,74 @@ fn inspect_program_details(
                     for e in args {
                         i.push(Node::Expr(e), next)?;
                     }
-                }
+                },
                 Expr::Lit(Lit::Int { bits, value, .. }) => {
                     i.string(value)?;
                     let digits = value.strip_prefix('-').unwrap_or(value);
                     i.wire_numbers &= valid_int_width(*bits)
                         && !digits.is_empty()
                         && digits.bytes().all(|b| b.is_ascii_digit());
-                }
+                },
                 Expr::Lit(Lit::Float { bits, value }) => {
                     i.string(value)?;
                     i.wire_numbers &= matches!(bits, 16 | 32 | 64)
                         && value.len() == 2 + usize::from(*bits) / 4
                         && value.starts_with("0x")
                         && value[2..].bytes().all(|b| b.is_ascii_hexdigit());
-                }
-                Expr::Lit(Lit::Bool(_)) => {}
+                },
+                Expr::Lit(Lit::Bool(_)) => {},
                 Expr::Binary { left, op, right } => {
                     if !matches!(op, BinOpRef::Add | BinOpRef::Sub | BinOpRef::Mul) {
                         i.extended_ops |= 1;
                     }
                     i.push(Node::Expr(left), next)?;
                     i.push(Node::Expr(right), next)?;
-                }
+                },
                 Expr::Cmp { left, right, .. } => {
                     i.push(Node::Expr(left), next)?;
                     i.push(Node::Expr(right), next)?;
-                }
+                },
             },
             Node::Stmt(s) => match s {
-                Stmt::Located {
-                    annotation,
-                    statement,
-                } => {
+                Stmt::Located { annotation, statement } => {
                     i.source(annotation)?;
                     i.push(Node::Stmt(statement), next)?;
-                }
+                },
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         i.push(Node::Expr(e), next)?;
                     }
-                }
+                },
                 Stmt::ConstDecl { name, ty, init } => {
                     i.string(name)?;
                     i.push(Node::Type(ty), next)?;
                     i.push(Node::Expr(init), next)?;
-                }
+                },
                 Stmt::VarDecl { name, ty, init } => {
                     i.string(name)?;
                     i.push(Node::Type(ty), next)?;
                     if let Some(e) = init {
                         i.push(Node::Expr(e), next)?;
                     }
-                }
+                },
                 Stmt::Assign { name, value } => {
                     i.string(name)?;
                     i.push(Node::Expr(value), next)?;
-                }
+                },
                 Stmt::ExprStmt(e) => i.push(Node::Expr(e), next)?,
-                Stmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                } => {
+                Stmt::If { cond, then_body, else_body } => {
                     i.push(Node::Expr(cond), next)?;
                     for s in then_body.iter().chain(else_body) {
                         i.push(Node::Stmt(s), next)?;
                     }
-                }
+                },
                 Stmt::While { cond, body } => {
                     i.push(Node::Expr(cond), next)?;
                     for s in body {
                         i.push(Node::Stmt(s), next)?;
                     }
-                }
-                Stmt::Break | Stmt::Continue => {}
+                },
+                Stmt::Break | Stmt::Continue => {},
             },
         }
     }
@@ -309,12 +304,14 @@ enum Owned {
     Type(TypeRef),
     Signature(SignatureRef),
 }
+
 enum Disposal {
     One(Owned),
     Types(std::vec::IntoIter<TypeRef>),
     Exprs(std::vec::IntoIter<Expr>),
     Stmts(std::vec::IntoIter<Stmt>),
 }
+
 /// Dispose of an owned rejected tree without its recursively derived destructor.
 /// Owning iterators reuse the tree's vectors, keeping extra storage bounded by
 /// depth rather than copying all siblings of a wide tree into another allocation.
@@ -337,6 +334,7 @@ pub(crate) fn discard_program(program: Program) {
         }
     }
 }
+
 fn discard(root: Owned, pending: &mut Vec<Disposal>) {
     pending.push(Disposal::One(root));
     while let Some(work) = pending.pop() {
@@ -346,84 +344,80 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 let Some(node) = iter.next() else { continue };
                 pending.push(Disposal::Types(iter));
                 Owned::Type(node)
-            }
+            },
             Disposal::Exprs(mut iter) => {
                 let Some(node) = iter.next() else { continue };
                 pending.push(Disposal::Exprs(iter));
                 Owned::Expr(node)
-            }
+            },
             Disposal::Stmts(mut iter) => {
                 let Some(node) = iter.next() else { continue };
                 pending.push(Disposal::Stmts(iter));
                 Owned::Stmt(node)
-            }
+            },
         };
         match node {
             Owned::Type(t) => match t {
                 TypeRef::Ptr(t) | TypeRef::Array { elem: t, .. } => {
                     pending.push(Disposal::One(Owned::Type(*t)))
-                }
+                },
                 TypeRef::FnPtr(s) => pending.push(Disposal::One(Owned::Signature(*s))),
-                _ => {}
+                _ => {},
             },
             Owned::Signature(s) => {
                 pending.push(Disposal::One(Owned::Type(s.ret)));
                 pending.push(Disposal::Types(s.params.into_iter()));
-            }
+            },
             Owned::Expr(e) => match e {
                 Expr::Located { expression, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*expression)))
-                }
+                },
                 Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*right)));
                     pending.push(Disposal::One(Owned::Expr(*left)));
-                }
+                },
                 Expr::Call { callee, args } => {
                     if let CalleeRef::Indirect(e) = callee {
                         pending.push(Disposal::One(Owned::Expr(*e)));
                     }
                     pending.push(Disposal::Exprs(args.into_iter()));
-                }
-                _ => {}
+                },
+                _ => {},
             },
             Owned::Stmt(s) => match s {
                 Stmt::Located { statement, .. } => {
                     pending.push(Disposal::One(Owned::Stmt(*statement)))
-                }
+                },
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         pending.push(Disposal::One(Owned::Expr(e)));
                     }
-                }
+                },
                 Stmt::ConstDecl { ty, init, .. } => {
                     pending.push(Disposal::One(Owned::Type(ty)));
                     pending.push(Disposal::One(Owned::Expr(init)));
-                }
+                },
                 Stmt::VarDecl { ty, init, .. } => {
                     pending.push(Disposal::One(Owned::Type(ty)));
                     if let Some(e) = init {
                         pending.push(Disposal::One(Owned::Expr(e)));
                     }
-                }
+                },
                 Stmt::Assign { value, .. } | Stmt::ExprStmt(value) => {
                     pending.push(Disposal::One(Owned::Expr(value)))
-                }
-                Stmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                } => {
+                },
+                Stmt::If { cond, then_body, else_body } => {
                     pending.push(Disposal::One(Owned::Expr(cond)));
                     pending.push(Disposal::Stmts(then_body.into_iter()));
                     pending.push(Disposal::Stmts(else_body.into_iter()));
-                }
+                },
                 Stmt::While { cond, body } => {
                     pending.push(Disposal::One(Owned::Expr(cond)));
                     pending.push(Disposal::Stmts(body.into_iter()));
-                }
-                Stmt::Break | Stmt::Continue => {}
+                },
+                Stmt::Break | Stmt::Continue => {},
             },
         }
     }

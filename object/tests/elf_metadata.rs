@@ -1,5 +1,7 @@
 mod common;
+
 use common::*;
+
 use object::*;
 
 #[test]
@@ -144,11 +146,7 @@ fn all_relocation_kinds_link_to_exact_symbol_and_section_with_signed_addends() {
     for name in [".text", ".data"] {
         let i = o.add_section(
             name,
-            if name == ".text" {
-                SectionKind::Text
-            } else {
-                SectionKind::Data
-            },
+            if name == ".text" { SectionKind::Text } else { SectionKind::Data },
             8,
         );
         o.sections[i].data = vec![0; 48];
@@ -209,20 +207,12 @@ fn all_relocation_kinds_link_to_exact_symbol_and_section_with_signed_addends() {
             assert_eq!(info as u32, kind);
             let sym = &syms[(info >> 32) as usize];
             assert_eq!(sym.name, ["local", "defined", "undefined"][i % 3]);
-            assert_eq!(
-                u64_at(&bytes, p + 16) as i64,
-                if i % 2 == 0 { 0x0b } else { -0x0a }
-            );
+            assert_eq!(u64_at(&bytes, p + 16) as i64, if i % 2 == 0 { 0x0b } else { -0x0a });
         }
     }
     let undefined = syms.iter().find(|s| s.name == "undefined").unwrap();
     assert_eq!(
-        (
-            undefined.section,
-            undefined.binding,
-            undefined.kind,
-            undefined.size
-        ),
+        (undefined.section, undefined.binding, undefined.kind, undefined.size),
         (0, 1, 0, 0)
     );
 }

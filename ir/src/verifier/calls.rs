@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 use crate::{CallError, Callee, Instruction, Module, Type, VerifyError};
+
 use std::collections::HashSet;
 
 fn error(name: &str, reason: CallError) -> VerifyError {
-    VerifyError::Call {
-        func: name.into(),
-        reason,
-    }
+    VerifyError::Call { func: name.into(), reason }
 }
 
 pub(super) fn verify_declarations(m: &Module, limits: crate::IrLimits) -> Result<(), VerifyError> {
@@ -30,17 +28,11 @@ pub(super) fn verify_declarations(m: &Module, limits: crate::IrLimits) -> Result
         crate::function::validate_decl_with_limits(decl, limits)
             .map_err(|e| error(&decl.name, e))?;
         if !ids.insert(decl.id) || !names.insert(&decl.name) {
-            return Err(error(
-                &decl.name,
-                CallError::ConflictingDeclaration(decl.name.clone()),
-            ));
+            return Err(error(&decl.name, CallError::ConflictingDeclaration(decl.name.clone())));
         }
         if let Some(link) = &decl.link_name {
             if !links.insert(link) {
-                return Err(error(
-                    &decl.name,
-                    CallError::LinkNameCollision(link.clone()),
-                ));
+                return Err(error(&decl.name, CallError::LinkNameCollision(link.clone())));
             }
         }
         if decl.linkage == crate::Linkage::Internal && !m.functions.iter().any(|f| f.id == decl.id)
@@ -78,12 +70,8 @@ pub(super) fn verify_instruction(
         match ins {
             Instruction::NullFunction { signature, .. } => {
                 crate::function::validate_signature_with_limits(signature, limits)?
-            }
-            Instruction::FunctionAddr {
-                function,
-                signature,
-                ..
-            } => {
+            },
+            Instruction::FunctionAddr { function, signature, .. } => {
                 let decl = m
                     .declarations
                     .iter()
@@ -92,14 +80,8 @@ pub(super) fn verify_instruction(
                 if &decl.signature != signature {
                     return Err(CallError::AddressTypeMismatch);
                 }
-            }
-            Instruction::Call {
-                dst,
-                ret_ty,
-                convention,
-                callee,
-                args,
-            } => {
+            },
+            Instruction::Call { dst, ret_ty, convention, callee, args } => {
                 let sig = match callee {
                     Callee::Direct(id) => {
                         &m.declarations
@@ -107,7 +89,7 @@ pub(super) fn verify_instruction(
                             .find(|d| d.id == *id)
                             .ok_or(CallError::UnknownFunction(*id))?
                             .signature
-                    }
+                    },
                     Callee::Indirect(value) => match f.value_type(*value) {
                         Some(Type::FnPtr(sig)) => sig,
                         Some(_) => return Err(CallError::NotFunctionPointer(*value)),
@@ -134,9 +116,7 @@ pub(super) fn verify_instruction(
                     });
                 }
                 for (index, (value, expected)) in args.iter().zip(&sig.params).enumerate() {
-                    let got = f
-                        .value_type(*value)
-                        .ok_or(CallError::UnknownValue(*value))?;
+                    let got = f.value_type(*value).ok_or(CallError::UnknownValue(*value))?;
                     if got != expected {
                         return Err(CallError::ArgumentType {
                             index,
@@ -145,24 +125,19 @@ pub(super) fn verify_instruction(
                         });
                     }
                 }
-            }
-            Instruction::Cast {
-                src,
-                src_ty,
-                dst_ty,
-                op,
-                ..
-            } if !(matches!(op, crate::CastOp::Bitcast)
-                && matches!(src_ty, Type::Ptr(_))
-                && matches!(dst_ty, Type::Ptr(_))
-                && matches!(f.value_type(*src), Some(Type::Ptr(_))))
-                && (contains_function_pointer(src_ty)
-                    || contains_function_pointer(dst_ty)
-                    || f.value_type(*src).is_some_and(contains_function_pointer)) =>
+            },
+            Instruction::Cast { src, src_ty, dst_ty, op, .. }
+                if !(matches!(op, crate::CastOp::Bitcast)
+                    && matches!(src_ty, Type::Ptr(_))
+                    && matches!(dst_ty, Type::Ptr(_))
+                    && matches!(f.value_type(*src), Some(Type::Ptr(_))))
+                    && (contains_function_pointer(src_ty)
+                        || contains_function_pointer(dst_ty)
+                        || f.value_type(*src).is_some_and(contains_function_pointer)) =>
             {
                 return Err(CallError::ForbiddenFunctionPointerCast)
-            }
-            _ => {}
+            },
+            _ => {},
         }
         Ok(())
     };
@@ -187,7 +162,7 @@ fn validate_pointer_types(ty: &Type, limits: crate::IrLimits) -> Result<(), Call
                 validate_pointer_types(t, limits)?;
             }
             Ok(())
-        }
+        },
         _ => Ok(()),
     }
 }

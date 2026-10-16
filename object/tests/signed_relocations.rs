@@ -1,4 +1,5 @@
 use object::*;
+
 #[test]
 fn signed_absolute32_roundtrips_as_distinct_elf_type_eleven() {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);

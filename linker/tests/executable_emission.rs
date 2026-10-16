@@ -1,5 +1,7 @@
 use linker::core::executable::{executable_layout, write_executable};
+
 use object::*;
+
 fn program() -> ObjectFile {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
     o.add_section(".text", SectionKind::Text, 16);
@@ -16,9 +18,11 @@ fn program() -> ObjectFile {
     });
     o
 }
+
 fn u64at(bytes: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap())
 }
+
 #[test]
 fn headers_segments_permissions_and_sparse_bss_agree() {
     let mut o = program();
@@ -36,10 +40,7 @@ fn headers_segments_permissions_and_sparse_bss_agree() {
     for (i, flags) in [5u32, 4, 6].into_iter().enumerate() {
         let at = 64 + i * 56;
         assert_eq!(u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()), 1);
-        assert_eq!(
-            u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()),
-            flags
-        );
+        assert_eq!(u32::from_le_bytes(bytes[at + 4..at + 8].try_into().unwrap()), flags);
         assert_eq!(u64at(&bytes, at + 8) % 4096, u64at(&bytes, at + 16) % 4096);
         assert!(u64at(&bytes, at + 32) <= u64at(&bytes, at + 40));
         assert!(u64at(&bytes, at + 8) + u64at(&bytes, at + 32) <= bytes.len() as u64);
@@ -47,11 +48,10 @@ fn headers_segments_permissions_and_sparse_bss_agree() {
     assert!(u64at(&bytes, 64 + 2 * 56 + 40) > 1 << 30);
     assert!(bytes.len() < 65536);
 }
+
 #[test]
 fn invalid_entry_and_limits_fail_before_output() {
-    assert!(write_executable(&[program()], "missing", 65536)
-        .unwrap_err()
-        .contains("entry"));
+    assert!(write_executable(&[program()], "missing", 65536).unwrap_err().contains("entry"));
     assert!(write_executable(&[program()], "_start", 1).is_err());
     let mut o = program();
     o.symbols[0].value = 12;
@@ -64,6 +64,7 @@ fn invalid_entry_and_limits_fail_before_output() {
     o.sections[0].align = 3;
     assert!(executable_layout(&[o], 65536).is_err());
 }
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn syscall_only_executable_runs_with_the_asserted_exit_status() {
@@ -82,9 +83,7 @@ fn sparse_bss_must_fit_portable_lower_user_address_space() {
     let mut o = program();
     o.add_section(".bss", SectionKind::Bss, 1);
     o.sections[1].zero_fill = 1 << 63;
-    assert!(write_executable(&[o.clone()], "_start", 8192)
-        .unwrap_err()
-        .contains("user address"));
+    assert!(write_executable(&[o.clone()], "_start", 8192).unwrap_err().contains("user address"));
     o.sections[1].zero_fill = 1 << 40;
     let bytes = write_executable(&[o.clone()], "_start", 8192).unwrap();
     assert_eq!(bytes.len(), 4096);

@@ -42,10 +42,7 @@ fn width_mismatch_is_invalid_ir_and_bit_equality_distinguishes_zero_and_nan() {
     let mut module = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
     module.add_global("wrong", Type::F32, ConstValue::F(FloatBits::F64(0)), 4);
     assert!(ir::verify_module(&module.finish()).is_err());
-    assert_ne!(
-        ConstValue::F(FloatBits::F32(0)),
-        ConstValue::F(FloatBits::F32(0x80000000))
-    );
+    assert_ne!(ConstValue::F(FloatBits::F32(0)), ConstValue::F(FloatBits::F32(0x80000000)));
     assert_eq!(
         ConstValue::F(FloatBits::F32(0x7fc00001)),
         ConstValue::F(FloatBits::F32(0x7fc00001))

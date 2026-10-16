@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -15,9 +16,9 @@ SKIP_DIRS = {
 }
 
 
-def rust_files():
+def source_files():
     result = subprocess.run(
-        ["git", "ls-files", "-z", "*.rs"],
+        ["git", "ls-files", "-co", "--exclude-standard", "-z", "--", "*.rs", "*.wave"],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -42,6 +43,18 @@ def strip_lexical_content(line, state):
     i = 0
 
     while i < len(line):
+        if state["raw_string_hashes"] is not None:
+            terminator = '"' + "#" * state["raw_string_hashes"]
+
+            if line.startswith(terminator, i):
+                state["raw_string_hashes"] = None
+                result.extend(" " * len(terminator))
+                i += len(terminator)
+            else:
+                result.append(" ")
+                i += 1
+            continue
+
         if state["block_comment"] > 0:
             if line.startswith("/*", i):
                 state["block_comment"] += 1
@@ -102,6 +115,14 @@ def strip_lexical_content(line, state):
             i += 2
             continue
 
+        raw_string = re.match(r'(?:b|c)?r(#{0,})"', line[i:])
+
+        if raw_string:
+            state["raw_string_hashes"] = len(raw_string.group(1))
+            result.extend(" " * len(raw_string.group(0)))
+            i += len(raw_string.group(0))
+            continue
+
         if line[i] == '"':
             state["string"] = True
             result.append(" ")
@@ -109,10 +130,13 @@ def strip_lexical_content(line, state):
             continue
 
         if line[i] == "'":
-            # Rust lifetimes such as 'a must not be treated as char literals.
-            if i + 1 < len(line) and (
-                line[i + 1].isalpha() or line[i + 1] == "_"
-            ):
+            closing_quote = line.find("'", i + 1)
+            is_char_literal = (
+                closing_quote != -1
+                and not any(char.isspace() for char in line[i + 1:closing_quote])
+            )
+
+            if not is_char_literal:
                 result.append("'")
                 i += 1
                 continue
@@ -128,111 +152,95 @@ def strip_lexical_content(line, state):
     return "".join(result)
 
 
-def is_function_start(text):
+def is_item_start(text):
     stripped = text.lstrip()
-
-    while stripped.startswith("#["):
-        return False
-
-    prefixes = (
-        "fn ",
-        "pub fn ",
-        "pub(crate) fn ",
-        "pub(super) fn ",
-        "pub(self) fn ",
-        "async fn ",
-        "pub async fn ",
-        "pub(crate) async fn ",
-        "pub(super) async fn ",
-        "unsafe fn ",
-        "pub unsafe fn ",
-        "const fn ",
-        "pub const fn ",
-        "extern ",
-        "pub extern ",
-    )
-
-    return stripped.startswith(prefixes)
+    return re.match(
+        r"^(?:(?:pub(?:\s*\([^)]*\))?|export\([^)]*\))\s+)?(?:"
+        r"(?:(?:default|const|async|unsafe)\s+)*(?:extern(?:\s+\"[^\"]+\")?\s+)?fn\b|"
+        r"fun\s+[A-Za-z_]\w*\s*\(|"
+        r"(?:(?:unsafe|auto)\s+)*(?:trait|impl)\b|"
+        r"enum\b|struct\b|union\b|mod\b|type\b|use\b|static\b|const\b|"
+        r"(?:unsafe\s+)?extern(?:\s+\"[^\"]+\")?\s*(?:\{|crate\b)|"
+        r"macro_rules!)",
+        stripped,
+    ) is not None
 
 
-def function_ranges(lines):
+def item_ranges(lines):
     state = {
         "block_comment": 0,
         "string": False,
         "char": False,
         "escape": False,
+        "raw_string_hashes": None,
     }
 
     depth = 0
-    active = None
+    active = []
     ranges = []
+    next_id = 0
 
     for index, line in enumerate(lines):
         lexical = strip_lexical_content(line, state)
         depth_before = depth
 
-        if active is None and is_function_start(lexical):
-            active = {
+        if is_item_start(lexical):
+            active.append({
+                "id": next_id,
+                "parent_id": active[-1]["id"] if active else None,
                 "start": index,
                 "parent_depth": depth_before,
                 "body_seen": False,
-            }
+            })
+            next_id += 1
 
         opens = lexical.count("{")
         closes = lexical.count("}")
 
-        # A trait/extern declaration has no body. Do not carry it forward into
-        # the next impl block and mistake that block's opening for its end.
         if (
-            active is not None
-            and not active["body_seen"]
+            active
+            and not active[-1]["body_seen"]
             and opens == 0
             and lexical.rstrip().endswith(";")
         ):
-            active = None
+            item = active.pop()
+            ranges.append((item["start"], index, item["parent_id"]))
 
-        if active is not None and opens > 0:
-            active["body_seen"] = True
+        if active and opens > 0:
+            active[-1]["body_seen"] = True
 
         depth += opens
         depth -= closes
 
-        if (
-            active is not None
-            and active["body_seen"]
-            and depth == active["parent_depth"]
-        ):
-            ranges.append((active["start"], index, active["parent_depth"]))
-            active = None
+        while active and active[-1]["body_seen"] and depth == active[-1]["parent_depth"]:
+            item = active.pop()
+            ranges.append((item["start"], index, item["parent_id"]))
 
     return ranges
 
 
-def add_function_spacing(text):
+def add_item_spacing(text):
     lines = text.splitlines(keepends=True)
-    ranges = function_ranges(lines)
+    ranges = item_ranges(lines)
 
     if not ranges:
         return text
 
     insert_after = set()
 
-    for (_, end, parent_depth), (next_start, _, next_parent_depth) in zip(
-        ranges,
-        ranges[1:],
-    ):
-        if parent_depth != next_parent_depth:
-            continue
+    siblings = {}
+    for start, end, parent_id in ranges:
+        siblings.setdefault(parent_id, []).append((start, end))
 
-        between = lines[end + 1:next_start]
+    for items in siblings.values():
+        items.sort()
 
-        if any(line.strip() for line in between):
-            continue
+        for (_, end), (next_start, _) in zip(items, items[1:]):
+            between = lines[end + 1:next_start]
+            blank_count = sum(1 for line in between if not line.strip())
 
-        blank_count = sum(1 for line in between if not line.strip())
-
-        if blank_count == 0:
-            insert_after.add(end)
+            if blank_count == 0:
+                insert_after.add(end)
 
     output = []
 
@@ -247,7 +255,7 @@ def add_function_spacing(text):
 
 def format_file(path, check):
     original = path.read_text(encoding="utf-8")
-    formatted = add_function_spacing(original)
+    formatted = add_item_spacing(original)
 
     if formatted == original:
         return False
@@ -272,7 +280,7 @@ def run_rustfmt(check):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Format Wave Rust sources and enforce blank lines between functions.",
+        description="Format Rust and Wave sources with blank lines between items.",
     )
     parser.add_argument(
         "--check",
@@ -285,12 +293,12 @@ def main():
 
     changed = False
 
-    for path in rust_files():
+    for path in source_files():
         changed |= format_file(path, args.check)
 
     if args.check and changed:
         print(
-            "Rust function spacing does not match the Wave style.",
+            "Rust or Wave item spacing does not match the project style.",
             file=sys.stderr,
         )
         return 1

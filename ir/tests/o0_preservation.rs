@@ -1,15 +1,13 @@
 #![cfg(feature = "socket")]
 
 use ir::lower_ast::{frontend as ast, lower_o0, LowerError};
+
 use ir::{ConstValue, DataLayout, Instruction, Module, Terminator};
 
 fn literal(value: i128) -> ast::Expr {
-    ast::Expr::Lit(ast::Lit::Int {
-        bits: 32,
-        signed: true,
-        value: value.to_string(),
-    })
+    ast::Expr::Lit(ast::Lit::Int { bits: 32, signed: true, value: value.to_string() })
 }
+
 fn expression(value: i128) -> ast::Stmt {
     ast::Stmt::ExprStmt(ast::Expr::Binary {
         left: Box::new(literal(value)),
@@ -17,6 +15,7 @@ fn expression(value: i128) -> ast::Stmt {
         right: Box::new(literal(1)),
     })
 }
+
 fn lower(body: Vec<ast::Stmt>) -> Result<Module, LowerError> {
     lower_o0(
         &ast::Program {
@@ -36,6 +35,7 @@ fn lower(body: Vec<ast::Stmt>) -> Result<Module, LowerError> {
         DataLayout::default_64bit_le(),
     )
 }
+
 fn has_literal(m: &Module, value: i128) -> bool {
     m.functions[0]
         .blocks
@@ -43,6 +43,7 @@ fn has_literal(m: &Module, value: i128) -> bool {
         .flat_map(|b| &b.instructions)
         .any(|i| matches!(i,Instruction::Const {value:ConstValue::I(actual),..} if *actual==value))
 }
+
 fn check_unchanged(m: &Module) {
     let before = format!("{m:?}");
     ir::verify_module(m).unwrap();
@@ -81,11 +82,7 @@ fn statements_after_return_remain_in_disconnected_blocks() {
 
 #[test]
 fn constant_branches_and_dead_loop_tails_are_not_simplified() {
-    for jump in [
-        ast::Stmt::Break,
-        ast::Stmt::Continue,
-        ast::Stmt::Return(None),
-    ] {
+    for jump in [ast::Stmt::Break, ast::Stmt::Continue, ast::Stmt::Return(None)] {
         let m = lower(vec![
             ast::Stmt::If {
                 cond: ast::Expr::Lit(ast::Lit::Bool(false)),

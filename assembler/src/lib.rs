@@ -1,19 +1,29 @@
 pub mod assembler;
+
 pub mod ast;
+
 pub mod error;
+
 pub mod isa;
+
 pub mod tokens;
+
 pub mod traits;
 
 pub use assembler::*;
+
 pub use ast::MemoryAddressMode;
+
 pub use error::{AsmError, SourceSpan};
 
 #[cfg(test)]
 mod tests {
     use crate::assemble;
+
     use crate::isa::AMD64;
+
     use crate::tokens::tokenize;
+
     use crate::RelocKind;
 
     #[test]
@@ -76,10 +86,7 @@ _start:
     ret
 "#;
         let out = assemble(src, &AMD64).expect("extern symbols should be allowed");
-        let has_ext = out
-            .symbols
-            .iter()
-            .any(|s| s.name == "ext" && s.section_index.is_none());
+        let has_ext = out.symbols.iter().any(|s| s.name == "ext" && s.section_index.is_none());
         assert!(has_ext, "extern symbol should be present as undefined");
     }
 
@@ -113,16 +120,9 @@ _start:
     ret
 "#;
         let out = assemble(src, &AMD64).expect("assemble should succeed");
-        let text = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".text")
-            .expect("text section");
+        let text = out.sections.iter().find(|s| s.name == ".text").expect("text section");
         assert_eq!(text.data, vec![0xB8, 0x08, 0x00, 0x00, 0x00, 0xC3]);
-        assert!(
-            text.relocs.is_empty(),
-            "equ immediate must not create relocations"
-        );
+        assert!(text.relocs.is_empty(), "equ immediate must not create relocations");
     }
 
     #[test]
@@ -134,11 +134,7 @@ ptr32:
     dd extdata + 4
 "#;
         let out = assemble(src, &AMD64).expect("assemble should succeed");
-        let data = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".data")
-            .expect("data section");
+        let data = out.sections.iter().find(|s| s.name == ".data").expect("data section");
         assert_eq!(data.data, vec![0, 0, 0, 0]);
         assert_eq!(data.relocs.len(), 1);
         let r = &data.relocs[0];
@@ -166,16 +162,9 @@ far_target:
     ret
 "#;
         let out = assemble(src, &AMD64).expect("assemble should succeed");
-        let text = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".text")
-            .expect("text section");
+        let text = out.sections.iter().find(|s| s.name == ".text").expect("text section");
 
-        assert!(
-            text.relocs.is_empty(),
-            "local same-section jumps must not use relocations"
-        );
+        assert!(text.relocs.is_empty(), "local same-section jumps must not use relocations");
         assert_eq!(text.data[0], 0xE9, "jmp must be near opcode");
         let jmp_disp = i32::from_le_bytes([text.data[1], text.data[2], text.data[3], text.data[4]]);
         assert_eq!(jmp_disp, 165);
@@ -190,11 +179,7 @@ far_target:
     fn eval_imm32(expr: &str) -> i32 {
         let src = format!("section .text\nglobal _start\n_start:\n    mov eax, {expr}\n    ret\n");
         let out = assemble(&src, &AMD64).expect("assemble should succeed");
-        let text = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".text")
-            .expect("text section");
+        let text = out.sections.iter().find(|s| s.name == ".text").expect("text section");
         i32::from_le_bytes([text.data[1], text.data[2], text.data[3], text.data[4]])
     }
 
@@ -240,11 +225,7 @@ dd 10 + -+2
 dd 10 + --2
 "#;
         let out = assemble(src, &AMD64).expect("assemble should succeed");
-        let data = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".data")
-            .expect("data section");
+        let data = out.sections.iter().find(|s| s.name == ".data").expect("data section");
         assert_eq!(
             data.data,
             vec![
@@ -252,10 +233,7 @@ dd 10 + --2
                 0x00, 0x00,
             ]
         );
-        assert!(
-            data.relocs.is_empty(),
-            "dd constants must not produce relocations"
-        );
+        assert!(data.relocs.is_empty(), "dd constants must not produce relocations");
     }
 
     #[test]
@@ -273,11 +251,7 @@ _start:
     ret
 "#;
         let out = assemble(src, &AMD64).expect("assemble should succeed");
-        let text = out
-            .sections
-            .iter()
-            .find(|s| s.name == ".text")
-            .expect("text section");
+        let text = out.sections.iter().find(|s| s.name == ".text").expect("text section");
         assert_eq!(
             text.data,
             vec![
@@ -285,43 +259,32 @@ _start:
                 0x00, 0xC3,
             ]
         );
-        assert!(
-            text.relocs.is_empty(),
-            "equ immediate must not create relocations"
-        );
+        assert!(text.relocs.is_empty(), "equ immediate must not create relocations");
     }
 
     #[test]
     fn trailing_operator_and_missing_term_errors() {
         let res1 = assemble("section .text\n_start:\n    mov eax, 10 +\n", &AMD64);
         match res1 {
-            Err(e) => assert!(e
-                .to_string()
-                .contains("Expression cannot end with operator")),
+            Err(e) => assert!(e.to_string().contains("Expression cannot end with operator")),
             Ok(_) => panic!("expected error on trailing '+'"),
         }
 
         let res2 = assemble("section .text\n_start:\n    mov eax, 10 -\n", &AMD64);
         match res2 {
-            Err(e) => assert!(e
-                .to_string()
-                .contains("Expression cannot end with operator")),
+            Err(e) => assert!(e.to_string().contains("Expression cannot end with operator")),
             Ok(_) => panic!("expected error on trailing '-'"),
         }
 
         let res3 = assemble("section .text\n_start:\n    mov eax, 10 - +\n", &AMD64);
         match res3 {
-            Err(e) => assert!(e
-                .to_string()
-                .contains("Expression cannot end with operator")),
+            Err(e) => assert!(e.to_string().contains("Expression cannot end with operator")),
             Ok(_) => panic!("expected error on trailing '- +'"),
         }
 
         let res4 = assemble("section .data\n    dd 10 +\n", &AMD64);
         match res4 {
-            Err(e) => assert!(e
-                .to_string()
-                .contains("Expression cannot end with operator")),
+            Err(e) => assert!(e.to_string().contains("Expression cannot end with operator")),
             Ok(_) => panic!("expected error on trailing '+' in data directive"),
         }
     }

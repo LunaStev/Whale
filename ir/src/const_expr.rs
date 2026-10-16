@@ -48,16 +48,8 @@ pub enum ConstExprKind {
     Not(Box<ConstExpr>),
     Literal(ConstValue),
     Reference(ConstRef),
-    Binary {
-        op: ConstBinaryOp,
-        left: Box<ConstExpr>,
-        right: Box<ConstExpr>,
-    },
-    Compare {
-        op: ConstCompareOp,
-        left: Box<ConstExpr>,
-        right: Box<ConstExpr>,
-    },
+    Binary { op: ConstBinaryOp, left: Box<ConstExpr>, right: Box<ConstExpr> },
+    Compare { op: ConstCompareOp, left: Box<ConstExpr>, right: Box<ConstExpr> },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,10 +68,7 @@ pub enum ConstEvalError {
 
 impl ConstExpr {
     pub fn literal(ty: Type, value: ConstValue) -> Self {
-        Self {
-            ty,
-            kind: ConstExprKind::Literal(value),
-        }
+        Self { ty, kind: ConstExprKind::Literal(value) }
     }
 
     pub fn references(&self) -> Vec<ConstRef> {
@@ -87,14 +76,14 @@ impl ConstExpr {
         let mut references = Vec::new();
         while let Some(expr) = pending.pop() {
             match &expr.kind {
-                ConstExprKind::Literal(_) => {}
+                ConstExprKind::Literal(_) => {},
                 ConstExprKind::Not(value) => pending.push(value),
                 ConstExprKind::Reference(reference) => references.push(*reference),
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. } => {
                     pending.push(right);
                     pending.push(left);
-                }
+                },
             }
         }
         references
@@ -112,8 +101,7 @@ impl ConstExpr {
         resolve: &impl Fn(ConstRef) -> Option<(Type, ConstValue)>,
         limits: crate::IrLimits,
     ) -> Result<ConstValue, ConstEvalError> {
-        self.evaluate_with_error_site(resolve, limits)
-            .map_err(|(error, _)| error)
+        self.evaluate_with_error_site(resolve, limits).map_err(|(error, _)| error)
     }
 
     /// Preserve the exact failing node without repeating validation, reference
@@ -125,9 +113,7 @@ impl ConstExpr {
     ) -> Result<ConstValue, (ConstEvalError, &ConstExpr)> {
         let mut budget = crate::limits::Budget::new(limits)
             .map_err(|error| (ConstEvalError::ResourceLimit(error), self))?;
-        budget
-            .expression(self)
-            .map_err(|error| (ConstEvalError::ResourceLimit(error), self))?;
+        budget.expression(self).map_err(|error| (ConstEvalError::ResourceLimit(error), self))?;
         // Validate every preserved branch before evaluating lazily. Invalid IR
         // is rejected even if its expression would be skipped at execution.
         let mut inspect = vec![self];
@@ -138,7 +124,7 @@ impl ConstExpr {
                     if !crate::constant::valid_constant(&expr.ty, v) {
                         return Err((ConstEvalError::InvalidLiteral, expr));
                     }
-                }
+                },
                 ConstExprKind::Reference(reference) => {
                     let (ty, value) = resolve(*reference)
                         .ok_or((ConstEvalError::UnknownReference(*reference), expr))?;
@@ -153,7 +139,7 @@ impl ConstExpr {
                         return Err((ConstEvalError::InvalidLiteral, expr));
                     }
                     resolved.insert(expr as *const ConstExpr, value);
-                }
+                },
                 ConstExprKind::Not(value) => {
                     if expr.ty != value.ty {
                         return Err((ConstEvalError::TypeMismatch, expr));
@@ -162,7 +148,7 @@ impl ConstExpr {
                         return Err((ConstEvalError::UnsupportedOperation, expr));
                     }
                     inspect.push(value);
-                }
+                },
                 ConstExprKind::Binary { op, left, right } => {
                     if left.ty != right.ty || expr.ty != left.ty {
                         return Err((ConstEvalError::TypeMismatch, expr));
@@ -183,7 +169,7 @@ impl ConstExpr {
                     }
                     inspect.push(right);
                     inspect.push(left);
-                }
+                },
                 ConstExprKind::Compare { op, left, right } => {
                     if left.ty != right.ty || expr.ty != Type::Bool {
                         return Err((ConstEvalError::TypeMismatch, expr));
@@ -199,7 +185,7 @@ impl ConstExpr {
                     }
                     inspect.push(right);
                     inspect.push(left);
-                }
+                },
             }
         }
         // An explicit evaluation stack preserves left-to-right order and lazy
@@ -214,7 +200,7 @@ impl ConstExpr {
                     pending.push((expr, 1));
                     pending.push((value, 0));
                     continue;
-                }
+                },
                 ConstExprKind::Not(_) => const_not(&expr.ty, &values.pop().expect("not operand"))
                     .map_err(|error| (error, expr))?,
                 ConstExprKind::Binary {
@@ -230,9 +216,7 @@ impl ConstExpr {
                     let ConstValue::Bool(value) = values.pop().expect("logical operand") else {
                         return Err((ConstEvalError::TypeMismatch, expr));
                     };
-                    let ConstExprKind::Binary { op, .. } = expr.kind else {
-                        unreachable!()
-                    };
+                    let ConstExprKind::Binary { op, .. } = expr.kind else { unreachable!() };
                     if phase == 1
                         && ((op == ConstBinaryOp::LogicalAnd && value)
                             || (op == ConstBinaryOp::LogicalOr && !value))
@@ -242,7 +226,7 @@ impl ConstExpr {
                         continue;
                     }
                     ConstValue::Bool(value)
-                }
+                },
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. }
                     if phase == 0 =>
@@ -251,12 +235,12 @@ impl ConstExpr {
                     pending.push((right, 0));
                     pending.push((left, 0));
                     continue;
-                }
+                },
                 ConstExprKind::Binary { op, left, .. } => {
                     let right = values.pop().expect("right operand");
                     let left_value = values.pop().expect("left operand");
                     const_bin(*op, &left.ty, &left_value, &right).map_err(|error| (error, expr))?
-                }
+                },
                 ConstExprKind::Compare { op, left, .. } => {
                     let right = values.pop().expect("right operand");
                     let left_value = values.pop().expect("left operand");
@@ -264,7 +248,7 @@ impl ConstExpr {
                         const_cmp(*op, &left.ty, &left_value, &right)
                             .map_err(|error| (error, expr))?,
                     )
-                }
+                },
             };
             if !crate::constant::valid_constant(&expr.ty, &value) {
                 return Err((ConstEvalError::InvalidLiteral, expr));
@@ -297,10 +281,7 @@ fn ty_int_bits(ty: &Type) -> Option<u32> {
 }
 
 fn is_signed_int(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
-    )
+    matches!(ty, Type::I1 | Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
 }
 
 fn wrap_u(v: u128, ty: &Type) -> u128 {
@@ -332,6 +313,7 @@ fn shift_count(ty: &Type, raw: u128) -> u32 {
     let bits = ty_int_bits(ty).expect("integer expression validated");
     (wrap_u(raw, ty) % u128::from(bits)) as u32
 }
+
 fn const_not(ty: &Type, value: &ConstValue) -> Result<ConstValue, ConstEvalError> {
     match value {
         ConstValue::I(v) if is_signed_int(ty) => Ok(ConstValue::I(wrap_i(!v, ty))),

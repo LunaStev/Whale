@@ -12,18 +12,9 @@ fn verifier_requires_a_supported_target_and_its_exact_layout() {
     ));
     module.target = target.name().into();
     for layout in [
-        DataLayout {
-            ptr_bits: 32,
-            endian: Endian::Little,
-        },
-        DataLayout {
-            ptr_bits: 64,
-            endian: Endian::Big,
-        },
-        DataLayout {
-            ptr_bits: 0,
-            endian: Endian::Little,
-        },
+        DataLayout { ptr_bits: 32, endian: Endian::Little },
+        DataLayout { ptr_bits: 64, endian: Endian::Big },
+        DataLayout { ptr_bits: 0, endian: Endian::Little },
     ] {
         module.datalayout = layout;
         assert!(matches!(
@@ -37,25 +28,15 @@ fn verifier_requires_a_supported_target_and_its_exact_layout() {
 #[test]
 fn lowering_rejects_target_layout_mismatches_without_relying_on_verification() {
     use ir::lower_ast::{frontend::Program, lower_o0, LowerError};
-    let program = Program {
-        declarations: vec![],
-        globals: vec![],
-        functions: vec![],
-    };
+    let program = Program { declarations: vec![], globals: vec![], functions: vec![] };
     let target = Target::X86_64WhaleLinux;
     assert!(matches!(
         lower_o0(&program, "banana", target.data_layout()),
         Err(LowerError::Target(TargetError::UnsupportedTarget(_)))
     ));
     for layout in [
-        DataLayout {
-            ptr_bits: 32,
-            endian: Endian::Little,
-        },
-        DataLayout {
-            ptr_bits: 64,
-            endian: Endian::Big,
-        },
+        DataLayout { ptr_bits: 32, endian: Endian::Little },
+        DataLayout { ptr_bits: 64, endian: Endian::Big },
     ] {
         assert!(matches!(
             lower_o0(&program, target.name(), layout),
@@ -63,11 +44,5 @@ fn lowering_rejects_target_layout_mismatches_without_relying_on_verification() {
         ));
     }
     let module = lower_o0(&program, target.name(), target.data_layout()).unwrap();
-    assert_eq!(
-        module.datalayout,
-        DataLayout {
-            ptr_bits: 64,
-            endian: Endian::Little
-        }
-    );
+    assert_eq!(module.datalayout, DataLayout { ptr_bits: 64, endian: Endian::Little });
 }

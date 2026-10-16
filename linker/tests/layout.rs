@@ -1,4 +1,5 @@
 use linker::core::layout::Layout;
+
 use object::{ObjectFile, ObjectFormat, SectionKind};
 
 #[test]
@@ -18,20 +19,9 @@ fn separate_file_and_memory_cursors_preserve_every_input_mapping() {
     let mappings: Vec<_> = layout
         .sections
         .iter()
-        .map(|s| {
-            (
-                s.object_index,
-                s.section_index,
-                s.file_offset,
-                s.file_size,
-                s.memory_size,
-            )
-        })
+        .map(|s| (s.object_index, s.section_index, s.file_offset, s.file_size, s.memory_size))
         .collect();
-    assert_eq!(
-        mappings,
-        [(0, 0, 0, 3, 3), (0, 1, 32, 0, 33), (1, 0, 8, 2, 2)]
-    );
+    assert_eq!(mappings, [(0, 0, 0, 3, 3), (0, 1, 32, 0, 33), (1, 0, 8, 2, 2)]);
 }
 
 #[test]

@@ -1,4 +1,5 @@
 use std::{path::PathBuf, process::Command};
+
 #[test]
 fn cli_reports_original_source_and_both_direct_and_indirect_callers_without_reading_source_files() {
     let input = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -1,5 +1,7 @@
 use crate::ast::{MemoryAddressMode, MemoryOperand};
+
 use crate::error::AsmError;
+
 use crate::isa::amd64::tables::{REGISTERS_32, REGISTERS_64};
 
 #[derive(Debug, Clone)]
@@ -57,11 +59,7 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
         })?;
         return Ok(EncodedAddress {
             mod_bits: 0,
-            rm_bits: if mem.address_mode == MemoryAddressMode::Relative {
-                5
-            } else {
-                4
-            },
+            rm_bits: if mem.address_mode == MemoryAddressMode::Relative { 5 } else { 4 },
             sib: if mem.address_mode == MemoryAddressMode::Absolute {
                 Some((0, 4, 5))
             } else {
@@ -89,9 +87,7 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
         .transpose()?;
 
     if base_code.is_none() && index_code.is_none() {
-        return Err(AsmError::EncodeError(
-            "Addressing without base/index not implemented".into(),
-        ));
+        return Err(AsmError::EncodeError("Addressing without base/index not implemented".into()));
     }
 
     let scale = scale_bits(mem.scale)
@@ -99,9 +95,7 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
 
     if let Some(idx) = index_code {
         if idx == 4 {
-            return Err(AsmError::EncodeError(
-                "rsp/esp cannot be used as index register".into(),
-            ));
+            return Err(AsmError::EncodeError("rsp/esp cannot be used as index register".into()));
         }
     }
 
@@ -147,7 +141,7 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
                 base >= 8,
                 idx.map(|i| i >= 8).unwrap_or(false),
             )
-        }
+        },
         (Some(base), _, false) => {
             let base_low = base & 7;
             let mut mod_bits = 0;
@@ -163,31 +157,13 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
             }
 
             (mod_bits, disp, base_low, None, base >= 8, false)
-        }
+        },
         (None, Some(idx), _) => {
             let index_low = idx & 7;
-            (
-                0,
-                Some(DispKind::Disp32(disp32)),
-                4,
-                Some((scale, index_low, 5)),
-                false,
-                idx >= 8,
-            )
-        }
-        _ => {
-            return Err(AsmError::EncodeError(
-                "Addressing mode is not supported yet".into(),
-            ))
-        }
+            (0, Some(DispKind::Disp32(disp32)), 4, Some((scale, index_low, 5)), false, idx >= 8)
+        },
+        _ => return Err(AsmError::EncodeError("Addressing mode is not supported yet".into())),
     };
 
-    Ok(EncodedAddress {
-        mod_bits,
-        rm_bits,
-        sib,
-        disp: final_disp,
-        rex_b,
-        rex_x,
-    })
+    Ok(EncodedAddress { mod_bits, rm_bits, sib, disp: final_disp, rex_b, rex_x })
 }

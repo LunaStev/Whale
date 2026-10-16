@@ -1,6 +1,8 @@
 #[path = "../object/tests/common/mod.rs"]
 mod elf;
+
 use std::{fs, process::Command};
+
 #[test]
 fn cli_bridge_preserves_metadata_and_legacy_labels() {
     let dir = tempfile::tempdir().unwrap();
@@ -31,6 +33,7 @@ fn cli_bridge_preserves_metadata_and_legacy_labels() {
         );
     }
 }
+
 #[test]
 #[ignore = "optional independent GNU readelf fixture; run with --ignored --nocapture"]
 fn readelf_fixture_confirms_symbol_metadata() {
@@ -58,10 +61,7 @@ fn readelf_fixture_confirms_symbol_metadata() {
         ("payload", "OBJECT", "HIDDEN"),
         ("imported", "FUNC", "DEFAULT"),
     ] {
-        let line = text
-            .lines()
-            .find(|l| l.split_whitespace().last() == Some(name))
-            .unwrap();
+        let line = text.lines().find(|l| l.split_whitespace().last() == Some(name)).unwrap();
         assert!(line.contains(kind) && line.contains(visibility), "{line}");
     }
     println!("{text}");

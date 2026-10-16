@@ -1,6 +1,9 @@
 use crate::core::reloc::ObjectRelocation;
+
 use crate::core::section::{Section, SectionKind};
+
 use crate::core::symbol::ObjectSymbol;
+
 use std::collections::HashSet;
 
 pub use whale_target::{Endian, Machine, ObjectFormat, ObjectTarget, Target};
@@ -16,20 +19,12 @@ pub struct ObjectFile {
 impl ObjectFile {
     /// Construct an AMD64 little-endian object in the requested format.
     pub fn new(format: ObjectFormat) -> Self {
-        Self::with_target(ObjectTarget {
-            format,
-            ..Target::X86_64WhaleLinux.object_target()
-        })
+        Self::with_target(ObjectTarget { format, ..Target::X86_64WhaleLinux.object_target() })
     }
 
     /// Retain explicit input identity; writers and link consumers validate support.
     pub fn with_target(target: ObjectTarget) -> Self {
-        Self {
-            target,
-            sections: Vec::new(),
-            symbols: Vec::new(),
-            relocations: Vec::new(),
-        }
+        Self { target, sections: Vec::new(), symbols: Vec::new(), relocations: Vec::new() }
     }
 
     pub fn add_section(&mut self, name: &str, kind: SectionKind, align: u64) -> usize {
@@ -53,17 +48,12 @@ impl ObjectFile {
     pub fn validate_diagnostic(&self) -> Result<(), crate::ObjectError> {
         use crate::{ObjectError as E, ObjectErrorKind as K};
         let error = |kind, message: String| E::new("validate", kind, message);
-        self.target
-            .validate()
-            .map_err(|e| error(K::InvalidTarget, e.to_string()))?;
+        self.target.validate().map_err(|e| error(K::InvalidTarget, e.to_string()))?;
         for (index, section) in self.sections.iter().enumerate() {
             if section.kind != SectionKind::Bss && section.zero_fill != 0 {
                 return Err(error(
                     K::InvalidSection,
-                    format!(
-                        "section {:?}: zero_fill is only valid for BSS",
-                        section.name
-                    ),
+                    format!("section {:?}: zero_fill is only valid for BSS", section.name),
                 )
                 .section(index));
             }
@@ -74,15 +64,10 @@ impl ObjectFile {
                 )
                 .section(index));
             }
-            (section.data.len() as u64)
-                .checked_add(section.zero_fill)
-                .ok_or_else(|| {
-                    error(
-                        K::Overflow,
-                        format!("section {:?}: memory size overflow", section.name),
-                    )
+            (section.data.len() as u64).checked_add(section.zero_fill).ok_or_else(|| {
+                error(K::Overflow, format!("section {:?}: memory size overflow", section.name))
                     .section(index)
-                })?;
+            })?;
             if section.name.contains('\0') {
                 return Err(error(
                     K::InvalidName,
@@ -101,6 +86,7 @@ impl ObjectFile {
                 .section(index));
             }
         }
+
         let mut names = HashSet::new();
         for symbol in &self.symbols {
             if symbol.name.contains('\0') {
@@ -121,20 +107,14 @@ impl ObjectFile {
                 let section = self.sections.get(index).ok_or_else(|| {
                     error(
                         K::InvalidSection,
-                        format!(
-                            "symbol {:?} references invalid section {index}",
-                            symbol.name
-                        ),
+                        format!("symbol {:?} references invalid section {index}", symbol.name),
                     )
                     .section(index)
                     .symbol(&symbol.name)
                 })?;
                 let end = symbol.value.checked_add(symbol.size).ok_or_else(|| {
-                    error(
-                        K::Overflow,
-                        format!("symbol range overflow for {:?}", symbol.name),
-                    )
-                    .symbol(&symbol.name)
+                    error(K::Overflow, format!("symbol range overflow for {:?}", symbol.name))
+                        .symbol(&symbol.name)
                 })?;
                 if end > section.memory_size().expect("validated section size") {
                     return Err(error(
@@ -221,6 +201,7 @@ impl ObjectFile {
     pub fn read(bytes: &[u8]) -> Result<Self, crate::ObjectReadError> {
         Self::read_with_limits(bytes, crate::ObjectReadLimits::default())
     }
+
     pub fn read_with_limits(
         bytes: &[u8],
         limits: crate::ObjectReadLimits,
@@ -241,6 +222,7 @@ impl ObjectFile {
     pub fn write_diagnostic(&self) -> Result<Vec<u8>, crate::ObjectError> {
         self.write_diagnostic_with_limit(crate::formats::elf::DEFAULT_MAX_OUTPUT_SIZE)
     }
+
     pub fn write_diagnostic_with_limit(
         &self,
         max_output_size: u64,

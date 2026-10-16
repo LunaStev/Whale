@@ -1,5 +1,7 @@
 use assembler::ast::MemoryOperand;
+
 use assembler::isa::amd64::encoding::encode_address;
+
 use assembler::{assemble, isa::AMD64};
 
 fn text(source: &str) -> Vec<u8> {
@@ -13,10 +15,7 @@ fn text(source: &str) -> Vec<u8> {
 }
 
 fn error(source: &str) -> String {
-    assemble(source, &AMD64)
-        .err()
-        .expect("invalid assembly must fail")
-        .to_string()
+    assemble(source, &AMD64).err().expect("invalid assembly must fail").to_string()
 }
 
 #[test]
@@ -41,24 +40,15 @@ fn displacements_preserve_signed_boundaries_and_encoding_transitions() {
         (-129, vec![0x48, 0x8b, 0x83, 0x7f, 0xff, 0xff, 0xff]),
         (128, vec![0x48, 0x8b, 0x83, 0x80, 0, 0, 0]),
         (i32::MIN as i64, vec![0x48, 0x8b, 0x83, 0, 0, 0, 0x80]),
-        (
-            i32::MAX as i64,
-            vec![0x48, 0x8b, 0x83, 0xff, 0xff, 0xff, 0x7f],
-        ),
+        (i32::MAX as i64, vec![0x48, 0x8b, 0x83, 0xff, 0xff, 0xff, 0x7f]),
     ] {
-        let expression = if disp < 0 {
-            format!("rbx - {}", -disp)
-        } else {
-            format!("rbx + {disp}")
-        };
+        let expression =
+            if disp < 0 { format!("rbx - {}", -disp) } else { format!("rbx + {disp}") };
         assert_eq!(text(&format!("mov rax, [{expression}]")), expected);
     }
     for disp in [i32::MIN as i64 - 1, i32::MAX as i64 + 1, 4294967296] {
-        let expression = if disp < 0 {
-            format!("rbx - {}", -disp)
-        } else {
-            format!("rbx + {disp}")
-        };
+        let expression =
+            if disp < 0 { format!("rbx - {}", -disp) } else { format!("rbx + {disp}") };
         assert!(error(&format!("mov rax, [{expression}]")).contains("displacement"));
         // The public address encoder also accepts base-less SIB operands.
         let mem = MemoryOperand {
@@ -70,11 +60,7 @@ fn displacements_preserve_signed_boundaries_and_encoding_transitions() {
             disp,
             symbol: None,
         };
-        assert!(encode_address(&mem, 64)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("displacement"));
+        assert!(encode_address(&mem, 64).err().unwrap().to_string().contains("displacement"));
     }
 }
 

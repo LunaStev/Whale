@@ -1,11 +1,17 @@
 use crate::assembler::AssemblerOutput;
+
 use crate::ast::AST;
+
 use crate::error::AsmError;
+
 use crate::traits::ISA;
 
 pub mod encoder;
+
 pub mod encoding;
+
 pub mod parser;
+
 pub mod tables;
 
 pub struct AMD64;
@@ -18,6 +24,7 @@ impl ISA for AMD64 {
     fn encode(&self, ast: &AST) -> Result<AssemblerOutput, AsmError> {
         encoder::encode(ast)
     }
+
     fn encode_with_limits(
         &self,
         ast: &AST,

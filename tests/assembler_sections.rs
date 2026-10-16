@@ -1,10 +1,13 @@
 use std::{collections::HashMap, fs, process::Command};
+
 fn u32_at(b: &[u8], n: usize) -> u32 {
     u32::from_le_bytes(b[n..n + 4].try_into().unwrap())
 }
+
 fn u64_at(b: &[u8], n: usize) -> u64 {
     u64::from_le_bytes(b[n..n + 8].try_into().unwrap())
 }
+
 #[test]
 fn explicit_section_identity_and_alignment_reach_elf_headers_and_symbols() {
     let dir = tempfile::tempdir().unwrap();

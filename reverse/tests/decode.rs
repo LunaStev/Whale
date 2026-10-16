@@ -1,4 +1,5 @@
 use reverse::*;
+
 #[test]
 fn absent_core_has_an_explicit_capability_error() {
     if !backend_available() {
@@ -6,29 +7,29 @@ fn absent_core_has_an_explicit_capability_error() {
         assert_eq!(backend_name(), "unavailable");
     }
 }
+
 #[cfg(whale_wave_reverse)]
 mod native {
     use super::*;
+
     use assembler::{assemble, isa::AMD64};
+
     fn one(bytes: &[u8]) -> Instruction {
         let instruction = decode(bytes, 0).unwrap_or_else(|e| panic!("{bytes:02x?}: {e}"));
         assert_eq!(instruction.length as usize, bytes.len());
         assert_eq!(instruction.original_bytes(), bytes);
         instruction
     }
+
     fn reg(operand: Operand, name: &str) {
-        let Operand::Register(r) = operand else {
-            panic!("expected {name}: {operand:?}")
-        };
+        let Operand::Register(r) = operand else { panic!("expected {name}: {operand:?}") };
         assert_eq!(r.name(), name);
     }
+
     fn encoded(source: &str) -> Vec<u8> {
-        assemble(source, &AMD64)
-            .unwrap_or_else(|e| panic!("{source}: {e}"))
-            .sections
-            .remove(0)
-            .data
+        assemble(source, &AMD64).unwrap_or_else(|e| panic!("{source}: {e}")).sections.remove(0).data
     }
+
     #[test]
     fn manual_integer_fields_preserve_widths_signedness_and_high_byte_rules() {
         let x = one(&[0x48, 0xb8, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01]);
@@ -36,19 +37,13 @@ mod native {
         reg(x.operands[0], "rax");
         assert_eq!(
             x.encoding.immediate,
-            Some(EncodingField {
-                offset: 2,
-                width: 8,
-                bits: 0x0123456789abcdef
-            })
+            Some(EncodingField { offset: 2, width: 8, bits: 0x0123456789abcdef })
         );
         let x = one(&[0x66, 0x41, 0xb9, 0x34, 0x12]);
         reg(x.operands[0], "r9w");
         assert_eq!(x.encoding.immediate.unwrap().width, 2);
         let x = one(&[0x48, 0xc7, 0xc0, 0xff, 0xff, 0xff, 0xff]);
-        let Operand::Immediate(i) = x.operands[1] else {
-            panic!()
-        };
+        let Operand::Immediate(i) = x.operands[1] else { panic!() };
         assert_eq!(
             (i.width, i.encoded_width, i.sign_extended, i.signed_value()),
             (64, 32, true, -1)
@@ -74,9 +69,7 @@ mod native {
         ] {
             let x = one(&bytes);
             reg(x.operands[0], name);
-            let Operand::Register(r) = x.operands[0] else {
-                panic!()
-            };
+            let Operand::Register(r) = x.operands[0] else { panic!() };
             assert_eq!(r.width, width);
         }
         let x = one(&[0x66, 0x68, 0, 0x80]);
@@ -90,76 +83,48 @@ mod native {
             })
         ));
         let x = one(&[0x6a, 0xff]);
-        let Operand::Immediate(i) = x.operands[0] else {
-            panic!()
-        };
+        let Operand::Immediate(i) = x.operands[0] else { panic!() };
         assert_eq!((i.width, i.encoded_width, i.signed_value()), (64, 8, -1));
         let x = one(&[0x48, 0xd1, 0xe0]);
         assert!(x.encoding.immediate.is_none());
         assert!(matches!(
             x.operands[1],
-            Operand::Immediate(Immediate {
-                value: 1,
-                encoded_width: 0,
-                ..
-            })
+            Operand::Immediate(Immediate { value: 1, encoded_width: 0, .. })
         ));
     }
+
     #[test]
     fn manual_sib_rip_absolute_and_rex_sentinels_are_distinct() {
         let x = one(&[0x4b, 0x8b, 0x44, 0xcc, 0x80]);
         reg(x.operands[0], "rax");
-        let Operand::Memory(m) = x.operands[1] else {
-            panic!()
-        };
+        let Operand::Memory(m) = x.operands[1] else { panic!() };
         assert_eq!(m.base.unwrap().name(), "r12");
         assert_eq!(m.index.unwrap().name(), "r9");
         assert_eq!((m.scale, m.displacement, m.rip_relative), (8, -128, false));
-        assert_eq!(
-            x.encoding.modrm,
-            Some(EncodingByte {
-                offset: 2,
-                value: 0x44
-            })
-        );
-        assert_eq!(
-            x.encoding.sib,
-            Some(EncodingByte {
-                offset: 3,
-                value: 0xcc
-            })
-        );
+        assert_eq!(x.encoding.modrm, Some(EncodingByte { offset: 2, value: 0x44 }));
+        assert_eq!(x.encoding.sib, Some(EncodingByte { offset: 3, value: 0xcc }));
         assert_eq!(
             x.encoding.displacement,
-            Some(EncodingField {
-                offset: 4,
-                width: 1,
-                bits: 0x80
-            })
+            Some(EncodingField { offset: 4, width: 1, bits: 0x80 })
         );
         for rex in [0x48, 0x49] {
             let x = one(&[rex, 0x8b, 0x05, 0xfc, 0xff, 0xff, 0xff]);
-            let Operand::Memory(m) = x.operands[1] else {
-                panic!()
-            };
+            let Operand::Memory(m) = x.operands[1] else { panic!() };
             assert!(m.rip_relative);
             assert!(m.base.is_none());
             assert_eq!(m.displacement, -4);
             let x = one(&[rex, 0x8b, 0x04, 0x25, 0xfc, 0xff, 0xff, 0xff]);
-            let Operand::Memory(m) = x.operands[1] else {
-                panic!()
-            };
+            let Operand::Memory(m) = x.operands[1] else { panic!() };
             assert!(!m.rip_relative);
             assert!(m.base.is_none());
             assert!(m.index.is_none());
             assert_eq!(m.displacement, -4);
         }
         let x = one(&[0x4a, 0x8b, 0x04, 0x25, 0, 0, 0, 0]);
-        let Operand::Memory(m) = x.operands[1] else {
-            panic!()
-        };
+        let Operand::Memory(m) = x.operands[1] else { panic!() };
         assert_eq!(m.index.unwrap().name(), "r12");
     }
+
     #[test]
     fn direct_indirect_conditional_and_loop_flow_keep_the_encoding_target_contract() {
         for (bytes, flow, displacement, width) in [
@@ -186,16 +151,13 @@ mod native {
         assert_eq!(one(&[0xeb, 0xfe]).relative_target(0x1000), Some(0x1000));
         assert_eq!(one(&[0xeb, 0xfc]).relative_target(0), None);
     }
+
     #[test]
     fn scalar_sse_uses_mandatory_prefixes_xmm_registers_and_scalar_memory_width() {
         for (prefix, precision) in [(0xf3, 32), (0xf2, 64)] {
-            for (opcode, mnemonic) in [
-                (0x10, "mov"),
-                (0x58, "add"),
-                (0x5c, "sub"),
-                (0x59, "mul"),
-                (0x5e, "div"),
-            ] {
+            for (opcode, mnemonic) in
+                [(0x10, "mov"), (0x58, "add"), (0x5c, "sub"), (0x59, "mul"), (0x5e, "div")]
+            {
                 let suffix = if precision == 32 { "ss" } else { "sd" };
                 let x = one(&[prefix, 0x45, 0x0f, opcode, 0xca]);
                 assert_eq!(x.mnemonic(), format!("{mnemonic}{suffix}"));
@@ -203,17 +165,13 @@ mod native {
                 reg(x.operands[1], "xmm10");
                 let x = one(&[prefix, 0x47, 0x0f, opcode, 0x4c, 0xcc, 0x80]);
                 reg(x.operands[0], "xmm9");
-                let Operand::Memory(m) = x.operands[1] else {
-                    panic!()
-                };
+                let Operand::Memory(m) = x.operands[1] else { panic!() };
                 assert_eq!(m.width, precision);
                 assert_eq!(m.base.unwrap().name(), "r12");
                 assert_eq!(m.index.unwrap().name(), "r9");
             }
             let x = one(&[prefix, 0x45, 0x0f, 0x11, 0x7d, 8]);
-            let Operand::Memory(m) = x.operands[0] else {
-                panic!()
-            };
+            let Operand::Memory(m) = x.operands[0] else { panic!() };
             assert_eq!(m.width, precision);
             reg(x.operands[1], "xmm15");
         }
@@ -223,12 +181,10 @@ mod native {
             &[0xf3, 0x90][..],
             &[0xc5, 0xfa, 0x10, 0xc0][..],
         ] {
-            assert!(matches!(
-                decode(bytes, 0),
-                Err(DecodeError::Unsupported { .. })
-            ));
+            assert!(matches!(decode(bytes, 0), Err(DecodeError::Unsupported { .. })));
         }
     }
+
     #[test]
     fn every_integer_encoder_family_and_width_decodes_without_a_rust_fallback() {
         let mut cases = vec![
@@ -298,9 +254,9 @@ mod native {
                 }
             }
         }
-        for condition in [
-            "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g",
-        ] {
+        for condition in
+            ["o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g"]
+        {
             cases.push(format!("set{condition} r9b"));
             cases.push(format!("set{condition} byte [r12+127]"));
         }
@@ -325,15 +281,12 @@ mod native {
                 );
             }
         }
-        for source in [
-            "jmp done\ndone:",
-            "call done\ndone:",
-            "je done\ndone:",
-            "loop done\ndone:",
-        ] {
+        for source in ["jmp done\ndone:", "call done\ndone:", "je done\ndone:", "loop done\ndone:"]
+        {
             one(&encoded(source));
         }
     }
+
     #[test]
     fn every_sib_base_index_scale_and_displacement_boundary_is_bounded() {
         let names = [
@@ -349,9 +302,7 @@ mod native {
                     for displacement in [-129, -128, 0, 127, 128] {
                         let source = format!("mov rax,[{base}+{index}*{scale}{displacement:+}]");
                         let instruction = one(&encoded(&source));
-                        let Operand::Memory(m) = instruction.operands[1] else {
-                            panic!()
-                        };
+                        let Operand::Memory(m) = instruction.operands[1] else { panic!() };
                         assert_eq!(m.base.unwrap().name(), base, "{source}");
                         assert_eq!(m.index.unwrap().name(), index, "{source}");
                         assert_eq!((m.scale, m.displacement), (scale, displacement));
@@ -360,48 +311,26 @@ mod native {
             }
         }
     }
+
     #[test]
     fn statuses_prefix_order_offset_and_fifteen_byte_limit_are_explicit() {
-        assert!(matches!(
-            decode(&[0x8d, 0xc0], 0),
-            Err(DecodeError::Invalid { .. })
-        ));
-        assert!(matches!(
-            decode(&[0x67, 0x90], 0),
-            Err(DecodeError::Unsupported { .. })
-        ));
-        assert!(matches!(
-            decode(&[0x41, 0x90], 0),
-            Err(DecodeError::Unsupported { .. })
-        ));
-        assert!(matches!(
-            decode(&[0xf3, 0x90], 0),
-            Err(DecodeError::Unsupported { .. })
-        ));
-        assert!(matches!(
-            decode(&[0x90], 2),
-            Err(DecodeError::Invalid { .. })
-        ));
-        assert!(matches!(
-            decode(&[0x90], 1),
-            Err(DecodeError::Truncated { .. })
-        ));
+        assert!(matches!(decode(&[0x8d, 0xc0], 0), Err(DecodeError::Invalid { .. })));
+        assert!(matches!(decode(&[0x67, 0x90], 0), Err(DecodeError::Unsupported { .. })));
+        assert!(matches!(decode(&[0x41, 0x90], 0), Err(DecodeError::Unsupported { .. })));
+        assert!(matches!(decode(&[0xf3, 0x90], 0), Err(DecodeError::Unsupported { .. })));
+        assert!(matches!(decode(&[0x90], 2), Err(DecodeError::Invalid { .. })));
+        assert!(matches!(decode(&[0x90], 1), Err(DecodeError::Truncated { .. })));
         let mut longest = vec![0x66; 14];
         longest.push(0x90);
         one(&longest);
         longest.insert(0, 0x66);
-        assert!(matches!(
-            decode(&longest, 0),
-            Err(DecodeError::Overlong { .. })
-        ));
-        assert!(matches!(
-            decode(&[0x66; 15], 0),
-            Err(DecodeError::Overlong { .. })
-        ));
+        assert!(matches!(decode(&longest, 0), Err(DecodeError::Overlong { .. })));
+        assert!(matches!(decode(&[0x66; 15], 0), Err(DecodeError::Overlong { .. })));
         let x = decode(&[0xcc, 0x48, 0x89, 0xd8, 0xc3], 1).unwrap();
         assert_eq!(x.offset, 1);
         assert_eq!(x.original_bytes(), [0x48, 0x89, 0xd8]);
     }
+
     #[test]
     fn raw_abi_capacity_version_and_every_failed_decode_leave_output_unchanged() {
         extern "C" {
@@ -459,10 +388,12 @@ mod native {
         }
         assert_eq!(output, [u64::MAX; 96]);
     }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn actual_kernel_reads_never_cross_a_protected_input_boundary() {
         use std::ffi::c_void;
+
         extern "C" {
             fn mmap(
                 address: *mut c_void,
@@ -472,9 +403,13 @@ mod native {
                 fd: i32,
                 offset: i64,
             ) -> *mut c_void;
+
             fn mprotect(address: *mut c_void, length: usize, protection: i32) -> i32;
+
             fn munmap(address: *mut c_void, length: usize) -> i32;
+
             fn sysconf(name: i32) -> i64;
+
             fn whale_wave_reverse_decode(
                 abi: u64,
                 data: *const u8,

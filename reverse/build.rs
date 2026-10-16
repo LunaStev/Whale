@@ -6,13 +6,16 @@ use std::{
 };
 
 const ABI_VERSION: &str = "1";
+
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+
 fn update(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
         hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
     }
     hash
 }
+
 fn file_hash(path: &Path, mut hash: u64) -> Result<u64, String> {
     let mut file = fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut buffer = [0; 16384];
@@ -24,21 +27,17 @@ fn file_hash(path: &Path, mut hash: u64) -> Result<u64, String> {
         hash = update(hash, &buffer[..count]);
     }
 }
+
 fn verify(directory: &Path, manifest: &Path) -> Result<(), String> {
     let archive = directory.join("libwhale_wave_reverse.a");
     let metadata = directory.join("reverse-core.meta");
-    let kernels = [
-        manifest.join("wave/amd64.wave"),
-        manifest.join("wave/cfg.wave"),
-    ];
+    let kernels = [manifest.join("wave/amd64.wave"), manifest.join("wave/cfg.wave")];
     for path in [&archive, &metadata, &kernels[0], &kernels[1]] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
     let file = fs::File::open(&metadata).map_err(|e| format!("missing reverse-core.meta: {e}"))?;
     let mut text = String::new();
-    file.take(4097)
-        .read_to_string(&mut text)
-        .map_err(|e| e.to_string())?;
+    file.take(4097).read_to_string(&mut text).map_err(|e| e.to_string())?;
     if text.len() > 4096 {
         return Err("oversized reverse-core.meta".into());
     }
@@ -68,6 +67,7 @@ fn verify(directory: &Path, manifest: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(whale_wave_reverse)");
     println!("cargo:rerun-if-env-changed=WHALE_WAVE_REVERSE_DIR");
@@ -87,9 +87,8 @@ fn main() {
         "x86_64-unknown-linux-gnu",
         "Wave reverse bootstrap does not cross-link yet"
     );
-    let directory = PathBuf::from(directory)
-        .canonicalize()
-        .expect("WHALE_WAVE_REVERSE_DIR must exist");
+    let directory =
+        PathBuf::from(directory).canonicalize().expect("WHALE_WAVE_REVERSE_DIR must exist");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
     if let Err(error) = verify(&directory, &manifest) {
         panic!("{error}; rebuild with tools/build_wave_reverse.py before enabling Wave reverse");

@@ -8,6 +8,7 @@ pub enum GlobalStorageInit {
     /// Physical zero-fill does not initialize a value.
     Uninitialized,
 }
+
 #[derive(Clone, Debug)]
 pub struct GlobalStorage {
     pub id: GlobalId,
@@ -19,6 +20,7 @@ pub struct GlobalStorage {
     pub linkage: Linkage,
     pub link_name: Option<String>,
 }
+
 impl GlobalStorage {
     /// A builder assigns a fresh GlobalId when this declaration is added.
     pub fn internal(
@@ -39,6 +41,7 @@ impl GlobalStorage {
             link_name: None,
         }
     }
+
     pub fn validate_with_limits(&self, limits: IrLimits) -> Result<(), GlobalStorageError> {
         crate::limits::Budget::new(limits)
             .and_then(|mut b| b.ty(&self.ty))
@@ -82,11 +85,11 @@ impl GlobalStorage {
                 if !crate::constant::valid_constant(&self.ty, value) =>
             {
                 return Err(GlobalStorageError::InvalidInitializer)
-            }
+            },
             GlobalStorageInit::Uninitialized if self.readonly => {
                 return Err(GlobalStorageError::ReadOnlyUninitialized)
-            }
-            _ => {}
+            },
+            _ => {},
         }
         match (&self.linkage, &self.link_name) {
             (Linkage::Internal, None) => Ok(()),
@@ -95,6 +98,7 @@ impl GlobalStorage {
         }
     }
 }
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GlobalStorageError {
     ResourceLimit(crate::LimitError),
@@ -109,9 +113,11 @@ pub enum GlobalStorageError {
     UnknownGlobal,
     AddressTypeMismatch,
 }
+
 impl std::fmt::Display for GlobalStorageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "global storage error: {self:?}")
     }
 }
+
 impl std::error::Error for GlobalStorageError {}

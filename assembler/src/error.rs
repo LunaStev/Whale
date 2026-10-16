@@ -23,6 +23,7 @@ pub enum AsmError {
         error: Box<AsmError>,
     },
 }
+
 impl AsmError {
     pub fn at(
         self,
@@ -33,30 +34,19 @@ impl AsmError {
         if matches!(self, Self::Diagnostic { .. }) {
             return self;
         }
-        Self::Diagnostic {
-            source_name: source_name.into(),
-            span,
-            related,
-            error: Box::new(self),
-        }
+        Self::Diagnostic { source_name: source_name.into(), span, related, error: Box::new(self) }
     }
+
     pub fn with_source_name(self, source_name: impl Into<String>) -> Self {
         match self {
-            Self::Diagnostic {
-                span,
-                related,
-                error,
-                ..
-            } => Self::Diagnostic {
-                source_name: source_name.into(),
-                span,
-                related,
-                error,
+            Self::Diagnostic { span, related, error, .. } => {
+                Self::Diagnostic { source_name: source_name.into(), span, related, error }
             },
             other => other,
         }
     }
 }
+
 impl fmt::Display for AsmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -65,12 +55,7 @@ impl fmt::Display for AsmError {
             AsmError::EncodeError(s) => write!(f, "Encode error: {}", s),
             AsmError::SymbolError(s) => write!(f, "Symbol error: {}", s),
             AsmError::UnexpectedToken(s) => write!(f, "Unexpected token: {}", s),
-            AsmError::Diagnostic {
-                source_name,
-                span,
-                related,
-                error,
-            } => {
+            AsmError::Diagnostic { source_name, span, related, error } => {
                 write!(
                     f,
                     "{error} at {source_name}: line {}, column {} (bytes {}..{})",
@@ -80,10 +65,11 @@ impl fmt::Display for AsmError {
                     write!(f, "; previous declaration at {source_name}: line {}, column {} (bytes {}..{})", previous.line, previous.column, previous.start, previous.end)?;
                 }
                 Ok(())
-            }
+            },
         }
     }
 }
+
 impl std::error::Error for AsmError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {

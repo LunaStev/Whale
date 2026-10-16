@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::VerifyError;
+
 use crate::{ConstEvalError, ConstExpr, ConstRef, ConstValue, Function, Instruction, Module, Type};
 
 type Values = HashMap<ConstRef, (Type, ConstValue)>;
@@ -37,10 +38,7 @@ fn evaluate(
         if indices.insert(definition.id, i).is_some()
             || lookup(&values, globals, definition.id).is_some()
         {
-            return Err(error(
-                definition.id,
-                ConstEvalError::DuplicateDefinition(definition.id),
-            ));
+            return Err(error(definition.id, ConstEvalError::DuplicateDefinition(definition.id)));
         }
         if definition.ty != &definition.expression.ty {
             return Err(error(definition.id, ConstEvalError::TypeMismatch));
@@ -70,10 +68,7 @@ fn evaluate(
         let definition = &definitions[i];
         let result = definition
             .expression
-            .evaluate_with_limits(
-                &|reference| lookup(&values, globals, reference).cloned(),
-                limits,
-            )
+            .evaluate_with_limits(&|reference| lookup(&values, globals, reference).cloned(), limits)
             .map_err(|reason| error(definition.id, reason))?;
         if !crate::const_expr::same_value(&result, definition.result) {
             return Err(error(definition.id, ConstEvalError::ResultMismatch));
@@ -122,19 +117,14 @@ pub(super) fn verify_locals(
         match ins {
             Instruction::Const { dst, ty, value } => {
                 values.insert(ConstRef::Local(*dst), (ty.clone(), value.clone()));
-            }
-            Instruction::ConstDecl {
-                dst,
-                expression,
-                value,
-                ..
-            } => definitions.push(Definition {
+            },
+            Instruction::ConstDecl { dst, expression, value, .. } => definitions.push(Definition {
                 id: ConstRef::Local(*dst),
                 ty: &expression.ty,
                 expression,
                 result: value,
             }),
-            _ => {}
+            _ => {},
         }
     }
     evaluate(&f.name, definitions, values, globals, limits).map(|_| ())
@@ -143,23 +133,16 @@ pub(super) fn verify_locals(
 #[cfg(test)]
 mod sharing_tests {
     use super::*;
+
     #[test]
     fn overlay_borrows_the_verified_global_entry() {
         let id = ConstRef::Global(crate::GlobalId(7));
         let globals = Values::from([(id, (Type::I32, ConstValue::I(42)))]);
         let mut locals = Values::new();
-        locals.insert(
-            ConstRef::Local(crate::ValueId(7)),
-            (Type::I32, ConstValue::I(9)),
-        );
-        assert!(std::ptr::eq(
-            lookup(&locals, &globals, id).unwrap(),
-            globals.get(&id).unwrap()
-        ));
+        locals.insert(ConstRef::Local(crate::ValueId(7)), (Type::I32, ConstValue::I(9)));
+        assert!(std::ptr::eq(lookup(&locals, &globals, id).unwrap(), globals.get(&id).unwrap()));
         assert_eq!(
-            lookup(&locals, &globals, ConstRef::Local(crate::ValueId(7)))
-                .unwrap()
-                .1,
+            lookup(&locals, &globals, ConstRef::Local(crate::ValueId(7))).unwrap().1,
             ConstValue::I(9)
         );
     }

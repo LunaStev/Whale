@@ -2,15 +2,13 @@ use std::{fs, io::Read, process};
 
 #[cfg(feature = "socket-cli")]
 use ir::lower_ast::{interchange, lower_o0};
+
 use ir::{parse_module, printer, IrLimits};
 
 fn stdout(text: impl AsRef<str>) {
     use std::io::Write;
     let mut stream = std::io::stdout().lock();
-    if let Err(error) = stream
-        .write_all(text.as_ref().as_bytes())
-        .and_then(|_| stream.flush())
-    {
+    if let Err(error) = stream.write_all(text.as_ref().as_bytes()).and_then(|_| stream.flush()) {
         if error.kind() == std::io::ErrorKind::BrokenPipe {
             process::exit(0);
         }
@@ -22,6 +20,7 @@ fn fail(message: impl std::fmt::Display) -> ! {
     eprintln!("Error: {message}");
     process::exit(1);
 }
+
 pub fn run(args: Vec<String>) {
     if args.is_empty() || args.iter().any(|s| s == "--help") {
         print_help();
@@ -55,14 +54,12 @@ pub fn run(args: Vec<String>) {
                     fail("duplicate -o option");
                 }
                 output = Some(args.next().unwrap_or_else(|| fail("-o requires a path")));
-            }
+            },
             "--function" if command == "run" => {
                 if function.is_some() {
                     fail("duplicate --function option");
                 }
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| fail("--function requires @fN"));
+                let value = args.next().unwrap_or_else(|| fail("--function requires @fN"));
                 function = Some(ir::FunctionId(
                     value
                         .strip_prefix("@f")
@@ -70,18 +67,15 @@ pub fn run(args: Vec<String>) {
                         .and_then(|s| s.parse().ok())
                         .unwrap_or_else(|| fail("--function requires @fN with a u32 ID")),
                 ));
-            }
-            "--arg" if command == "run" => arguments.push(
-                args.next()
-                    .unwrap_or_else(|| fail("--arg requires a literal")),
-            ),
+            },
+            "--arg" if command == "run" => {
+                arguments.push(args.next().unwrap_or_else(|| fail("--arg requires a literal")))
+            },
             "--max-steps" if command == "run" => {
                 if max_steps.is_some() {
                     fail("duplicate --max-steps option");
                 }
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| fail("--max-steps requires a u64 count"));
+                let value = args.next().unwrap_or_else(|| fail("--max-steps requires a u64 count"));
                 max_steps = Some(
                     value
                         .parse::<u64>()
@@ -89,14 +83,13 @@ pub fn run(args: Vec<String>) {
                         .filter(|_| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
                         .unwrap_or_else(|| fail("--max-steps requires a decimal u64 count")),
                 );
-            }
+            },
             "--max-memory" if command == "run" => {
                 if max_memory.is_some() {
                     fail("duplicate --max-memory option");
                 }
-                let value = args
-                    .next()
-                    .unwrap_or_else(|| fail("--max-memory requires a u64 byte count"));
+                let value =
+                    args.next().unwrap_or_else(|| fail("--max-memory requires a u64 byte count"));
                 max_memory = Some(
                     value
                         .parse::<u64>()
@@ -104,17 +97,14 @@ pub fn run(args: Vec<String>) {
                         .filter(|_| !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()))
                         .unwrap_or_else(|| fail("--max-memory requires a decimal u64 byte count")),
                 );
-            }
+            },
             #[cfg(feature = "socket-cli")]
             "--target" if command == "lower" => {
                 if target.is_some() {
                     fail("duplicate --target option");
                 }
-                target = Some(
-                    args.next()
-                        .unwrap_or_else(|| fail("--target requires a value")),
-                );
-            }
+                target = Some(args.next().unwrap_or_else(|| fail("--target requires a value")));
+            },
             #[cfg(feature = "socket-cli")]
             "--no-verify" if command == "lower" => do_verify = false,
             s if !s.starts_with('-') && input.is_none() => input = Some(arg),
@@ -136,16 +126,11 @@ pub fn run(args: Vec<String>) {
     };
     let max_bytes = IrLimits::default().max_input_bytes;
     #[cfg(feature = "socket-cli")]
-    let max_bytes = if command == "lower" {
-        interchange::DEFAULT_MAX_INPUT_BYTES
-    } else {
-        max_bytes
-    };
+    let max_bytes =
+        if command == "lower" { interchange::DEFAULT_MAX_INPUT_BYTES } else { max_bytes };
     let source = (|| -> std::io::Result<String> {
         let mut source = String::new();
-        fs::File::open(input)?
-            .take((max_bytes + 1) as u64)
-            .read_to_string(&mut source)?;
+        fs::File::open(input)?.take((max_bytes + 1) as u64).read_to_string(&mut source)?;
         Ok(source)
     })()
     .unwrap_or_else(|e| fail(format!("failed to read {input}: {e}")));
@@ -192,6 +177,7 @@ pub fn run(args: Vec<String>) {
         stdout(text);
     }
 }
+
 fn print_help() {
     stdout(concat!(
         "Usage: whale ir <command> [options]", "\n",
@@ -222,11 +208,7 @@ fn execute(
         .find(|f| f.id == function)
         .unwrap_or_else(|| fail(format!("{input}: no body for @f{}", function.0)));
     if fun.params.len() != literals.len() {
-        fail(format!(
-            "{input}: expected {} arguments, got {}",
-            fun.params.len(),
-            literals.len()
-        ));
+        fail(format!("{input}: expected {} arguments, got {}", fun.params.len(), literals.len()));
     }
     let arguments: Vec<_> = fun.params.iter().zip(literals).enumerate().map(|(index, (param, literal))| {
         scalar_argument(&param.ty, literal).unwrap_or_else(|| {
@@ -268,7 +250,7 @@ fn scalar_argument(ty: &ir::Type, literal: &str) -> Option<ir::ConstValue> {
             if decimal(literal.strip_prefix('-').unwrap_or(literal)) =>
         {
             literal.parse().ok().map(ir::ConstValue::I)
-        }
+        },
         ir::Type::U1
         | ir::Type::U8
         | ir::Type::U16
@@ -278,7 +260,7 @@ fn scalar_argument(ty: &ir::Type, literal: &str) -> Option<ir::ConstValue> {
             if decimal(literal) =>
         {
             literal.parse().ok().map(ir::ConstValue::U)
-        }
+        },
         _ => None,
     }
 }

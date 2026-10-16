@@ -1,7 +1,9 @@
 use ir::*;
+
 fn header() -> String {
     format!("module {{ format_version {} semantics_version 1 target \"x86_64-whale-linux\" datalayout {{ptr=64,endian=little}}",IR_FORMAT_VERSION)
 }
+
 #[test]
 fn memory_instruction_corpus_is_also_bounded_by_shared_ir_fuel() {
     let text=format!("{} declare @f0 \"bounded\": whale () -> void, linkage internal fn @f0 \"bounded\"() -> void, entry %b0 {{ %b0 \"entry\": %v0: ptr<u8> = alloca u8, align 1 %v1: u8 = const u8 42 br label %b1 %b1 \"loop\": store u8 %v1, ptr<u8> %v0, align 1 %v2: u8 = load u8, ptr<u8> %v0, align 1 uninit u8, ptr<u8> %v0, align 1 br label %b1 }} }}",header());
@@ -12,6 +14,7 @@ fn memory_instruction_corpus_is_also_bounded_by_shared_ir_fuel() {
         );
     }
 }
+
 #[test]
 fn explicit_lifetime_end_invalidates_generated_stored_and_gep_aliases() {
     // Batch5 introduces the operation in format6. This fixture is intentionally
@@ -24,9 +27,6 @@ fn explicit_lifetime_end_invalidates_generated_stored_and_gep_aliases() {
         }
         let module = parse_module(&text).unwrap();
         let error = interpret(&module, FunctionId(0), &[]).unwrap_err();
-        assert!(
-            error.to_string().contains("allocation lifetime has ended"),
-            "{error}"
-        );
+        assert!(error.to_string().contains("allocation lifetime has ended"), "{error}");
     }
 }

@@ -1,6 +1,7 @@
 #![cfg(feature = "socket")]
 
 use ir::lower_ast::{frontend as ast, lower_o0, LowerError};
+
 use ir::{ConstValue, DataLayout, Type};
 
 fn function(name: &str, ty: ast::TypeRef, expr: Option<ast::Expr>) -> ast::Function {
@@ -16,19 +17,11 @@ fn function(name: &str, ty: ast::TypeRef, expr: Option<ast::Expr>) -> ast::Funct
 }
 
 fn lower(program: ast::Program) -> Result<ir::Module, LowerError> {
-    lower_o0(
-        &program,
-        "x86_64-whale-linux",
-        DataLayout::default_64bit_le(),
-    )
+    lower_o0(&program, "x86_64-whale-linux", DataLayout::default_64bit_le())
 }
 
 fn int(bits: u16, signed: bool, value: i128) -> ast::Expr {
-    ast::Expr::Lit(ast::Lit::Int {
-        bits,
-        signed,
-        value: value.to_string(),
-    })
+    ast::Expr::Lit(ast::Lit::Int { bits, signed, value: value.to_string() })
 }
 
 #[test]
@@ -39,10 +32,7 @@ fn names_are_unique_within_their_own_namespaces() {
     );
     let global = ast::GlobalConst {
         name: "same".into(),
-        ty: ast::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        },
+        ty: ast::TypeRef::Int { bits: 32, signed: true },
         init: int(32, true, 1),
     };
     assert!(
@@ -60,19 +50,10 @@ fn names_are_unique_within_their_own_namespaces() {
 
 #[test]
 fn duplicate_parameters_fail_before_the_body_is_lowered() {
-    let p = ast::Parameter {
-        name: "x".into(),
-        ty: ast::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        },
-    };
+    let p = ast::Parameter { name: "x".into(), ty: ast::TypeRef::Int { bits: 32, signed: true } };
     let mut f = function(
         "f",
-        ast::TypeRef::Int {
-            bits: 32,
-            signed: true,
-        },
+        ast::TypeRef::Int { bits: 32, signed: true },
         Some(ast::Expr::Var("missing".into())),
     );
     f.parameters = vec![p.clone(), p];
@@ -90,10 +71,8 @@ fn duplicate_parameters_fail_before_the_body_is_lowered() {
         .unwrap();
         ir::verify_module(&m).unwrap();
         let f = &m.functions[0];
-        let ir::Terminator::Ret {
-            value: Some(result),
-            ..
-        } = f.blocks[0].terminator.as_ref().unwrap()
+        let ir::Terminator::Ret { value: Some(result), .. } =
+            f.blocks[0].terminator.as_ref().unwrap()
         else {
             panic!("missing return")
         };
@@ -134,10 +113,7 @@ fn void_returns_never_discard_an_expression() {
             globals: vec![],
             functions: vec![function(
                 "f",
-                ast::TypeRef::Int {
-                    bits: 32,
-                    signed: true
-                },
+                ast::TypeRef::Int { bits: 32, signed: true },
                 Some(ast::Expr::Lit(ast::Lit::Bool(true)))
             )]
         }),
@@ -179,11 +155,7 @@ fn integer_literals_have_the_same_range_in_globals_and_function_bodies() {
             },
             ast::Program {
                 declarations: vec![],
-                globals: vec![ast::GlobalConst {
-                    name: "g".into(),
-                    ty,
-                    init: expr,
-                }],
+                globals: vec![ast::GlobalConst { name: "g".into(), ty, init: expr }],
                 functions: vec![],
             },
         ];
@@ -192,14 +164,14 @@ fn integer_literals_have_the_same_range_in_globals_and_function_bodies() {
                 Ok(m) => {
                     assert!(valid, "accepted bits={bits} signed={signed} value={value}");
                     ir::verify_module(&m).unwrap();
-                }
+                },
                 Err(e) => {
                     assert!(!valid, "{e:?}");
                     assert!(matches!(
                         e,
                         LowerError::InvalidLiteral { .. } | LowerError::NumericLiteral(_)
                     ));
-                }
+                },
             }
         }
     }
@@ -211,25 +183,11 @@ fn bool_and_one_bit_integer_types_remain_distinct_in_printed_ir() {
         declarations: vec![],
         globals: vec![],
         functions: vec![
-            function(
-                "boolean",
-                ast::TypeRef::Bool,
-                Some(ast::Expr::Lit(ast::Lit::Bool(true))),
-            ),
-            function(
-                "signed",
-                ast::TypeRef::Int {
-                    bits: 1,
-                    signed: true,
-                },
-                Some(int(1, true, -1)),
-            ),
+            function("boolean", ast::TypeRef::Bool, Some(ast::Expr::Lit(ast::Lit::Bool(true)))),
+            function("signed", ast::TypeRef::Int { bits: 1, signed: true }, Some(int(1, true, -1))),
             function(
                 "unsigned",
-                ast::TypeRef::Int {
-                    bits: 1,
-                    signed: false,
-                },
+                ast::TypeRef::Int { bits: 1, signed: false },
                 Some(int(1, false, 1)),
             ),
         ],
@@ -237,10 +195,7 @@ fn bool_and_one_bit_integer_types_remain_distinct_in_printed_ir() {
     .unwrap();
     ir::verify_module(&m).unwrap();
     assert_eq!(
-        m.functions
-            .iter()
-            .map(|f| f.ret_ty.clone())
-            .collect::<Vec<_>>(),
+        m.functions.iter().map(|f| f.ret_ty.clone()).collect::<Vec<_>>(),
         vec![Type::Bool, Type::I1, Type::U1]
     );
     let text = ir::print_module(&m);
@@ -255,10 +210,7 @@ fn integer_arithmetic_wrapping_is_unchanged_by_literal_validation() {
         declarations: vec![],
         globals: vec![ast::GlobalConst {
             name: "g".into(),
-            ty: ast::TypeRef::Int {
-                bits: 8,
-                signed: true,
-            },
+            ty: ast::TypeRef::Int { bits: 8, signed: true },
             init: ast::Expr::Binary {
                 left: Box::new(int(8, true, 127)),
                 op: ast::BinOpRef::Add,
@@ -279,17 +231,9 @@ fn boolean_equality_is_supported_but_integer_arithmetic_is_not_boolean_arithmeti
             let left = Box::new(ast::Expr::Lit(ast::Lit::Bool(true)));
             let right = Box::new(ast::Expr::Lit(ast::Lit::Bool(false)));
             let expr = if equality {
-                ast::Expr::Cmp {
-                    left,
-                    op: ast::CmpOpRef::Eq,
-                    right,
-                }
+                ast::Expr::Cmp { left, op: ast::CmpOpRef::Eq, right }
             } else {
-                ast::Expr::Binary {
-                    left,
-                    op: ast::BinOpRef::Add,
-                    right,
-                }
+                ast::Expr::Binary { left, op: ast::BinOpRef::Add, right }
             };
             let program = if runtime {
                 ast::Program {
@@ -322,24 +266,10 @@ fn boolean_equality_is_supported_but_integer_arithmetic_is_not_boolean_arithmeti
 fn one_bit_integer_conditions_need_explicit_conversion() {
     for condition in [int(1, true, -1), int(1, false, 1)] {
         let mut f = function("f", ast::TypeRef::Void, None);
-        f.body.insert(
-            0,
-            ast::Stmt::If {
-                cond: condition,
-                then_body: vec![],
-                else_body: vec![],
-            },
-        );
+        f.body.insert(0, ast::Stmt::If { cond: condition, then_body: vec![], else_body: vec![] });
         assert!(matches!(
-            lower(ast::Program {
-                declarations: vec![],
-                globals: vec![],
-                functions: vec![f]
-            }),
-            Err(LowerError::TypeMismatch {
-                expected: Type::Bool,
-                ..
-            })
+            lower(ast::Program { declarations: vec![], globals: vec![], functions: vec![f] }),
+            Err(LowerError::TypeMismatch { expected: Type::Bool, .. })
         ));
     }
 }
@@ -354,14 +284,7 @@ fn o0_keeps_function_arithmetic_visible_in_ir() {
     let m = lower(ast::Program {
         declarations: vec![],
         globals: vec![],
-        functions: vec![function(
-            "f",
-            ast::TypeRef::Int {
-                bits: 32,
-                signed: true,
-            },
-            Some(expr),
-        )],
+        functions: vec![function("f", ast::TypeRef::Int { bits: 32, signed: true }, Some(expr))],
     })
     .unwrap();
     ir::verify_module(&m).unwrap();
@@ -369,18 +292,9 @@ fn o0_keeps_function_arithmetic_visible_in_ir() {
     assert!(matches!(
         instructions.as_slice(),
         [
-            ir::Instruction::Const {
-                value: ConstValue::I(1),
-                ..
-            },
-            ir::Instruction::Const {
-                value: ConstValue::I(2),
-                ..
-            },
-            ir::Instruction::Bin {
-                op: ir::BinOp::Add,
-                ..
-            }
+            ir::Instruction::Const { value: ConstValue::I(1), .. },
+            ir::Instruction::Const { value: ConstValue::I(2), .. },
+            ir::Instruction::Bin { op: ir::BinOp::Add, .. }
         ]
     ));
 }

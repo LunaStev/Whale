@@ -1,7 +1,9 @@
 //! Dependency-free bounded mutation targets; every accepted input exercises real library APIs.
 #![allow(dead_code)]
 use std::path::{Path, PathBuf};
+
 pub const MAX_INPUT: usize = 8192;
+
 #[derive(Clone, Copy, Debug)]
 pub enum Target {
     Assembler,
@@ -9,6 +11,7 @@ pub enum Target {
     Ast,
     Object,
 }
+
 impl Target {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
@@ -19,6 +22,7 @@ impl Target {
             _ => None,
         }
     }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Assembler => "assembler",
@@ -28,6 +32,7 @@ impl Target {
         }
     }
 }
+
 pub fn ir_limits() -> ir::IrLimits {
     ir::IrLimits {
         max_input_bytes: MAX_INPUT,
@@ -38,6 +43,7 @@ pub fn ir_limits() -> ir::IrLimits {
         max_analysis_work: 131072,
     }
 }
+
 /// Rejection is normal. A panic means a target violated its bounded-input contract.
 pub fn check(target: Target, bytes: &[u8]) -> bool {
     if bytes.len() > MAX_INPUT {
@@ -56,10 +62,8 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
             if let Ok(tokens) = assembler::tokens::tokenize(source) {
                 let _ = assembler::isa::amd64::parser::parse(&tokens);
             }
-            let limits = assembler::AssemblyLimits {
-                max_output_bytes: 65536,
-                max_relax_iterations: 32,
-            };
+            let limits =
+                assembler::AssemblyLimits { max_output_bytes: 65536, max_relax_iterations: 32 };
             let Ok(output) =
                 assembler::assemble_with_limits(source, &assembler::isa::AMD64, &limits)
             else {
@@ -71,10 +75,8 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
             );
             for symbol in &output.symbols {
                 if let Some(index) = symbol.section_index {
-                    let section = output
-                        .sections
-                        .get(index)
-                        .expect("assembled symbol section must exist");
+                    let section =
+                        output.sections.get(index).expect("assembled symbol section must exist");
                     assert!(
                         symbol.offset + symbol.size
                             <= section.data.len() as u64 + section.zero_fill
@@ -82,14 +84,14 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
                 }
             }
             true
-        }
+        },
         Target::Ir => {
             let Ok(module) = ir::parse_module_with_limits(source, ir_limits()) else {
                 return false;
             };
             canonical(&module);
             true
-        }
+        },
         Target::Ast => {
             #[cfg(feature = "socket-cli")]
             {
@@ -114,7 +116,7 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
                     return false;
                 };
                 match ir::verify_module_with_limits(&module, ir_limits()) {
-                    Ok(()) => {}
+                    Ok(()) => {},
                     Err(ir::VerifyError::ResourceLimit(_)) => return false,
                     Err(error) => panic!("successful O0 lowering produced invalid IR: {error:?}"),
                 }
@@ -131,9 +133,10 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
             {
                 false
             }
-        }
+        },
     }
 }
+
 fn canonical(module: &ir::Module) {
     let text = ir::print_module(module);
     assert!(text.len() <= 262144, "bounded source expanded unexpectedly");
@@ -142,17 +145,16 @@ fn canonical(module: &ir::Module) {
     limits.max_tokens = 16384;
     let decoded =
         ir::parse_module_with_limits(&text, limits).expect("printed verified module must parse");
-    assert_eq!(
-        ir::print_module(&decoded),
-        text,
-        "canonical text/identities changed"
-    );
+    assert_eq!(ir::print_module(&decoded), text, "canonical text/identities changed");
 }
+
 pub struct Rng(u64);
+
 impl Rng {
     pub fn new(seed: u64) -> Self {
         Self(seed.max(1))
     }
+
     pub fn next(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x << 13;
@@ -161,10 +163,12 @@ impl Rng {
         self.0 = x;
         x
     }
+
     pub fn index(&mut self, n: usize) -> usize {
         (self.next() as usize) % n.max(1)
     }
 }
+
 pub fn mutate(seed: &[u8], rng: &mut Rng) -> Vec<u8> {
     let mut input = seed[..seed.len().min(MAX_INPUT)].to_vec();
     for _ in 0..1 + rng.index(4) {
@@ -172,20 +176,20 @@ pub fn mutate(seed: &[u8], rng: &mut Rng) -> Vec<u8> {
         match rng.index(5) {
             0 if at < input.len() => {
                 input[at] ^= 1 << rng.index(8);
-            }
+            },
             1 if input.len() < MAX_INPUT => {
                 input.insert(at, rng.next() as u8);
-            }
+            },
             2 if at < input.len() => {
                 let end = (at + 1 + rng.index(32)).min(input.len());
                 input.drain(at..end);
-            }
+            },
             3 if !input.is_empty() => {
                 let end = (at + 1 + rng.index(64)).min(input.len());
                 let copy = input[at..end].to_vec();
                 let room = MAX_INPUT - input.len();
                 input.splice(at..at, copy.into_iter().take(room));
-            }
+            },
             _ => {
                 let token = [
                     b"9223372036854775808".as_slice(),
@@ -197,11 +201,12 @@ pub fn mutate(seed: &[u8], rng: &mut Rng) -> Vec<u8> {
                 ][rng.index(6)];
                 let room = MAX_INPUT - input.len();
                 input.splice(at..at, token.iter().copied().take(room));
-            }
+            },
         }
     }
     input
 }
+
 pub fn minimize(mut input: Vec<u8>, fails: impl Fn(&[u8]) -> bool) -> Vec<u8> {
     let mut width = input.len() / 2;
     while width > 0 {
@@ -219,16 +224,16 @@ pub fn minimize(mut input: Vec<u8>, fails: impl Fn(&[u8]) -> bool) -> Vec<u8> {
     }
     input
 }
+
 pub fn read_bounded(path: &Path) -> Vec<u8> {
     use std::io::Read;
     let file = std::fs::File::open(path).expect("replay input");
     let mut bytes = Vec::new();
-    file.take((MAX_INPUT + 1) as u64)
-        .read_to_end(&mut bytes)
-        .unwrap();
+    file.take((MAX_INPUT + 1) as u64).read_to_end(&mut bytes).unwrap();
     assert!(bytes.len() <= MAX_INPUT, "seed/replay exceeds input budget");
     bytes
 }
+
 pub fn seeds(root: &Path, target: Target) -> Vec<(PathBuf, Vec<u8>)> {
     let mut entries: Vec<_> = std::fs::read_dir(root.join(target.name()))
         .expect("seed directory")
@@ -263,6 +268,7 @@ pub fn object_limits() -> object::ObjectReadLimits {
         max_work: 131072,
     }
 }
+
 fn check_object(bytes: &[u8]) -> bool {
     if let Some(model) = bytes.strip_prefix(b"WOM1") {
         return check_object_model(model);
@@ -272,6 +278,7 @@ fn check_object(bytes: &[u8]) -> bool {
     };
     object_canonical(&object)
 }
+
 fn check_object_model(bytes: &[u8]) -> bool {
     use object::{
         ObjectFile, ObjectFormat, ObjectRelocation, ObjectSymbol, RelocKind, SectionKind,
@@ -286,16 +293,8 @@ fn check_object_model(bytes: &[u8]) -> bool {
         _ => SectionKind::Bss,
     };
     let mut object = ObjectFile::new(ObjectFormat::ELF64);
-    let name = if flags & 4 != 0 {
-        "model\0section"
-    } else {
-        "model-section"
-    };
-    let align = if flags & 2 != 0 {
-        3
-    } else {
-        1u64 << (field(2) % 16)
-    };
+    let name = if flags & 4 != 0 { "model\0section" } else { "model-section" };
+    let align = if flags & 2 != 0 { 3 } else { 1u64 << (field(2) % 16) };
     let section = object.add_section(name, kind, align);
     if kind == SectionKind::Bss {
         object.sections[section].zero_fill = 1u64 << (field(2) % 63);
@@ -303,17 +302,10 @@ fn check_object_model(bytes: &[u8]) -> bool {
             object.sections[section].data.push(1);
         }
     } else {
-        object.sections[section].data = if bytes.len() > 8 {
-            bytes[8..bytes.len().min(72)].to_vec()
-        } else {
-            vec![0; 32]
-        };
+        object.sections[section].data =
+            if bytes.len() > 8 { bytes[8..bytes.len().min(72)].to_vec() } else { vec![0; 32] };
     }
-    let symbol = if flags & 8 != 0 {
-        "model\0symbol"
-    } else {
-        "model-symbol"
-    };
+    let symbol = if flags & 8 != 0 { "model\0symbol" } else { "model-symbol" };
     object.symbols.push(ObjectSymbol {
         name: symbol.into(),
         kind: match (field(1) >> 2) & 3 {
@@ -328,11 +320,7 @@ fn check_object_model(bytes: &[u8]) -> bool {
         } else {
             Some(section)
         },
-        value: if field(3) == 255 {
-            u64::MAX
-        } else {
-            u64::from(field(3))
-        },
+        value: if field(3) == 255 { u64::MAX } else { u64::from(field(3)) },
         size: u64::from(field(4)),
         binding: if field(1) & 64 != 0 {
             SymbolBinding::Local
@@ -369,11 +357,7 @@ fn check_object_model(bytes: &[u8]) -> bool {
         ];
         object.relocations.push(ObjectRelocation {
             section_index: section,
-            offset: if field(6) == 255 {
-                usize::MAX
-            } else {
-                usize::from(field(6))
-            },
+            offset: if field(6) == 255 { usize::MAX } else { usize::from(field(6)) },
             symbol: symbol.into(),
             addend: i64::from(field(7) as i8),
             kind: kinds[usize::from(field(5)) % kinds.len()],
@@ -388,11 +372,10 @@ fn check_object_model(bytes: &[u8]) -> bool {
     }
     object_canonical(&object)
 }
+
 fn object_canonical(object: &object::ObjectFile) -> bool {
     use object::{ObjectErrorKind, ObjectResource};
-    object
-        .validate_diagnostic()
-        .expect("reader accepted invalid in-memory model");
+    object.validate_diagnostic().expect("reader accepted invalid in-memory model");
     let bytes = match object.write_diagnostic_with_limit(65536) {
         Ok(bytes) => bytes,
         Err(error)
@@ -400,7 +383,7 @@ fn object_canonical(object: &object::ObjectFile) -> bool {
                 && error.resource == Some(ObjectResource::OutputBytes) =>
         {
             return false
-        }
+        },
         Err(error) => panic!("valid bounded object failed serialization: {error:?}"),
     };
     let mut limits = object_limits();
@@ -416,6 +399,7 @@ fn object_canonical(object: &object::ObjectFile) -> bool {
     assert_object_semantics(object, &imported);
     true
 }
+
 /// Writer table reordering, BSS compaction and zero-alignment normalization are
 /// representation details; payloads and all link-relevant identities must remain.
 fn assert_object_semantics(a: &object::ObjectFile, b: &object::ObjectFile) {
@@ -435,15 +419,7 @@ fn assert_object_semantics(a: &object::ObjectFile, b: &object::ObjectFile) {
             .symbols
             .iter()
             .map(|s| {
-                (
-                    s.name.clone(),
-                    s.section_index,
-                    s.value,
-                    s.size,
-                    s.kind,
-                    s.binding,
-                    s.visibility,
-                )
+                (s.name.clone(), s.section_index, s.value, s.size, s.kind, s.binding, s.visibility)
             })
             .collect::<Vec<_>>();
         result.sort_by(|a, b| a.0.cmp(&b.0));
@@ -470,15 +446,7 @@ fn assert_object_semantics(a: &object::ObjectFile, b: &object::ObjectFile) {
         let mut result = o
             .relocations
             .iter()
-            .map(|r| {
-                (
-                    r.section_index,
-                    r.offset,
-                    r.symbol.clone(),
-                    r.addend,
-                    r.kind as u8,
-                )
-            })
+            .map(|r| (r.section_index, r.offset, r.symbol.clone(), r.addend, r.kind as u8))
             .collect::<Vec<_>>();
         result.sort();
         result

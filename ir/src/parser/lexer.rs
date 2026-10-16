@@ -1,23 +1,25 @@
 // SPDX-License-Identifier: MPL-2.0
 use super::{ParseError, ParseErrorKind, SourceLocation};
+
 use crate::{IrLimits, LimitError, Resource};
+
 #[derive(Debug)]
 pub(super) enum Kind<'a> {
     Word(&'a str),
     String(String),
     Mark(&'a str),
 }
+
 #[derive(Debug)]
 pub(super) struct Token<'a> {
     pub kind: Kind<'a>,
     pub location: SourceLocation,
 }
+
 fn error(location: SourceLocation, message: &str) -> ParseError {
-    ParseError {
-        location,
-        kind: ParseErrorKind::Syntax(message.into()),
-    }
+    ParseError { location, kind: ParseErrorKind::Syntax(message.into()) }
 }
+
 fn advance(location: &mut SourceLocation, c: char) {
     location.byte_offset += c.len_utf8();
     if c == '\n' {
@@ -27,12 +29,9 @@ fn advance(location: &mut SourceLocation, c: char) {
         location.column += 1;
     }
 }
+
 pub(super) fn lex(source: &str, limits: IrLimits) -> Result<Vec<Token<'_>>, ParseError> {
-    let mut pos = SourceLocation {
-        byte_offset: 0,
-        line: 1,
-        column: 1,
-    };
+    let mut pos = SourceLocation { byte_offset: 0, line: 1, column: 1 };
     if source.len() > limits.max_input_bytes {
         return Err(ParseError {
             location: pos,
@@ -115,7 +114,7 @@ pub(super) fn lex(source: &str, limits: IrLimits) -> Result<Vec<Token<'_>>, Pars
                                 .ok()
                                 .and_then(char::from_u32)
                                 .ok_or_else(|| error(pos, "invalid Unicode scalar"))?
-                        }
+                        },
                         _ => return Err(error(pos, "unknown string escape")),
                     });
                 } else if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
@@ -141,14 +140,8 @@ pub(super) fn lex(source: &str, limits: IrLimits) -> Result<Vec<Token<'_>>, Pars
             }
             Kind::Word(&source[start.byte_offset..pos.byte_offset])
         };
-        tokens.push(Token {
-            kind,
-            location: start,
-        });
+        tokens.push(Token { kind, location: start });
     }
-    tokens.push(Token {
-        kind: Kind::Mark("<eof>"),
-        location: pos,
-    });
+    tokens.push(Token { kind: Kind::Mark("<eof>"), location: pos });
     Ok(tokens)
 }

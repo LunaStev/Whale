@@ -21,11 +21,7 @@ fn module(blocks: Vec<BasicBlock>, values: &[(u32, Type)]) -> Module {
     m.functions.push(Function {
         id: FunctionId(0),
         name: "flow".into(),
-        params: vec![Param {
-            name: "condition".into(),
-            id: ValueId(0),
-            ty: Type::Bool,
-        }],
+        params: vec![Param { name: "condition".into(), id: ValueId(0), ty: Type::Bool }],
         ret_ty: Type::Void,
         blocks,
         entry: BlockId(0),
@@ -37,45 +33,30 @@ fn module(blocks: Vec<BasicBlock>, values: &[(u32, Type)]) -> Module {
 }
 
 fn constant(id: u32) -> Instruction {
-    Instruction::Const {
-        dst: ValueId(id),
-        ty: Type::I32,
-        value: ConstValue::I(7),
-    }
+    Instruction::Const { dst: ValueId(id), ty: Type::I32, value: ConstValue::I(7) }
 }
+
 fn mov(dst: u32, src: u32) -> Instruction {
-    Instruction::Mov {
-        dst: ValueId(dst),
-        ty: Type::I32,
-        src: ValueId(src),
-    }
+    Instruction::Mov { dst: ValueId(dst), ty: Type::I32, src: ValueId(src) }
 }
+
 fn br(id: u32) -> Terminator {
-    Terminator::Br {
-        target: BlockId(id),
-    }
+    Terminator::Br { target: BlockId(id) }
 }
+
 fn cbr(a: u32, b: u32) -> Terminator {
-    Terminator::CBr {
-        cond: ValueId(0),
-        then_bb: BlockId(a),
-        else_bb: BlockId(b),
-    }
+    Terminator::CBr { cond: ValueId(0), then_bb: BlockId(a), else_bb: BlockId(b) }
 }
+
 fn ret() -> Terminator {
-    Terminator::Ret {
-        ty: Type::Void,
-        value: None,
-    }
+    Terminator::Ret { ty: Type::Void, value: None }
 }
+
 fn phi(dst: u32, incomings: &[(u32, u32)]) -> Instruction {
     Instruction::Phi {
         dst: ValueId(dst),
         ty: Type::I32,
-        incomings: incomings
-            .iter()
-            .map(|(v, b)| (ValueId(*v), BlockId(*b)))
-            .collect(),
+        incomings: incomings.iter().map(|(v, b)| (ValueId(*v), BlockId(*b))).collect(),
     }
 }
 
@@ -109,10 +90,7 @@ fn sibling_values_do_not_leak_and_block_order_does_not_matter() {
 
 #[test]
 fn same_block_forward_and_self_uses_fail() {
-    for instructions in [
-        vec![mov(11, 10), constant(10)],
-        vec![mov(10, 10), constant(11)],
-    ] {
+    for instructions in [vec![mov(11, 10), constant(10)], vec![mov(10, 10), constant(11)]] {
         assert!(verify_module(&module(
             vec![block(0, instructions, ret())],
             &[(10, Type::I32), (11, Type::I32)]
@@ -164,12 +142,7 @@ fn loop_phi_accepts_backedge_values_stored_later_and_self_edges() {
             block(2, vec![mov(12, 11)], br(1)),
             block(3, vec![mov(13, 11)], ret()),
         ],
-        &[
-            (10, Type::I32),
-            (11, Type::I32),
-            (12, Type::I32),
-            (13, Type::I32),
-        ],
+        &[(10, Type::I32), (11, Type::I32), (12, Type::I32), (13, Type::I32)],
     );
     for _ in 0..4 {
         verify_module(&m).unwrap();
@@ -191,40 +164,25 @@ fn loop_phi_accepts_backedge_values_stored_later_and_self_edges() {
 fn phis_are_a_typed_prefix_and_cannot_supply_an_entry_value() {
     let mut bad = diamond();
     bad.functions[0].value_types.push((ValueId(13), Type::I32));
-    bad.functions[0].blocks[3]
-        .instructions
-        .insert(0, constant(13));
+    bad.functions[0].blocks[3].instructions.insert(0, constant(13));
     assert!(verify_module(&bad).is_err());
     let mut bad = diamond();
     if let Instruction::Phi { ty, .. } = &mut bad.functions[0].blocks[3].instructions[0] {
         *ty = Type::Void;
     }
-    bad.functions[0]
-        .value_types
-        .iter_mut()
-        .find(|(v, _)| *v == ValueId(12))
-        .unwrap()
-        .1 = Type::Void;
+    bad.functions[0].value_types.iter_mut().find(|(v, _)| *v == ValueId(12)).unwrap().1 =
+        Type::Void;
     assert!(verify_module(&bad).is_err());
-    let bad = module(
-        vec![block(0, vec![phi(10, &[(10, 0)])], br(0))],
-        &[(10, Type::I32)],
-    );
+    let bad = module(vec![block(0, vec![phi(10, &[(10, 0)])], br(0))], &[(10, Type::I32)]);
     assert!(verify_module(&bad).is_err());
-    let bad = module(
-        vec![block(0, vec![phi(10, &[])], ret())],
-        &[(10, Type::I32)],
-    );
+    let bad = module(vec![block(0, vec![phi(10, &[])], ret())], &[(10, Type::I32)]);
     assert!(verify_module(&bad).is_err());
 }
 
 #[test]
 fn repeated_successor_edges_use_one_input_per_predecessor_block() {
     let mut m = module(
-        vec![
-            block(0, vec![constant(10)], cbr(1, 1)),
-            block(1, vec![phi(11, &[(10, 0)])], ret()),
-        ],
+        vec![block(0, vec![constant(10)], cbr(1, 1)), block(1, vec![phi(11, &[(10, 0)])], ret())],
         &[(10, Type::I32), (11, Type::I32)],
     );
     verify_module(&m).unwrap();
@@ -258,10 +216,7 @@ fn unreachable_blocks_are_preserved_and_checked_without_leaking_values() {
     m.functions[0].blocks[1].instructions[0] = mov(11, 999);
     assert!(verify_module(&m).is_err());
     m.functions[0].blocks[1].instructions[0] = mov(11, 0);
-    assert!(
-        verify_module(&m).is_err(),
-        "unreachable code still requires valid types"
-    );
+    assert!(verify_module(&m).is_err(), "unreachable code still requires valid types");
 }
 
 #[test]
@@ -299,11 +254,7 @@ fn entry_rejects_every_kind_of_incoming_edge_even_from_unreachable_blocks() {
         ] {
             // b0 is entry, b1 is reachable, and b2 is initially unreachable.
             let mut m = module(
-                vec![
-                    block(0, vec![], br(1)),
-                    block(1, vec![], ret()),
-                    block(2, vec![], ret()),
-                ],
+                vec![block(0, vec![], br(1)), block(1, vec![], ret()), block(2, vec![], ret())],
                 &[],
             );
             m.functions[0].blocks[source].terminator = Some(terminator);

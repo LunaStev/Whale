@@ -17,22 +17,10 @@ fn amd64_identity_matches_independently_decoded_elf_header() {
 fn both_writer_entry_points_reject_unsupported_object_identities() {
     let amd64 = Target::X86_64WhaleLinux.object_target();
     for target in [
-        ObjectTarget {
-            machine: Machine::AArch64,
-            ..amd64
-        },
-        ObjectTarget {
-            machine: Machine::RiscV64,
-            ..amd64
-        },
-        ObjectTarget {
-            endian: Endian::Big,
-            ..amd64
-        },
-        ObjectTarget {
-            address_bits: 32,
-            ..amd64
-        },
+        ObjectTarget { machine: Machine::AArch64, ..amd64 },
+        ObjectTarget { machine: Machine::RiscV64, ..amd64 },
+        ObjectTarget { endian: Endian::Big, ..amd64 },
+        ObjectTarget { address_bits: 32, ..amd64 },
     ] {
         let object = ObjectFile::with_target(target);
         assert_eq!(object.target, target);

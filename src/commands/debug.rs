@@ -11,12 +11,7 @@ pub(super) fn dump_bytes(
     let head = &bytes[..n];
 
     if show_bytes {
-        println!(
-            "== BYTES ({}, {} bytes, head {} bytes) ==",
-            label,
-            bytes.len(),
-            n
-        );
+        println!("== BYTES ({}, {} bytes, head {} bytes) ==", label, bytes.len(), n);
         for (i, b) in head.iter().enumerate() {
             println!("{:04X}: {}", i, b);
         }

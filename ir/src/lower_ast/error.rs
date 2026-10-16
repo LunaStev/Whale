@@ -4,10 +4,7 @@ use crate::{ConstValue, Type};
 
 #[derive(Debug)]
 pub enum LowerError {
-    Located {
-        annotation: crate::SourceAnnotation,
-        error: Box<LowerError>,
-    },
+    Located { annotation: crate::SourceAnnotation, error: Box<LowerError> },
     ResourceLimit(super::AstLimitError),
     Call(crate::CallError),
     VoidCallUsedAsValue,
@@ -17,10 +14,7 @@ pub enum LowerError {
     Layout(crate::LayoutError),
     UnsupportedType(String),
     UnknownVariable(String),
-    TypeMismatch {
-        expected: Type,
-        got: Type,
-    },
+    TypeMismatch { expected: Type, got: Type },
     MissingInit(String),
     UnsupportedStmt,
     UnsupportedExpr,
@@ -28,15 +22,9 @@ pub enum LowerError {
     ContinueOutsideLoop,
     DuplicateGlobal(String),
     DuplicateFunction(String),
-    DuplicateParameter {
-        func: String,
-        param: String,
-    },
+    DuplicateParameter { func: String, param: String },
     ValueReturnedFromVoid,
-    InvalidLiteral {
-        ty: Type,
-        value: ConstValue,
-    },
+    InvalidLiteral { ty: Type, value: ConstValue },
     AssignToConst(String),
     NonConstExpr,
 }
@@ -49,22 +37,22 @@ impl LowerError {
             self
         }
     }
+
     pub fn at(self, annotation: &crate::SourceAnnotation) -> Self {
         if matches!(self, Self::Located { .. }) {
             self
         } else {
-            Self::Located {
-                annotation: annotation.clone(),
-                error: Box::new(self),
-            }
+            Self::Located { annotation: annotation.clone(), error: Box::new(self) }
         }
     }
+
     pub fn root_cause(&self) -> &Self {
         match self {
             Self::Located { error, .. } => error.root_cause(),
             _ => self,
         }
     }
+
     pub fn annotation(&self) -> Option<&crate::SourceAnnotation> {
         match self {
             Self::Located { annotation, .. } => Some(annotation),
@@ -72,6 +60,7 @@ impl LowerError {
         }
     }
 }
+
 impl std::fmt::Display for LowerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::Located { annotation, error } = self {
@@ -84,4 +73,5 @@ impl std::fmt::Display for LowerError {
         }
     }
 }
+
 impl std::error::Error for LowerError {}

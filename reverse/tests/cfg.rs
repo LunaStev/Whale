@@ -1,4 +1,5 @@
 use reverse::*;
+
 #[test]
 fn absent_cfg_core_is_explicit() {
     if !backend_available() {
@@ -8,9 +9,11 @@ fn absent_cfg_core_is_explicit() {
         );
     }
 }
+
 #[cfg(whale_wave_reverse)]
 mod native {
     use super::*;
+
     fn limits() -> CfgLimits {
         CfgLimits {
             max_input_bytes: 65536,
@@ -23,14 +26,17 @@ mod native {
             follow_calls: true,
         }
     }
+
     fn graph(bytes: &[u8], seeds: &[usize]) -> ControlFlowGraph {
         analyze(bytes, 0x1000, seeds, &[], limits()).unwrap()
     }
+
     fn offsets(g: &ControlFlowGraph) -> Vec<usize> {
         let mut v: Vec<_> = g.instructions.iter().map(|i| i.offset).collect();
         v.sort_unstable();
         v
     }
+
     fn edge(g: &ControlFlowGraph, from: usize, kind: EdgeKind, target: CfgTarget) {
         assert!(
             g.edges.contains(&Edge { from, kind, target }),
@@ -38,65 +44,43 @@ mod native {
             g.edges
         );
     }
+
     #[test]
     fn diamond_and_late_backward_leaders_split_existing_blocks_in_wave() {
         let g = graph(&[0x75, 3, 0x90, 0xeb, 1, 0x90, 0xc3], &[0]);
         assert_eq!(offsets(&g), [0, 2, 3, 5, 6]);
         assert_eq!(
-            g.blocks
-                .iter()
-                .map(|b| (b.offset, b.end))
-                .collect::<Vec<_>>(),
+            g.blocks.iter().map(|b| (b.offset, b.end)).collect::<Vec<_>>(),
             [(0, 2), (2, 5), (5, 6), (6, 7)]
         );
-        edge(
-            &g,
-            0,
-            EdgeKind::ConditionalTaken,
-            CfgTarget::Address(0x1005),
-        );
-        edge(
-            &g,
-            0,
-            EdgeKind::ConditionalFallThrough,
-            CfgTarget::Address(0x1002),
-        );
+        edge(&g, 0, EdgeKind::ConditionalTaken, CfgTarget::Address(0x1005));
+        edge(&g, 0, EdgeKind::ConditionalFallThrough, CfgTarget::Address(0x1002));
         edge(&g, 3, EdgeKind::Jump, CfgTarget::Address(0x1006));
         edge(&g, 5, EdgeKind::FallThrough, CfgTarget::Address(0x1006));
         assert!(g.stops.is_empty());
         let g = graph(&[0x90, 0x90, 0x90, 0xeb, 0xfc], &[0]);
         assert_eq!(
-            g.blocks
-                .iter()
-                .map(|b| (b.offset, b.end))
-                .collect::<Vec<_>>(),
+            g.blocks.iter().map(|b| (b.offset, b.end)).collect::<Vec<_>>(),
             [(0, 1), (1, 5)]
         );
         edge(&g, 0, EdgeKind::FallThrough, CfgTarget::Address(0x1001));
         edge(&g, 3, EdgeKind::Jump, CfgTarget::Address(0x1001));
     }
+
     #[test]
     fn entries_decode_backward_callees_and_targets_after_unsupported_gaps_on_demand() {
         let bytes = [0xc3, 0x0f, 0x0b, 0x90, 0xe8, 0xf7, 0xff, 0xff, 0xff, 0xc3];
         let g = graph(&bytes, &[4]);
         assert_eq!(offsets(&g), [0, 4, 9]);
         edge(&g, 4, EdgeKind::Call, CfgTarget::Address(0x1000));
-        let g = analyze(
-            &bytes,
-            0x1000,
-            &[4],
-            &[],
-            CfgLimits {
-                follow_calls: false,
-                ..limits()
-            },
-        )
-        .unwrap();
+        let g = analyze(&bytes, 0x1000, &[4], &[], CfgLimits { follow_calls: false, ..limits() })
+            .unwrap();
         assert_eq!(offsets(&g), [4, 9]);
         let g = graph(&[0xeb, 2, 0x0f, 0x0b, 0x90, 0xc3], &[0]);
         assert_eq!(offsets(&g), [0, 4, 5]);
         assert!(g.stops.is_empty());
     }
+
     #[test]
     fn recursive_calls_and_indirect_targets_have_bounded_explicit_edges() {
         let g = graph(&[0xe8, 0xfb, 0xff, 0xff, 0xff, 0xc3], &[0]);
@@ -106,15 +90,13 @@ mod native {
         assert_eq!(offsets(&g), [0, 2]);
         edge(&g, 0, EdgeKind::IndirectCall, CfgTarget::Unresolved);
         edge(&g, 2, EdgeKind::IndirectJump, CfgTarget::Unresolved);
-        assert!(g
-            .stops
-            .iter()
-            .any(|s| s.kind == StopKind::IndirectJump && s.offset == 2));
+        assert!(g.stops.iter().any(|s| s.kind == StopKind::IndirectJump && s.offset == 2));
         let g = graph(&[0x0f, 5, 0xc3], &[0]);
         assert_eq!(offsets(&g), [0]);
         edge(&g, 0, EdgeKind::Syscall, CfgTarget::Unresolved);
         assert_eq!(g.stops[0].kind, StopKind::Syscall);
     }
+
     #[test]
     fn unknown_truncated_invalid_overlong_and_overlapping_entries_stop_without_guessing() {
         for (bytes, kind) in [
@@ -130,30 +112,16 @@ mod native {
         }
         let g = graph(&[0xeb, 0xff], &[0]);
         assert_eq!(offsets(&g), [0]);
-        assert!(g.stops.contains(&Stop {
-            offset: 1,
-            kind: StopKind::Overlap,
-            conflict: Some(0)
-        }));
-        let g = graph(
-            &[0xb8, 0x90, 0xc3, 0, 0, 0xe9, 0xf6, 0xff, 0xff, 0xff],
-            &[2, 5],
-        );
+        assert!(g.stops.contains(&Stop { offset: 1, kind: StopKind::Overlap, conflict: Some(0) }));
+        let g = graph(&[0xb8, 0x90, 0xc3, 0, 0, 0xe9, 0xf6, 0xff, 0xff, 0xff], &[2, 5]);
         assert_eq!(offsets(&g), [2, 5]);
-        assert!(g.stops.contains(&Stop {
-            offset: 0,
-            kind: StopKind::Overlap,
-            conflict: Some(2)
-        }));
+        assert!(g.stops.contains(&Stop { offset: 0, kind: StopKind::Overlap, conflict: Some(2) }));
     }
+
     #[test]
     fn relocation_overlays_override_placeholders_before_target_selection() {
         let bytes = [0xe8, 0, 0, 0, 0, 0xc3, 0x0f, 0x0b, 0xc3];
-        let overlay = FlowOverride {
-            field_offset: 1,
-            width: 4,
-            target: CfgTarget::Symbol(77),
-        };
+        let overlay = FlowOverride { field_offset: 1, width: 4, target: CfgTarget::Symbol(77) };
         let g = analyze(&bytes, 0x1000, &[0], &[overlay], limits()).unwrap();
         assert_eq!(offsets(&g), [0, 5]);
         edge(&g, 0, EdgeKind::Call, CfgTarget::Symbol(77));
@@ -165,10 +133,7 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                target: CfgTarget::Address(0x1008),
-                ..overlay
-            }],
+            &[FlowOverride { target: CfgTarget::Address(0x1008), ..overlay }],
             limits(),
         )
         .unwrap();
@@ -177,11 +142,7 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                field_offset: 2,
-                width: 2,
-                target: CfgTarget::Address(0x1008),
-            }],
+            &[FlowOverride { field_offset: 2, width: 2, target: CfgTarget::Address(0x1008) }],
             limits(),
         )
         .unwrap();
@@ -191,16 +152,14 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                target: CfgTarget::Unresolved,
-                ..overlay
-            }],
+            &[FlowOverride { target: CfgTarget::Unresolved, ..overlay }],
             limits(),
         )
         .unwrap();
         edge(&g, 0, EdgeKind::Call, CfgTarget::Unresolved);
         assert!(g.stops.iter().all(|s| s.kind != StopKind::AddressOverflow));
     }
+
     #[test]
     fn memory_and_symbolic_immediate_xrefs_do_not_fabricate_code_reachability() {
         let bytes = [0x48, 0x8b, 0x05, 2, 0, 0, 0, 0xc3, 0x90, 0x90];
@@ -211,19 +170,12 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                field_offset: 3,
-                width: 4,
-                target: CfgTarget::Symbol(9),
-            }],
+            &[FlowOverride { field_offset: 3, width: 4, target: CfgTarget::Symbol(9) }],
             limits(),
         )
         .unwrap();
         edge(&g, 0, EdgeKind::Memory, CfgTarget::Symbol(9));
-        let g = graph(
-            &[0x48, 0x8b, 0x04, 0x25, 0xfc, 0xff, 0xff, 0xff, 0xc3],
-            &[0],
-        );
+        let g = graph(&[0x48, 0x8b, 0x04, 0x25, 0xfc, 0xff, 0xff, 0xff, 0xc3], &[0]);
         edge(&g, 0, EdgeKind::Memory, CfgTarget::Address(u64::MAX - 3));
         let g = graph(&[0x48, 0x8d, 0x05, 0, 0, 0, 0, 0xc3], &[0]);
         edge(&g, 0, EdgeKind::Address, CfgTarget::Address(0x1007));
@@ -234,16 +186,13 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                field_offset: 1,
-                width: 4,
-                target: CfgTarget::Symbol(3),
-            }],
+            &[FlowOverride { field_offset: 1, width: 4, target: CfgTarget::Symbol(3) }],
             limits(),
         )
         .unwrap();
         edge(&g, 0, EdgeKind::Address, CfgTarget::Symbol(3));
     }
+
     #[test]
     fn indexed_symbol_components_are_xrefs_without_becoming_effective_code_addresses() {
         let bytes = [0x48, 0x8b, 4, 0x85, 0, 0, 0, 0, 0xc3];
@@ -253,17 +202,14 @@ mod native {
             &bytes,
             0x1000,
             &[0],
-            &[FlowOverride {
-                field_offset: 4,
-                width: 4,
-                target: CfgTarget::Symbol(42),
-            }],
+            &[FlowOverride { field_offset: 4, width: 4, target: CfgTarget::Symbol(42) }],
             limits(),
         )
         .unwrap();
         edge(&g, 0, EdgeKind::Memory, CfgTarget::Symbol(42));
         assert_eq!(offsets(&g), [0, 8]);
     }
+
     #[test]
     fn rip_references_include_trailing_immediates_and_never_resolve_indirect_contents() {
         let g = graph(&[0xc7, 5, 0, 0, 0, 0, 1, 0, 0, 0, 0xc3], &[0]);
@@ -273,6 +219,7 @@ mod native {
         edge(&g, 0, EdgeKind::Memory, CfgTarget::Address(0x1006));
         edge(&g, 0, EdgeKind::IndirectJump, CfgTarget::Unresolved);
     }
+
     #[test]
     fn large_overlay_sets_use_shared_normalization_and_binary_lookup_budgets() {
         let mut bytes = Vec::new();
@@ -306,22 +253,11 @@ mod native {
         assert_eq!(g.edges.len(), 512);
         assert!(g.work <= 70_000);
         assert!(matches!(
-            analyze(
-                &bytes,
-                0,
-                &[0],
-                &overlays,
-                CfgLimits {
-                    max_work: 1256,
-                    ..budget
-                }
-            ),
-            Err(CfgError::Limit {
-                resource: CfgResource::Work,
-                ..
-            })
+            analyze(&bytes, 0, &[0], &overlays, CfgLimits { max_work: 1256, ..budget }),
+            Err(CfgError::Limit { resource: CfgResource::Work, .. })
         ));
     }
+
     #[test]
     fn scope_address_overflow_and_end_of_region_are_explicit() {
         let g = graph(&[0xeb, 0x7f], &[0]);
@@ -338,109 +274,44 @@ mod native {
         assert_eq!(g.stops[0].kind, StopKind::EndOfRange);
         edge(&g, 0, EdgeKind::FallThrough, CfgTarget::Address(0x1001));
     }
+
     #[test]
     fn every_resource_budget_and_invalid_boundary_has_a_structured_error() {
         for (resource, limits, bytes) in [
-            (
-                CfgResource::InputBytes,
-                CfgLimits {
-                    max_input_bytes: 0,
-                    ..limits()
-                },
-                vec![0xc3],
-            ),
-            (
-                CfgResource::Instructions,
-                CfgLimits {
-                    max_instructions: 0,
-                    ..limits()
-                },
-                vec![0xc3],
-            ),
-            (
-                CfgResource::Blocks,
-                CfgLimits {
-                    max_blocks: 0,
-                    ..limits()
-                },
-                vec![0xc3],
-            ),
-            (
-                CfgResource::Edges,
-                CfgLimits {
-                    max_edges: 0,
-                    ..limits()
-                },
-                vec![0xeb, 0],
-            ),
-            (
-                CfgResource::Stops,
-                CfgLimits {
-                    max_stops: 0,
-                    ..limits()
-                },
-                vec![0xc5],
-            ),
-            (
-                CfgResource::Work,
-                CfgLimits {
-                    max_work: 0,
-                    ..limits()
-                },
-                vec![0xc3],
-            ),
-            (
-                CfgResource::Memory,
-                CfgLimits {
-                    max_workspace_bytes: 0,
-                    ..limits()
-                },
-                vec![0xc3],
-            ),
+            (CfgResource::InputBytes, CfgLimits { max_input_bytes: 0, ..limits() }, vec![0xc3]),
+            (CfgResource::Instructions, CfgLimits { max_instructions: 0, ..limits() }, vec![0xc3]),
+            (CfgResource::Blocks, CfgLimits { max_blocks: 0, ..limits() }, vec![0xc3]),
+            (CfgResource::Edges, CfgLimits { max_edges: 0, ..limits() }, vec![0xeb, 0]),
+            (CfgResource::Stops, CfgLimits { max_stops: 0, ..limits() }, vec![0xc5]),
+            (CfgResource::Work, CfgLimits { max_work: 0, ..limits() }, vec![0xc3]),
+            (CfgResource::Memory, CfgLimits { max_workspace_bytes: 0, ..limits() }, vec![0xc3]),
         ] {
             assert!(
                 matches!(analyze(&bytes,0,&[0],&[],limits),Err(CfgError::Limit{resource:r,..}) if r==resource),
                 "{resource:?}"
             );
         }
-        assert!(matches!(
-            analyze(&[0xc3], 0, &[1], &[], limits()),
-            Err(CfgError::Invalid(_))
-        ));
+        assert!(matches!(analyze(&[0xc3], 0, &[1], &[], limits()), Err(CfgError::Invalid(_))));
         let overlays = [
-            FlowOverride {
-                field_offset: 1,
-                width: 4,
-                target: CfgTarget::Symbol(0),
-            },
-            FlowOverride {
-                field_offset: 2,
-                width: 1,
-                target: CfgTarget::Symbol(1),
-            },
+            FlowOverride { field_offset: 1, width: 4, target: CfgTarget::Symbol(0) },
+            FlowOverride { field_offset: 2, width: 1, target: CfgTarget::Symbol(1) },
         ];
         assert!(matches!(
             analyze(&[0xe8, 0, 0, 0, 0, 0xc3], 0, &[0], &overlays, limits()),
             Err(CfgError::Invalid(_))
         ));
     }
+
     #[test]
     fn seed_and_overlay_normalization_is_deterministic() {
         let bytes = [0xb8, 0, 0, 0, 0, 0xc3, 0xb8, 0, 0, 0, 0, 0xc3];
-        let a = FlowOverride {
-            field_offset: 1,
-            width: 4,
-            target: CfgTarget::Symbol(1),
-        };
-        let b = FlowOverride {
-            field_offset: 7,
-            width: 4,
-            target: CfgTarget::Symbol(2),
-        };
+        let a = FlowOverride { field_offset: 1, width: 4, target: CfgTarget::Symbol(1) };
+        let b = FlowOverride { field_offset: 7, width: 4, target: CfgTarget::Symbol(2) };
         let first = analyze(&bytes, 0, &[6, 0], &[b, a], limits()).unwrap();
         let second = analyze(&bytes, 0, &[0, 6], &[a, b], limits()).unwrap();
         assert_eq!(first, second);
     }
+
     #[test]
     fn raw_cfg_failures_never_publish_partial_graph_output() {
         extern "C" {

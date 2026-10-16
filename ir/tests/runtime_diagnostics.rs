@@ -1,39 +1,29 @@
 use ir::*;
+
 fn fixture() -> Module {
     parse_module(include_str!("fixtures/runtime-diagnostics-v7.wir")).unwrap()
 }
+
 fn single(ret: &str, body: &str) -> Module {
     parse_module(&format!("module {{ format_version 7 semantics_version 1 target \"x86_64-whale-linux\" datalayout {{ ptr=64, endian=little }} declare @f0 \"test\": whale () -> {ret}, linkage internal fn @f0 \"test\"() -> {ret}, entry %b0 {{ %b0 \"entry\": {body} }} }}")).unwrap()
 }
+
 fn annotate(m: &mut Module, target: SourceTarget, id: u64, line: u32) {
     if m.sources.files.is_empty() {
-        m.sources.files.push(SourceFile {
-            id: 0,
-            name: "provided.wave".into(),
-        });
+        m.sources.files.push(SourceFile { id: 0, name: "provided.wave".into() });
     }
     m.sources.originals.push(OriginalNode {
         id,
-        span: Some(SourceSpan {
-            file: 0,
-            line,
-            column: 7,
-            end_line: line,
-            end_column: 12,
-        }),
+        span: Some(SourceSpan { file: 0, line, column: 7, end_line: line, end_column: 12 }),
     });
-    m.sources.mappings.push(SourceMapping {
-        target,
-        original: id,
-    });
+    m.sources.mappings.push(SourceMapping { target, original: id });
 }
+
 #[test]
 fn direct_and_indirect_failures_preserve_leaf_source_and_ordered_caller_chain() {
     let m = fixture();
     let error = interpret(&m, FunctionId(0), &[]).unwrap_err();
-    let InterpreterError::Trap(trap) = error.root_cause() else {
-        panic!("{error:?}")
-    };
+    let InterpreterError::Trap(trap) = error.root_cause() else { panic!("{error:?}") };
     assert_eq!(trap.reason, TrapReason::DivisionByZero);
     assert_eq!(trap.steps, 5);
     let d = error.diagnostic().unwrap();
@@ -43,14 +33,8 @@ fn direct_and_indirect_failures_preserve_leaf_source_and_ordered_caller_chain() 
     assert_eq!(file, "original.wave");
     assert_eq!((span.line, span.column), (11, 13));
     assert_eq!(d.calls.len(), 2);
-    assert_eq!(
-        (d.calls[0].caller, d.calls[0].callee),
-        (FunctionId(0), FunctionId(1))
-    );
-    assert_eq!(
-        (d.calls[1].caller, d.calls[1].callee),
-        (FunctionId(1), FunctionId(2))
-    );
+    assert_eq!((d.calls[0].caller, d.calls[0].callee), (FunctionId(0), FunctionId(1)));
+    assert_eq!((d.calls[1].caller, d.calls[1].callee), (FunctionId(1), FunctionId(2)));
     assert_eq!(d.calls[0].original.as_ref().unwrap().original, 100);
     assert_eq!(d.calls[1].original.as_ref().unwrap().original, 200);
     let human = error.to_string();
@@ -60,6 +44,7 @@ fn direct_and_indirect_failures_preserve_leaf_source_and_ordered_caller_chain() 
     assert_eq!(d.omitted_call_frames, 0);
     assert_eq!(d.omitted_source_details, 0);
 }
+
 #[test]
 fn source_mapping_roundtrip_never_changes_runtime_cause_site_or_step_order() {
     let m = fixture();
@@ -77,6 +62,7 @@ fn source_mapping_roundtrip_never_changes_runtime_cause_site_or_step_order() {
     };
     assert_eq!(mapped, raw);
 }
+
 #[test]
 fn initialization_bounds_and_explicit_instruction_traps_report_the_original_operation() {
     for (ret,body,index,expected) in [
@@ -89,78 +75,39 @@ fn initialization_bounds_and_explicit_instruction_traps_report_the_original_oper
         let d=error.diagnostic().unwrap();assert_eq!(d.original.as_ref().unwrap().original,500);assert!(d.calls.is_empty());assert!(error.to_string().contains("provided.wave:24:7"));
     }
 }
+
 #[test]
 fn terminators_have_their_own_source_identity_including_explicit_traps_and_fuel() {
     let mut m = fixture();
-    let f = m
-        .functions
-        .iter_mut()
-        .find(|f| f.id == FunctionId(2))
-        .unwrap();
-    let Instruction::Bin { op, .. } = &mut f.blocks[0].instructions[1] else {
-        panic!()
-    };
+    let f = m.functions.iter_mut().find(|f| f.id == FunctionId(2)).unwrap();
+    let Instruction::Bin { op, .. } = &mut f.blocks[0].instructions[1] else { panic!() };
     *op = BinOp::Add;
-    f.blocks[0].terminator = Some(Terminator::Trap {
-        reason: "terminator stop".into(),
-    });
+    f.blocks[0].terminator = Some(Terminator::Trap { reason: "terminator stop".into() });
     let error = interpret(&m, FunctionId(0), &[]).unwrap_err();
     assert!(matches!(error.root_cause(),InterpreterError::Trap(t) if t.site.instruction==2));
-    assert_eq!(
-        error
-            .diagnostic()
-            .unwrap()
-            .original
-            .as_ref()
-            .unwrap()
-            .original,
-        301
-    );
+    assert_eq!(error.diagnostic().unwrap().original.as_ref().unwrap().original, 301);
     assert!(error.to_string().contains("original.wave:12:1"));
     let error = interpret_with_options(
         &m,
         FunctionId(0),
         &[],
-        InterpreterOptions {
-            max_steps: 5,
-            ..Default::default()
-        },
+        InterpreterOptions { max_steps: 5, ..Default::default() },
     )
     .unwrap_err();
     assert!(
         matches!(error.root_cause(),InterpreterError::StepLimit {site,..} if site.instruction==2)
     );
-    assert_eq!(
-        error
-            .diagnostic()
-            .unwrap()
-            .original
-            .as_ref()
-            .unwrap()
-            .original,
-        301
-    );
+    assert_eq!(error.diagnostic().unwrap().original.as_ref().unwrap().original, 301);
 }
+
 #[test]
 fn fuel_depth_frame_and_live_value_failures_keep_bounded_structured_context() {
     let m = fixture();
     for options in [
-        InterpreterOptions {
-            max_steps: 4,
-            ..Default::default()
-        },
-        InterpreterOptions {
-            max_call_depth: 2,
-            ..Default::default()
-        },
-        InterpreterOptions {
-            max_frames: 2,
-            ..Default::default()
-        },
-        InterpreterOptions {
-            max_live_values: 3,
-            ..Default::default()
-        },
+        InterpreterOptions { max_steps: 4, ..Default::default() },
+        InterpreterOptions { max_call_depth: 2, ..Default::default() },
+        InterpreterOptions { max_frames: 2, ..Default::default() },
+        InterpreterOptions { max_live_values: 3, ..Default::default() },
     ] {
         let error = interpret_with_options(&m, FunctionId(0), &[], options).unwrap_err();
         let d = error.diagnostic().unwrap();
@@ -176,29 +123,15 @@ fn fuel_depth_frame_and_live_value_failures_keep_bounded_structured_context() {
         &m,
         FunctionId(0),
         &[],
-        InterpreterOptions {
-            max_call_depth: 0,
-            ..Default::default()
-        },
+        InterpreterOptions { max_call_depth: 0, ..Default::default() },
     )
     .unwrap_err();
-    assert_eq!(
-        error
-            .diagnostic()
-            .unwrap()
-            .original
-            .as_ref()
-            .unwrap()
-            .original,
-        100
-    );
+    assert_eq!(error.diagnostic().unwrap().original.as_ref().unwrap().original, 100);
 }
+
 #[test]
 fn unannotated_inputs_keep_ir_sites_and_never_infer_a_source_from_names_or_canonical_lines() {
-    let m = single(
-        "u32",
-        "%v0: u32 = const u32 0 %v1: u32 = udiv u32 %v0, %v0 ret u32 %v1",
-    );
+    let m = single("u32", "%v0: u32 = const u32 0 %v1: u32 = udiv u32 %v0, %v0 ret u32 %v1");
     let error = interpret(&m, FunctionId(0), &[]).unwrap_err();
     assert!(error.diagnostic().is_none());
     assert!(matches!(error, InterpreterError::Trap(_)));
@@ -211,6 +144,7 @@ fn unannotated_inputs_keep_ir_sites_and_never_infer_a_source_from_names_or_canon
     assert!(d.calls.iter().all(|call| call.original.is_none()));
     assert!(error.to_string().contains("@f2 %b0"));
 }
+
 #[test]
 fn recursion_trace_limits_truncate_outer_frames_and_the_hard_cap_cannot_be_bypassed() {
     for (body, instruction) in [("call whale void @f0() ret void", 0), ("%v0: fnptr<whale () -> void> = function_addr @f0 call whale void indirect %v0() ret void", 1)] {
@@ -229,6 +163,7 @@ fn recursion_trace_limits_truncate_outer_frames_and_the_hard_cap_cannot_be_bypas
         assert_eq!(error.diagnostic().unwrap().calls.len(), 64);
     }
 }
+
 #[test]
 fn source_detail_byte_limits_are_explicit_and_keep_original_and_ir_ids() {
     let mut m = fixture();
@@ -252,6 +187,7 @@ fn source_detail_byte_limits_are_explicit_and_keep_original_and_ir_ids() {
         .sum::<usize>();
     assert_eq!(copied, MAX_RUNTIME_DIAGNOSTIC_SOURCE_BYTES);
 }
+
 #[test]
 fn global_initialization_failures_report_global_original_metadata_without_a_fabricated_function_site(
 ) {
@@ -270,20 +206,14 @@ fn global_initialization_failures_report_global_original_metadata_without_a_fabr
         FunctionId(0),
         &[],
         InterpreterOptions {
-            memory_limits: MemoryLimits {
-                max_bytes: 0,
-                ..Default::default()
-            },
+            memory_limits: MemoryLimits { max_bytes: 0, ..Default::default() },
             ..Default::default()
         },
     )
     .unwrap_err();
     assert!(matches!(
         error.root_cause(),
-        InterpreterError::GlobalMemoryLimit {
-            global: GlobalId(0),
-            ..
-        }
+        InterpreterError::GlobalMemoryLimit { global: GlobalId(0), .. }
     ));
     let d = error.diagnostic().unwrap();
     assert_eq!(d.global, Some(GlobalId(0)));
@@ -291,51 +221,29 @@ fn global_initialization_failures_report_global_original_metadata_without_a_fabr
     assert_eq!(d.original.as_ref().unwrap().original, 900);
     assert!(error.to_string().contains("provided.wave:33:7"));
 }
+
 #[test]
 fn malformed_metadata_is_rejected_and_unrelated_metadata_does_not_label_a_failure() {
     let mut m = fixture();
-    m.sources.mappings[0].target = SourceTarget::Instruction {
-        function: FunctionId(99),
-        block: BlockId(0),
-        index: 0,
-    };
-    assert!(matches!(
-        interpret(&m, FunctionId(0), &[]),
-        Err(InterpreterError::Verification(_))
-    ));
-    let mut m = single(
-        "u32",
-        "%v0: u32 = const u32 0 %v1: u32 = udiv u32 %v0, %v0 ret u32 %v1",
-    );
+    m.sources.mappings[0].target =
+        SourceTarget::Instruction { function: FunctionId(99), block: BlockId(0), index: 0 };
+    assert!(matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::Verification(_))));
+    let mut m = single("u32", "%v0: u32 = const u32 0 %v1: u32 = udiv u32 %v0, %v0 ret u32 %v1");
     annotate(
         &mut m,
-        SourceTarget::Instruction {
-            function: FunctionId(0),
-            block: BlockId(0),
-            index: 0,
-        },
+        SourceTarget::Instruction { function: FunctionId(0), block: BlockId(0), index: 0 },
         800,
         20,
     );
-    assert!(interpret(&m, FunctionId(0), &[])
-        .unwrap_err()
-        .diagnostic()
-        .is_none());
+    assert!(interpret(&m, FunctionId(0), &[]).unwrap_err().diagnostic().is_none());
 }
 
 #[test]
 fn mapped_memory_limits_and_identity_only_origins_keep_the_exact_leaf_cause() {
     let mut m = single("void", "%v0: ptr<u32> = alloca u32, align 4 ret void");
-    m.sources.originals.push(OriginalNode {
-        id: 777,
-        span: None,
-    });
+    m.sources.originals.push(OriginalNode { id: 777, span: None });
     m.sources.mappings.push(SourceMapping {
-        target: SourceTarget::Instruction {
-            function: FunctionId(0),
-            block: BlockId(0),
-            index: 0,
-        },
+        target: SourceTarget::Instruction { function: FunctionId(0), block: BlockId(0), index: 0 },
         original: 777,
     });
     let error = interpret_with_options(
@@ -343,21 +251,14 @@ fn mapped_memory_limits_and_identity_only_origins_keep_the_exact_leaf_cause() {
         FunctionId(0),
         &[],
         InterpreterOptions {
-            memory_limits: MemoryLimits {
-                max_bytes: 0,
-                ..Default::default()
-            },
+            memory_limits: MemoryLimits { max_bytes: 0, ..Default::default() },
             ..Default::default()
         },
     )
     .unwrap_err();
     assert!(matches!(
         error.root_cause(),
-        InterpreterError::MemoryLimit {
-            resource: MemoryResource::Bytes,
-            limit: 0,
-            ..
-        }
+        InterpreterError::MemoryLimit { resource: MemoryResource::Bytes, limit: 0, .. }
     ));
     let origin = error.diagnostic().unwrap().original.as_ref().unwrap();
     assert_eq!(origin.original, 777);

@@ -1,5 +1,7 @@
 use object::formats::elf_read::ElfView;
+
 use object::*;
+
 use whale_diagnostic::{Context, ToDiagnostic};
 
 fn fixture() -> Vec<u8> {
@@ -10,6 +12,7 @@ fn fixture() -> Vec<u8> {
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
 }
+
 fn sample() -> ObjectFile {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
     for (name, kind, align) in [
@@ -33,20 +36,8 @@ fn sample() -> ObjectFile {
             SymbolBinding::Global,
             SymbolVisibility::Hidden,
         ),
-        (
-            "object",
-            Some(1),
-            SymbolKind::Object,
-            SymbolBinding::Local,
-            SymbolVisibility::Default,
-        ),
-        (
-            "external",
-            None,
-            SymbolKind::NoType,
-            SymbolBinding::Weak,
-            SymbolVisibility::Default,
-        ),
+        ("object", Some(1), SymbolKind::Object, SymbolBinding::Local, SymbolVisibility::Default),
+        ("external", None, SymbolKind::NoType, SymbolBinding::Weak, SymbolVisibility::Default),
     ] {
         o.symbols.push(ObjectSymbol {
             name: name.into(),
@@ -79,47 +70,22 @@ fn sample() -> ObjectFile {
     }
     o
 }
+
 fn assert_semantics(a: &ObjectFile, b: &ObjectFile) {
     assert_eq!(a.target, b.target);
     assert_eq!(a.sections.len(), b.sections.len());
     for (x, y) in a.sections.iter().zip(&b.sections) {
         assert_eq!(
-            (
-                &x.name,
-                x.kind,
-                &x.data,
-                x.memory_size().unwrap(),
-                x.align.max(1)
-            ),
-            (
-                &y.name,
-                y.kind,
-                &y.data,
-                y.memory_size().unwrap(),
-                y.align.max(1)
-            )
+            (&x.name, x.kind, &x.data, x.memory_size().unwrap(), x.align.max(1)),
+            (&y.name, y.kind, &y.data, y.memory_size().unwrap(), y.align.max(1))
         );
     }
     assert_eq!(a.symbols.len(), b.symbols.len());
     for x in &a.symbols {
         let y = b.symbols.iter().find(|s| s.name == x.name).unwrap();
         assert_eq!(
-            (
-                x.section_index,
-                x.value,
-                x.size,
-                x.kind,
-                x.binding,
-                x.visibility
-            ),
-            (
-                y.section_index,
-                y.value,
-                y.size,
-                y.kind,
-                y.binding,
-                y.visibility
-            )
+            (x.section_index, x.value, x.size, x.kind, x.binding, x.visibility),
+            (y.section_index, y.value, y.size, y.kind, y.binding, y.visibility)
         );
     }
     assert_eq!(a.relocations.len(), b.relocations.len());
@@ -132,17 +98,19 @@ fn assert_semantics(a: &ObjectFile, b: &ObjectFile) {
         assert_eq!((&x.symbol, x.addend, x.kind), (&y.symbol, y.addend, y.kind));
     }
 }
+
 fn rejected(bytes: &[u8]) -> ObjectError {
-    ObjectFile::read(bytes)
-        .err()
-        .expect("malformed ELF must fail")
+    ObjectFile::read(bytes).err().expect("malformed ELF must fail")
 }
+
 fn put16(bytes: &mut [u8], at: usize, v: u16) {
     bytes[at..at + 2].copy_from_slice(&v.to_le_bytes())
 }
+
 fn put32(bytes: &mut [u8], at: usize, v: u32) {
     bytes[at..at + 4].copy_from_slice(&v.to_le_bytes())
 }
+
 fn put64(bytes: &mut [u8], at: usize, v: u64) {
     bytes[at..at + 8].copy_from_slice(&v.to_le_bytes())
 }
@@ -160,26 +128,18 @@ fn writer_reader_roundtrip_preserves_all_supported_semantic_fields_and_sparse_bs
     assert!(empty.sections.is_empty() && empty.symbols.is_empty());
     let mut unnamed = sample();
     unnamed.symbols[0].name.clear();
-    assert_semantics(
-        &unnamed,
-        &ObjectFile::read(&unnamed.write().unwrap()).unwrap(),
-    );
+    assert_semantics(&unnamed, &ObjectFile::read(&unnamed.write().unwrap()).unwrap());
 }
+
 #[test]
 fn retained_nasm_sections_symbols_and_relocation_indices_load_without_nasm() {
     let bytes = fixture();
     let o = ObjectFile::read(&bytes).unwrap();
     assert_eq!(
-        o.sections
-            .iter()
-            .map(|s| s.name.as_str())
-            .collect::<Vec<_>>(),
+        o.sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
         [".text", ".rodata", ".data", ".bss"]
     );
-    assert_eq!(
-        o.sections[0].data,
-        [0xe8, 0, 0, 0, 0, 0x48, 0x8d, 5, 0, 0, 0, 0, 0xc3]
-    );
+    assert_eq!(o.sections[0].data, [0xe8, 0, 0, 0, 0, 0x48, 0x8d, 5, 0, 0, 0, 0, 0xc3]);
     assert_eq!(o.sections[1].data, [0x41, 0, 0xff]);
     assert_eq!(o.sections[3].zero_fill, 32);
     assert!(o.sections[3].data.is_empty());
@@ -199,12 +159,7 @@ fn retained_nasm_sections_symbols_and_relocation_indices_load_without_nasm() {
         .any(|s| s.name == "__whale_elf_section_2" && s.binding == SymbolBinding::Global));
     let external = &o.relocations[0];
     assert_eq!(
-        (
-            external.offset,
-            external.symbol.as_str(),
-            external.kind,
-            external.addend
-        ),
+        (external.offset, external.symbol.as_str(), external.kind, external.addend),
         (1, "external", RelocKind::Relative32, -4)
     );
     for r in &o.relocations[1..] {
@@ -214,6 +169,7 @@ fn retained_nasm_sections_symbols_and_relocation_indices_load_without_nasm() {
     }
     assert_semantics(&o, &ObjectFile::read(&o.write().unwrap()).unwrap());
 }
+
 #[test]
 fn every_truncated_writer_prefix_is_rejected_without_panicking() {
     let bytes = sample().write().unwrap();
@@ -221,6 +177,7 @@ fn every_truncated_writer_prefix_is_rejected_without_panicking() {
         assert!(ObjectFile::read(&bytes[..end]).is_err(), "prefix {end}");
     }
 }
+
 #[test]
 fn unsupported_identity_and_checked_table_ranges_have_typed_causes() {
     let good = fixture();
@@ -258,6 +215,7 @@ fn unsupported_identity_and_checked_table_ranges_have_typed_causes() {
     v.header.program_offset = u64::MAX;
     assert!(v.program(0).is_err());
 }
+
 #[test]
 fn malformed_sections_symbols_relas_and_names_preserve_offset_context() {
     let good = fixture();
@@ -270,10 +228,7 @@ fn malformed_sections_symbols_relas_and_names_preserve_offset_context() {
     put64(&mut b, table + 64 + 48, 3);
     let e = rejected(&b);
     assert_eq!(e.kind, ObjectErrorKind::InvalidAlignment);
-    assert!(e.diagnostic().contexts.contains(&Context::Section {
-        index: 1,
-        name: None
-    }));
+    assert!(e.diagnostic().contexts.contains(&Context::Section { index: 1, name: None }));
     let mut b = good.clone();
     put32(&mut b, table + 64, 99999);
     assert_eq!(rejected(&b).kind, ObjectErrorKind::InvalidName);
@@ -293,10 +248,7 @@ fn malformed_sections_symbols_relas_and_names_preserve_offset_context() {
     put64(&mut b, rela.offset as usize + 8, (9u64 << 32) | 999);
     let e = rejected(&b);
     assert_eq!(e.kind, ObjectErrorKind::Unsupported);
-    assert!(e
-        .contexts
-        .iter()
-        .any(|c| matches!(c, Context::FileOffset(_))));
+    assert!(e.contexts.iter().any(|c| matches!(c, Context::FileOffset(_))));
     let mut b = good.clone();
     put64(&mut b, rela.offset as usize, 13);
     assert_eq!(rejected(&b).kind, ObjectErrorKind::OutOfBounds);
@@ -307,60 +259,22 @@ fn malformed_sections_symbols_relas_and_names_preserve_offset_context() {
     put32(&mut b, table + 8 * 64 + 40, 7);
     assert_eq!(rejected(&b).kind, ObjectErrorKind::InvalidRelocation);
 }
+
 #[test]
 fn every_reader_budget_has_an_independent_failure_and_valid_neighbor() {
     let good = fixture();
     let defaults = ObjectReadLimits::default();
     for (limits, resource) in [
         (
-            ObjectReadLimits {
-                max_input_bytes: good.len() - 1,
-                ..defaults
-            },
+            ObjectReadLimits { max_input_bytes: good.len() - 1, ..defaults },
             ObjectResource::InputBytes,
         ),
-        (
-            ObjectReadLimits {
-                max_sections: 9,
-                ..defaults
-            },
-            ObjectResource::Sections,
-        ),
-        (
-            ObjectReadLimits {
-                max_symbols: 11,
-                ..defaults
-            },
-            ObjectResource::Symbols,
-        ),
-        (
-            ObjectReadLimits {
-                max_relocations: 2,
-                ..defaults
-            },
-            ObjectResource::Relocations,
-        ),
-        (
-            ObjectReadLimits {
-                max_payload_bytes: 23,
-                ..defaults
-            },
-            ObjectResource::PayloadBytes,
-        ),
-        (
-            ObjectReadLimits {
-                max_string_bytes: 0,
-                ..defaults
-            },
-            ObjectResource::StringBytes,
-        ),
-        (
-            ObjectReadLimits {
-                max_work: 0,
-                ..defaults
-            },
-            ObjectResource::Work,
-        ),
+        (ObjectReadLimits { max_sections: 9, ..defaults }, ObjectResource::Sections),
+        (ObjectReadLimits { max_symbols: 11, ..defaults }, ObjectResource::Symbols),
+        (ObjectReadLimits { max_relocations: 2, ..defaults }, ObjectResource::Relocations),
+        (ObjectReadLimits { max_payload_bytes: 23, ..defaults }, ObjectResource::PayloadBytes),
+        (ObjectReadLimits { max_string_bytes: 0, ..defaults }, ObjectResource::StringBytes),
+        (ObjectReadLimits { max_work: 0, ..defaults }, ObjectResource::Work),
     ] {
         let e = ObjectFile::read_with_limits(&good, limits).err().unwrap();
         assert_eq!(e.kind, ObjectErrorKind::ResourceLimit);
@@ -382,16 +296,11 @@ fn every_reader_budget_has_an_independent_failure_and_valid_neighbor() {
     put16(&mut with_program, 54, 56);
     put16(&mut with_program, 56, 1);
     put64(&mut with_program, 32, 64);
-    let e = ElfView::parse(
-        &with_program,
-        ObjectReadLimits {
-            max_program_headers: 0,
-            ..defaults
-        },
-    )
-    .unwrap_err();
+    let e = ElfView::parse(&with_program, ObjectReadLimits { max_program_headers: 0, ..defaults })
+        .unwrap_err();
     assert_eq!(e.resource, Some(ObjectResource::ProgramHeaders));
 }
+
 #[test]
 fn aliased_payloads_and_repeated_names_cannot_multiply_decoded_storage_unboundedly() {
     let mut o = ObjectFile::new(ObjectFormat::ELF64);
@@ -408,10 +317,7 @@ fn aliased_payloads_and_repeated_names_cannot_multiply_decoded_storage_unbounded
     }
     let e = ObjectFile::read_with_limits(
         &b,
-        ObjectReadLimits {
-            max_payload_bytes: 16,
-            ..Default::default()
-        },
+        ObjectReadLimits { max_payload_bytes: 16, ..Default::default() },
     )
     .err()
     .unwrap();
@@ -420,15 +326,13 @@ fn aliased_payloads_and_repeated_names_cannot_multiply_decoded_storage_unbounded
     o.add_section(&"long".repeat(1024), SectionKind::Data, 1);
     let e = ObjectFile::read_with_limits(
         &o.write().unwrap(),
-        ObjectReadLimits {
-            max_work: 128,
-            ..Default::default()
-        },
+        ObjectReadLimits { max_work: 128, ..Default::default() },
     )
     .err()
     .unwrap();
     assert_eq!(e.resource, Some(ObjectResource::Work));
 }
+
 #[test]
 fn typed_validation_and_legacy_rendering_share_the_same_component_cause() {
     let mut o = sample();
@@ -438,37 +342,26 @@ fn typed_validation_and_legacy_rendering_share_the_same_component_cause() {
     assert_eq!(e.diagnostic().phase, "validate");
     assert_eq!(e.diagnostic().code, "invalid-alignment");
     assert_eq!(o.validate().unwrap_err(), e.to_string());
-    let e = e.context(Context::Object {
-        name: "archive.a".into(),
-        member: Some("input.o".into()),
-    });
+    let e = e.context(Context::Object { name: "archive.a".into(), member: Some("input.o".into()) });
     assert!(e.to_string().contains("archive.a(input.o)"));
 }
+
 #[test]
 fn typed_writer_distinguishes_output_budget_layout_and_invalid_input_causes() {
     let o = sample();
     let exact = o.write_diagnostic().unwrap().len() as u64;
-    assert_eq!(
-        o.write_diagnostic_with_limit(exact).unwrap(),
-        o.write().unwrap()
-    );
+    assert_eq!(o.write_diagnostic_with_limit(exact).unwrap(), o.write().unwrap());
     let e = o.write_diagnostic_with_limit(exact - 1).unwrap_err();
     assert_eq!(
         (e.kind, e.resource),
-        (
-            ObjectErrorKind::ResourceLimit,
-            Some(ObjectResource::OutputBytes)
-        )
+        (ObjectErrorKind::ResourceLimit, Some(ObjectResource::OutputBytes))
     );
     assert_eq!(e.diagnostic().phase, "write");
     let mut o = sample();
     o.sections[1].align = 3;
     let e = o.write_diagnostic().unwrap_err();
     assert_eq!(e.kind, ObjectErrorKind::InvalidAlignment);
-    assert!(e.contexts.contains(&Context::Section {
-        index: 1,
-        name: None
-    }));
+    assert!(e.contexts.contains(&Context::Section { index: 1, name: None }));
     let mut o = sample();
     o.symbols[0].section_index = Some(99);
     let e = o.write_diagnostic().unwrap_err();
@@ -488,10 +381,7 @@ fn sparse_nobits_alignment_may_put_conceptual_file_offset_beyond_eof() {
         assert!(view.section(1).unwrap().offset > bytes.len() as u64);
         let imported = ObjectFile::read_with_limits(
             &bytes,
-            ObjectReadLimits {
-                max_payload_bytes: 0,
-                ..Default::default()
-            },
+            ObjectReadLimits { max_payload_bytes: 0, ..Default::default() },
         )
         .unwrap();
         assert_eq!(

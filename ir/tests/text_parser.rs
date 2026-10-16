@@ -1,5 +1,7 @@
 use ir::*;
+
 const HEADER: &str = "module {\nformat_version 3\nsemantics_version 1\ntarget \"x86_64-whale-linux\"\ndatalayout { ptr=64, endian=little }\n";
+
 fn function(params: &str, body: &str) -> String {
     let mut types = Vec::new();
     for param in params.split(';').filter(|s| !s.is_empty()) {
@@ -8,6 +10,7 @@ fn function(params: &str, body: &str) -> String {
     let params = params.replace(';', ",");
     format!("{HEADER}declare @f7 \"test\": whale ({}) -> void, linkage internal\nfn @f7 \"test\"({params}) -> void, entry %b11 {{\n%b11 \"entry\":\n{body}\nret void\n}}\n}}\n", types.join(", "))
 }
+
 fn roundtrip(text: &str) -> Module {
     let parsed = parse_module(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
     verify_module(&parsed).unwrap();
@@ -15,6 +18,7 @@ fn roundtrip(text: &str) -> Module {
     assert_eq!(print_module(&parse_module(&canonical).unwrap()), canonical);
     parsed
 }
+
 #[test]
 fn canonical_fixtures_preserve_scoped_sparse_ids_block_order_and_wave_output() {
     for text in [
@@ -34,6 +38,7 @@ fn canonical_fixtures_preserve_scoped_sparse_ids_block_order_and_wave_output() {
     assert_eq!(m.functions[0].params[0].id, m.functions[1].params[0].id);
     assert_eq!(m.globals[0].name, m.functions[0].name);
 }
+
 #[test]
 fn every_scalar_opcode_and_predicate_reads_its_printed_form() {
     for (ty, ops) in [
@@ -54,11 +59,7 @@ fn every_scalar_opcode_and_predicate_reads_its_printed_form() {
         ("cmp", "f64", "feq fne flt fle fgt fge"),
         ("icmp", "i64", "eq ne slt sle sgt sge"),
         ("icmp", "u64", "ult ule ugt uge"),
-        (
-            "fcmp",
-            "f16",
-            "oeq one olt ole ogt oge ord uno ueq une ult ule ugt uge",
-        ),
+        ("fcmp", "f16", "oeq one olt ole ogt oge ord uno ueq une ult ule ugt uge"),
     ] {
         for pred in preds.split_whitespace() {
             roundtrip(&function(
@@ -88,15 +89,14 @@ fn every_scalar_opcode_and_predicate_reads_its_printed_form() {
             &format!("%v5: {destination} = {op} {source} %v0 to {destination}"),
         ));
     }
-    for (ty, ops) in [
-        ("i32", "sadd_chk ssub_chk smul_chk"),
-        ("u128", "uadd_chk usub_chk umul_chk"),
-    ] {
+    for (ty, ops) in [("i32", "sadd_chk ssub_chk smul_chk"), ("u128", "uadd_chk usub_chk umul_chk")]
+    {
         for op in ops.split_whitespace() {
             roundtrip(&function(&format!("%v0 \"a\": {ty};%v1 \"b\": {ty}"),&format!("%v5: tuple<{ty}, bool> = {op} {ty} %v0, %v1\n%v6: {ty} = extract %v5, 0\n%v7: bool = extract %v5, 1")));
         }
     }
 }
+
 #[test]
 fn memory_dataflow_function_addresses_and_dead_o0_instructions_are_retained() {
     let text = function(
@@ -126,6 +126,7 @@ trap_if bool %v0, reason="한글 λ\"\\\n\r\t\0\u{85}\u{2028}""#,
     // aggregate literal values and SysV aggregate ABI lowering are unsupported.
     roundtrip(&function("%v0 \"base\": ptr<array<struct{i32, tuple<u8, bool>}, 4>>", "%v1: u64 = const u64 0\n%v2: u64 = const u64 1\n%v3: ptr<tuple<u8, bool>> = gep %v0, %v1, %v1, %v2"));
 }
+
 #[test]
 fn exact_literals_constant_trees_forward_references_and_escapes() {
     let text = format!(
@@ -155,11 +156,9 @@ global @g1 "double": f64 = const f64 0x8000000000000000, align 8, init_expr f64 
     let escaped = r#"한글 λ\"\\\n\r\t\0\u{1}\u{7f}\u{85}\u{2028}\u{2029}"#;
     let text = function("", "").replace("\"test\"", &format!("\"{escaped}\""));
     let m = roundtrip(&text);
-    assert_eq!(
-        m.functions[0].name,
-        "한글 λ\"\\\n\r\t\0\u{1}\u{7f}\u{85}\u{2028}\u{2029}"
-    );
+    assert_eq!(m.functions[0].name, "한글 λ\"\\\n\r\t\0\u{1}\u{7f}\u{85}\u{2028}\u{2029}");
 }
+
 #[test]
 fn strict_syntax_and_semantic_failures_have_locations() {
     let good = function("%v0 \"x\": i32", "%v5: i32 = const i32 7");
@@ -185,10 +184,7 @@ fn strict_syntax_and_semantic_failures_have_locations() {
         good.replace("\"test\"", r#""bad\u{110000}""#),
         good.replace("\"test\"", "\"bad\nname\""),
         good.replace("%v0 \"x\": i32", "%v0 \"x\": i32, %v0 \"y\": i32"),
-        good.replace(
-            "%v5: i32 = const i32 7",
-            "%v5: i32 = const i32 7\n%v5: i32 = const i32 8",
-        ),
+        good.replace("%v5: i32 = const i32 7", "%v5: i32 = const i32 7\n%v5: i32 = const i32 8"),
     ];
     for text in cases {
         let e = parse_module(&text).unwrap_err();
@@ -208,22 +204,14 @@ fn strict_syntax_and_semantic_failures_have_locations() {
         print_module(&roundtrip(&good))
     );
 }
+
 #[test]
 fn parser_resource_limits_and_truncated_inputs_never_panic() {
     let good = function("%v0 \"x\": i32", "%v5: i32 = const i32 7");
     for limits in [
-        IrLimits {
-            max_input_bytes: good.len() - 1,
-            ..IrLimits::default()
-        },
-        IrLimits {
-            max_tokens: 4,
-            ..IrLimits::default()
-        },
-        IrLimits {
-            max_nodes: 1,
-            ..IrLimits::default()
-        },
+        IrLimits { max_input_bytes: good.len() - 1, ..IrLimits::default() },
+        IrLimits { max_tokens: 4, ..IrLimits::default() },
+        IrLimits { max_nodes: 1, ..IrLimits::default() },
     ] {
         assert!(matches!(
             parse_module_with_limits(&good, limits).unwrap_err().kind,
@@ -232,18 +220,12 @@ fn parser_resource_limits_and_truncated_inputs_never_panic() {
     }
     let ty = format!("{}i32{}", "ptr<".repeat(50000), ">".repeat(50000));
     let bad=format!("{HEADER}declare @f0 \"deep\": whale ({ty}) -> void, linkage external, link_name \"deep\"\n}}");
-    assert!(matches!(
-        parse_module(&bad).unwrap_err().kind,
-        ParseErrorKind::ResourceLimit(_)
-    ));
+    assert!(matches!(parse_module(&bad).unwrap_err().kind, ParseErrorKind::ResourceLimit(_)));
     let expression = format!("{}i32 0{}", "add(".repeat(50000), ", i32 0)".repeat(50000));
     let bad = format!(
         "{HEADER}global @g0 \"deep\": i32 = const i32 0, align 4, init_expr {expression}\n}}"
     );
-    assert!(matches!(
-        parse_module(&bad).unwrap_err().kind,
-        ParseErrorKind::ResourceLimit(_)
-    ));
+    assert!(matches!(parse_module(&bad).unwrap_err().kind, ParseErrorKind::ResourceLimit(_)));
     let sample = include_str!("fixtures/calls-v3.wir");
     for (i, _) in sample.char_indices() {
         let _ = parse_module(&sample[..i]);

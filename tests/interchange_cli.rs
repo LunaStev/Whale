@@ -1,5 +1,6 @@
 #[cfg(feature = "socket-cli")]
 use std::fs;
+
 use std::process::Command;
 
 #[test]
@@ -25,18 +26,12 @@ fn schema_and_lowering_errors_preserve_existing_output_even_without_verify() {
     let valid = include_str!("../ir/tests/fixtures/ast-v2-u128.json");
     let calls = include_str!("../ir/tests/fixtures/ast-v2-calls.json");
     let cases = [
-        (
-            calls.replace("\"Direct\": \"emit\"", "\"Direct\": \"missing\""),
-            "UnknownFunctionName",
-        ),
+        (calls.replace("\"Direct\": \"emit\"", "\"Direct\": \"missing\""), "UnknownFunctionName"),
         (
             calls.replace("\"convention\": \"Whale\"", "\"convention\": \"Unknown\""),
             "AST envelope/schema",
         ),
-        (
-            "{\"globals\":[],\"functions\":[]}".to_string(),
-            "AST envelope/schema",
-        ),
+        ("{\"globals\":[],\"functions\":[]}".to_string(), "AST envelope/schema"),
         (
             valid.replace("\"format_version\": 2", "\"format_version\": 9"),
             "unsupported AST format_version",
@@ -45,10 +40,7 @@ fn schema_and_lowering_errors_preserve_existing_output_even_without_verify() {
             valid.replace("\"name\": \"answer\"", "\"name\": \"a\", \"name\": \"b\""),
             "duplicate JSON key",
         ),
-        (
-            valid.replace(&u128::MAX.to_string(), "-1"),
-            "NumericLiteral",
-        ),
+        (valid.replace(&u128::MAX.to_string(), "-1"), "NumericLiteral"),
     ];
     let tmp = tempfile::tempdir().unwrap();
     let input = tmp.path().join("input.json");
@@ -67,10 +59,7 @@ fn schema_and_lowering_errors_preserve_existing_output_even_without_verify() {
                 .output()
                 .unwrap();
             assert!(!result.status.success());
-            assert!(
-                String::from_utf8_lossy(&result.stderr).contains(expected),
-                "{result:?}"
-            );
+            assert!(String::from_utf8_lossy(&result.stderr).contains(expected), "{result:?}");
             if exists {
                 assert_eq!(fs::read(&output).unwrap(), b"previous");
                 fs::remove_file(&output).unwrap();
