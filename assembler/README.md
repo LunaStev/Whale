@@ -34,7 +34,7 @@ the new scalar forms.
 
 | Family | Supported forms and boundaries |
 | --- | --- |
-| LEA | `lea r32/r64, [address]`, using 64-bit base/index registers and signed 32-bit displacement. Symbolic addresses and 8/16-bit destinations are rejected. Operand size does not select 32-bit address size. |
+| LEA | `lea r32/r64, [address]`, using 64-bit base/index registers and signed 32-bit displacement. Symbol-only addresses support the rel/abs rules below; 8/16-bit destinations are rejected. Operand size does not select 32-bit address size. |
 | TEST | `test reg, reg`, matching 8/16/32/64-bit widths; flags are updated without changing the operands. |
 | NOT / NEG | A single register at any scalar width; memory forms are rejected. |
 | SHL / SAL / SHR / SAR | Register destination at any scalar width, with count `1`, unsigned immediate `0..255`, or `CL`; memory forms and other count registers are rejected. |
@@ -218,3 +218,29 @@ No source file is read implicitly. The CLI supplies the actual input filename.
 error fields. `AST::new(items)` supports manually built ASTs without invented
 source ranges; callers can supply `spans` and `source_name` explicitly when they
 have original source metadata.
+
+## Explicit rel/abs memory addresses
+
+`[symbol + displacement]` retains its RIP-relative default. Explicit
+`[rel symbol + displacement]` uses the same signed PC32 relocation. The addend
+accounts for the displacement field and any trailing instruction immediate.
+`[abs symbol + displacement]` emits a no-base SIB address with a signed disp32
+field and a distinct `SignedAbsolute32` relocation (ELF `R_X86_64_32S`). Its
+addend is unchanged, and the linked absolute address must fit signed 32 bits.
+This is distinct from `dd symbol`, which retains unsigned `Absolute32` intent.
+
+Explicit numeric `[rel N]` stores N as the signed displacement from the end of
+this instruction; N is not an absolute target address. `[abs N]` stores a
+signed absolute disp32 address. Both require `-2147483648..2147483647`; there
+is no address-size override or 64-bit absolute memory field in this subset.
+Equ constants in these operands resolve to the same numeric contracts.
+
+The qualifiers appear inside brackets, after an optional byte/word/dword/qword
+width. A qualifier is separated from its expression by whitespace. Ordinary
+symbol spellings `[rel]`, `[abs]`, `[rel+4]` and `[abs+4]` remain available;
+`rel`/`abs` followed by a separated expression are reserved for this syntax.
+Explicit modes initially reject base/index registers. Existing unqualified
+register addresses remain unchanged, and unqualified numeric-only addresses
+remain unsupported. LEA now shares these address forms, including symbolic
+RIP-relative and signed absolute addresses. MOV, supported memory ALU/IMUL,
+extensions, SETcc and indirect CALL/JMP use the same address/relocation path.

@@ -26,6 +26,7 @@ pub enum Context {
         name: Option<String>,
     },
     FileOffset(u64),
+    SectionOffset(u64),
     Symbol(String),
     Function(u32),
     Block(u32),
@@ -92,6 +93,7 @@ impl fmt::Display for Diagnostic {
                     }
                 }
                 Context::FileOffset(at) => write!(f, " at file offset {at}")?,
+                Context::SectionOffset(at) => write!(f, " at section offset {at}")?,
                 Context::Symbol(s) => write!(f, " symbol {s:?}")?,
                 Context::Function(id) => write!(f, " function @f{id}")?,
                 Context::Block(id) => write!(f, " block %b{id}")?,

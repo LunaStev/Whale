@@ -6,6 +6,7 @@ pub mod tokens;
 pub mod traits;
 
 pub use assembler::*;
+pub use ast::MemoryAddressMode;
 pub use error::{AsmError, SourceSpan};
 
 #[cfg(test)]

@@ -762,12 +762,13 @@ fn visibility_to_stv(vis: SymbolVisibility) -> u8 {
 
 fn reloc_type(kind: RelocKind) -> u32 {
     match kind {
-        RelocKind::Absolute64 => 1,  // R_X86_64_64
-        RelocKind::Absolute32 => 10, // R_X86_64_32
-        RelocKind::Relative32 => 2,  // R_X86_64_PC32
-        RelocKind::Relative8 => 15,  // R_X86_64_PC8
-        RelocKind::GOTPCREL => 9,    // R_X86_64_GOTPCREL
-        RelocKind::PLT32 => 4,       // R_X86_64_PLT32
+        RelocKind::Absolute64 => 1,        // R_X86_64_64
+        RelocKind::Absolute32 => 10,       // R_X86_64_32
+        RelocKind::SignedAbsolute32 => 11, // R_X86_64_32S
+        RelocKind::Relative32 => 2,        // R_X86_64_PC32
+        RelocKind::Relative8 => 15,        // R_X86_64_PC8
+        RelocKind::GOTPCREL => 9,          // R_X86_64_GOTPCREL
+        RelocKind::PLT32 => 4,             // R_X86_64_PLT32
     }
 }
 

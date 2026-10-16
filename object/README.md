@@ -54,3 +54,8 @@ program-table access for read-only consumers. It validates layout and target
 identity; container consumers must enforce their own ET_REL/ET_EXEC, section,
 program-segment and work-budget semantics. This shared view alone does not
 advertise executable-image support.
+
+Signed absolute-32 intent is `RelocKind::SignedAbsolute32`, represented by
+R_X86_64_32S (11). The reader/writer keep it distinct from unsigned Absolute32
+(R_X86_64_32, 10) and PC-relative relocation kinds. Static application uses signed
+32-bit range checks; declaring a signed kind never changes unsigned behavior.

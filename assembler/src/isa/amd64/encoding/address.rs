@@ -1,4 +1,4 @@
-use crate::ast::MemoryOperand;
+use crate::ast::{MemoryAddressMode, MemoryOperand};
 use crate::error::AsmError;
 use crate::isa::amd64::tables::{REGISTERS_32, REGISTERS_64};
 
@@ -44,6 +44,33 @@ pub fn encode_address(mem: &MemoryOperand, mode: u8) -> Result<EncodedAddress, A
         return Err(AsmError::EncodeError(
             "symbol memory should be encoded via rip-relative path".into(),
         ));
+    }
+
+    if mem.address_mode != MemoryAddressMode::Default {
+        if mode != 64 || mem.base.is_some() || mem.index.is_some() || mem.scale != 1 {
+            return Err(AsmError::EncodeError(
+                "rel/abs requires a base-less long-mode address".into(),
+            ));
+        }
+        let displacement = i32::try_from(mem.disp).map_err(|_| {
+            AsmError::EncodeError("rel/abs displacement is out of signed 32-bit range".into())
+        })?;
+        return Ok(EncodedAddress {
+            mod_bits: 0,
+            rm_bits: if mem.address_mode == MemoryAddressMode::Relative {
+                5
+            } else {
+                4
+            },
+            sib: if mem.address_mode == MemoryAddressMode::Absolute {
+                Some((0, 4, 5))
+            } else {
+                None
+            },
+            disp: Some(DispKind::Disp32(displacement)),
+            rex_b: false,
+            rex_x: false,
+        });
     }
 
     let base_code = mem

@@ -185,6 +185,7 @@ impl ObjectFile {
                 crate::RelocKind::Absolute64 => 8,
                 crate::RelocKind::Relative8 => 1,
                 crate::RelocKind::Absolute32
+                | crate::RelocKind::SignedAbsolute32
                 | crate::RelocKind::Relative32
                 | crate::RelocKind::GOTPCREL
                 | crate::RelocKind::PLT32 => 4,

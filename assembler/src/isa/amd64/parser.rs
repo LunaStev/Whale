@@ -195,6 +195,27 @@ fn parse_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError>
 
 fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, AsmError> {
     *pos += 1; // '['
+    let mut address_mode = MemoryAddressMode::Default;
+    if let Some(token) = tokens.get(*pos) {
+        if let TokenKind::Identifier(name) = &token.kind {
+            // A separated prefix introduces the new syntax. Existing symbols
+            // named rel/abs still work as [rel], [abs+4], etc.
+            let separated_term = tokens.get(*pos + 1).is_some_and(|next| {
+                next.position > token.end_position
+                    && !matches!(next.kind, TokenKind::RBracket | TokenKind::Newline)
+            });
+            if separated_term
+                && (name.eq_ignore_ascii_case("rel") || name.eq_ignore_ascii_case("abs"))
+            {
+                address_mode = if name.eq_ignore_ascii_case("rel") {
+                    MemoryAddressMode::Relative
+                } else {
+                    MemoryAddressMode::Absolute
+                };
+                *pos += 1;
+            }
+        }
+    }
 
     let mut base = None;
     let mut index = None;
@@ -286,7 +307,12 @@ fn parse_memory_operand(tokens: &[Token], pos: &mut usize) -> Result<Operand, As
         match tokens.get(*pos).map(|t| &t.kind) {
             Some(TokenKind::RBracket) => {
                 *pos += 1;
+                if address_mode != MemoryAddressMode::Default && (base.is_some() || index.is_some())
+                {
+                    return Err(parser_err(tokens, term_pos, "rel/abs address requires a symbol or numeric displacement without registers"));
+                }
                 return Ok(Operand::Memory(MemoryOperand {
+                    address_mode,
                     width: None,
                     base,
                     index,

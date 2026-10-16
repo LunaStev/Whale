@@ -725,6 +725,7 @@ pub fn read_elf(bytes: &[u8], limits: ObjectReadLimits) -> Result<ObjectFile> {
             let kind = match info as u32 {
                 1 => RelocKind::Absolute64,
                 10 => RelocKind::Absolute32,
+                11 => RelocKind::SignedAbsolute32,
                 2 => RelocKind::Relative32,
                 15 => RelocKind::Relative8,
                 9 => RelocKind::GOTPCREL,

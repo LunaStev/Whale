@@ -62,6 +62,7 @@ fn displacements_preserve_signed_boundaries_and_encoding_transitions() {
         assert!(error(&format!("mov rax, [{expression}]")).contains("displacement"));
         // The public address encoder also accepts base-less SIB operands.
         let mem = MemoryOperand {
+            address_mode: Default::default(),
             width: None,
             base: None,
             index: Some("rcx".into()),
