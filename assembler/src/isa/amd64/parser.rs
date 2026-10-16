@@ -321,6 +321,38 @@ fn parse_directive(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmErro
             _ => return Err(parser_err(tokens, *pos, "Expected directive name argument")),
         };
         *pos += 1;
+        if name == "section" && matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::Comma))
+        {
+            *pos += 1;
+            let kind = match tokens.get(*pos).map(|t| &t.kind) {
+                Some(TokenKind::Identifier(kind)) => match kind.to_ascii_lowercase().as_str() {
+                    "text" => AsmSectionKind::Text,
+                    "data" => AsmSectionKind::Data,
+                    "rodata" => AsmSectionKind::ReadOnlyData,
+                    "bss" => AsmSectionKind::Bss,
+                    _ => {
+                        return Err(parser_err(
+                            tokens,
+                            *pos,
+                            "Expected section kind text/data/rodata/bss",
+                        ))
+                    }
+                },
+                _ => {
+                    return Err(parser_err(
+                        tokens,
+                        *pos,
+                        "Expected section kind text/data/rodata/bss",
+                    ))
+                }
+            };
+            *pos += 1;
+            finish_statement(tokens, pos)?;
+            return Ok(ASTNode::SectionAttributes {
+                name: argument,
+                kind,
+            });
+        }
         finish_statement(tokens, pos)?;
         return Ok(match name.as_str() {
             "section" => ASTNode::Section(argument),
@@ -582,7 +614,9 @@ fn is_register(name: &str) -> bool {
 fn is_directive(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
-        "db" | "dw"
+        "align"
+            | "db"
+            | "dw"
             | "dd"
             | "dq"
             | "resb"

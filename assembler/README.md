@@ -116,3 +116,43 @@ memory remains RIP-relative, and relocation addends include any trailing
 immediate bytes. A scaled first register denotes an index without a base;
 optional displacement and a subsequent base are supported, while invalid scales,
 RSP as index and excess registers are rejected.
+
+## Section identity, alignment and fixture coverage
+
+`section NAME, text|rodata|data|bss` assigns an explicit supported kind to a
+custom name. `text` is executable/read-only, `rodata` is initialized read-only,
+`data` is initialized writable, and `bss` is writable zero-fill storage. The four
+standard names retain their corresponding defaults, and other unqualified names
+default to data. Reentering an existing section without attributes preserves its
+kind; contradictory attributes, unknown kinds, and incompatible redeclarations
+are errors. Custom BSS names use sparse storage and reject nonzero initializers,
+relocations and instructions exactly as `.bss` does.
+
+`align N` requires one positive power-of-two constant, including an `equ` value.
+It raises the section's ELF alignment and pads the current logical offset. Text
+uses `0x90` NOP bytes, initialized data uses zero bytes, and BSS only increases
+logical zero-fill size. Code defaults to alignment 16, other kinds to 1. Output
+budgets are checked before materializing padding. Alignment participates in label
+layout and branch relaxation. A branch that grows after being shortened stays
+near, preventing alignment-driven oscillation; configured pass limits still
+return an explicit error instead of stale displacements.
+
+```asm
+section .startup, text
+entry: nop
+align 32
+aligned: ret
+section .constants, rodata
+db "hello", 0
+align 16
+section .workspace, bss
+resb 1099511627777
+align 64
+```
+
+`test/fixtures.tsv` classifies every historical `.asm` fixture with an outcome,
+expected diagnostic (for negative/future cases), and purpose. All 15 current
+fixtures are supported-positive and run under Cargo/CI. The runner compares the
+manifest with recursive file discovery, so missing, empty, duplicated and
+unclassified entries fail. A future-syntax entry must name its feature issue;
+negative/future entries must actually reject with their declared diagnostic.

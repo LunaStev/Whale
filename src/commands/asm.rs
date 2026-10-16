@@ -239,15 +239,13 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
     let mut section_map = Vec::with_capacity(out.sections.len());
 
     for sec in &out.sections {
-        let kind = match sec.name.as_str() {
-            ".text" => SectionKind::Text,
-            ".data" => SectionKind::Data,
-            ".rodata" => SectionKind::ReadOnlyData,
-            ".bss" => SectionKind::Bss,
-            _ => SectionKind::Data,
+        let kind = match sec.kind {
+            assembler::AsmSectionKind::Text => SectionKind::Text,
+            assembler::AsmSectionKind::Data => SectionKind::Data,
+            assembler::AsmSectionKind::ReadOnlyData => SectionKind::ReadOnlyData,
+            assembler::AsmSectionKind::Bss => SectionKind::Bss,
         };
-
-        let align = if sec.name == ".text" { 16 } else { 1 };
+        let align = sec.align;
         let idx = obj.add_section(&sec.name, kind, align);
         obj.sections[idx].data = sec.data.clone();
         obj.sections[idx].zero_fill = sec.zero_fill;

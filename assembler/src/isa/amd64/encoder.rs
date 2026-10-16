@@ -100,8 +100,15 @@ pub fn encode_with_limits(
 ) -> Result<AssemblerOutput, AsmError> {
     let consts = resolve_constants(ast)?;
     let mut prev_label_locs = None;
+    let mut forced_near = HashSet::new();
     for _ in 0..limits.max_relax_iterations {
-        let (out, label_locs) = encode_once(ast, prev_label_locs.as_ref(), &consts, limits)?;
+        let (out, label_locs) = encode_once(
+            ast,
+            prev_label_locs.as_ref(),
+            &consts,
+            limits,
+            &mut forced_near,
+        )?;
         if prev_label_locs.as_ref() == Some(&label_locs) {
             return Ok(out);
         }
@@ -118,6 +125,7 @@ fn encode_once(
     jump_hint_layout: Option<&EncodingLayout>,
     consts: &HashMap<String, i128>,
     limits: &crate::AssemblyLimits,
+    forced_near: &mut HashSet<usize>,
 ) -> Result<(AssemblerOutput, EncodingLayout), AsmError> {
     let mut materialized = 0usize;
     let mut sections = Vec::new();
@@ -134,6 +142,8 @@ fn encode_once(
     let mut global_symbols = HashSet::<String>::new();
 
     sections.push(AsmSection {
+        kind: AsmSectionKind::Text,
+        align: 16,
         name: ".text".to_string(),
         data: Vec::new(),
         zero_fill: 0,
@@ -145,12 +155,32 @@ fn encode_once(
 
     for (node_index, node) in ast.items.iter().enumerate() {
         match node {
-            ASTNode::Section(name) => {
+            ASTNode::Section(name) | ASTNode::SectionAttributes { name, .. } => {
+                let explicit = match node {
+                    ASTNode::SectionAttributes { kind, .. } => Some(*kind),
+                    _ => None,
+                };
                 if let Some(idx) = sections.iter().position(|s| s.name == *name) {
+                    if explicit.is_some_and(|kind| kind != sections[idx].kind) {
+                        return Err(AsmError::EncodeError(format!(
+                            "Incompatible section redeclaration '{name}'"
+                        )));
+                    }
                     current_section_idx = idx;
                 } else {
+                    let default = AsmSectionKind::default_for_name(name);
+                    let kind = explicit.unwrap_or(default);
+                    if matches!(name.as_str(), ".text" | ".data" | ".rodata" | ".bss")
+                        && kind != default
+                    {
+                        return Err(AsmError::EncodeError(format!(
+                            "Standard section '{name}' has incompatible kind"
+                        )));
+                    }
                     sections.push(AsmSection {
                         name: name.clone(),
+                        kind,
+                        align: kind.default_alignment(),
                         data: Vec::new(),
                         zero_fill: 0,
                         relocs: Vec::new(),
@@ -221,7 +251,7 @@ fn encode_once(
                 let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
                 let inst = resolve_instruction_consts(&scoped, consts)?;
                 let sec = &mut sections[current_section_idx];
-                if sec.name == ".bss" {
+                if sec.kind == AsmSectionKind::Bss {
                     return Err(AsmError::EncodeError(
                         "instructions are not valid in BSS".into(),
                     ));
@@ -240,10 +270,23 @@ fn encode_once(
                     jump_hint_layout
                         .map(|layout| &layout.labels)
                         .unwrap_or(&jump_known_locs),
-                    jump_hint_layout
-                        .map(|layout| layout.instruction_lengths[node_index])
-                        .unwrap_or(0),
+                    BranchRelaxation {
+                        previous_len: jump_hint_layout
+                            .map(|layout| layout.instruction_lengths[node_index])
+                            .unwrap_or(0),
+                        force_near: forced_near.contains(&node_index),
+                    },
                 )?;
+                // Alignment padding can offset an earlier shrink. Once a short
+                // branch must grow, keep it near: each branch changes size at most
+                // twice, so relaxation cannot oscillate around alignment edges.
+                if jump_hint_layout
+                    .is_some_and(|layout| layout.instruction_lengths[node_index] == 2)
+                    && instruction_bytes.len() > 2
+                    && (inst.mnemonic == "jmp" || condition_code(&inst.mnemonic).is_some())
+                {
+                    forced_near.insert(node_index);
+                }
                 instruction_lengths[node_index] = instruction_bytes.len();
                 instruction_offsets[node_index] = cur_off;
                 reserve_output(
@@ -261,7 +304,33 @@ fn encode_once(
             ASTNode::Directive(dir) => {
                 let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
                 let sec = &mut sections[current_section_idx];
-                if sec.name == ".bss" {
+                if scoped.name == "align" {
+                    let alignment = alignment_value(&scoped, consts)?;
+                    sec.align = sec.align.max(alignment);
+                    let offset = (sec.data.len() as u64)
+                        .checked_add(sec.zero_fill)
+                        .ok_or_else(|| AsmError::EncodeError("Section size overflow".into()))?;
+                    let padding = offset.wrapping_neg() & (alignment - 1);
+                    offset
+                        .checked_add(padding)
+                        .ok_or_else(|| AsmError::EncodeError("Alignment size overflow".into()))?;
+                    if sec.kind == AsmSectionKind::Bss {
+                        sec.zero_fill = sec.zero_fill.checked_add(padding).ok_or_else(|| {
+                            AsmError::EncodeError("BSS alignment overflow".into())
+                        })?;
+                    } else {
+                        let extra = usize::try_from(padding).map_err(|_| {
+                            AsmError::EncodeError("Alignment exceeds host capacity".into())
+                        })?;
+                        reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
+                        let fill = if sec.kind == AsmSectionKind::Text {
+                            0x90
+                        } else {
+                            0
+                        };
+                        sec.data.resize(sec.data.len() + extra, fill);
+                    }
+                } else if sec.kind == AsmSectionKind::Bss {
                     encode_bss_directive(&scoped, sec, consts)?;
                 } else {
                     let extra = directive_size(&scoped, consts)?;
@@ -712,6 +781,12 @@ fn emit_mem_reg(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
+struct BranchRelaxation {
+    previous_len: usize,
+    force_near: bool,
+}
+
 fn encode_instruction(
     ins: &Instruction,
     bytes: &mut Vec<u8>,
@@ -719,7 +794,7 @@ fn encode_instruction(
     current_section: usize,
     current_offset: usize,
     label_locs: &HashMap<String, (usize, u64)>,
-    previous_len: usize,
+    relaxation: BranchRelaxation,
 ) -> Result<(), AsmError> {
     match ins.mnemonic.as_str() {
         "ret" | "nop" | "syscall" | "int3" | "cwd" | "cdq" | "cqo" if !ins.operands.is_empty() => {
@@ -762,7 +837,8 @@ fn encode_instruction(
         "jmp" => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::One(0xE9),
                 short_opcode: Some(0xEB),
                 reloc_kind: RelocKind::Branch32,
@@ -778,7 +854,8 @@ fn encode_instruction(
         "call" => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::One(0xE8),
                 short_opcode: None,
                 reloc_kind: RelocKind::Branch32,
@@ -794,7 +871,8 @@ fn encode_instruction(
         condition if condition_code(condition).is_some() => encode_jump(
             ins,
             JumpSpec {
-                previous_len,
+                previous_len: relaxation.previous_len,
+                force_near: relaxation.force_near,
                 near_opcode: JumpOpcode::Two(0x0F, 0x80 + condition_code(condition).unwrap()),
                 short_opcode: Some(0x70 + condition_code(condition).unwrap()),
                 reloc_kind: RelocKind::Branch32,
@@ -1484,6 +1562,7 @@ enum JumpOpcode {
 
 struct JumpSpec {
     previous_len: usize,
+    force_near: bool,
     near_opcode: JumpOpcode,
     short_opcode: Option<u8>,
     reloc_kind: RelocKind,
@@ -1531,7 +1610,7 @@ fn encode_jump(
 
     if let Some((target_sec, target_off)) = label_locs.get(&label) {
         if *target_sec == current_section {
-            if let Some(short_op) = spec.short_opcode {
+            if let Some(short_op) = spec.short_opcode.filter(|_| !spec.force_near) {
                 let short_len = 2i64;
                 // A forward target moves when this branch itself shrinks.
                 // Its previous encoded length keeps the inclusive +127 edge
@@ -1693,6 +1772,29 @@ fn encode_data_expr(
             )),
         },
     }
+}
+
+fn alignment_value(dir: &Directive, consts: &HashMap<String, i128>) -> Result<u64, AsmError> {
+    if dir.values.len() != 1 {
+        return Err(AsmError::EncodeError(
+            "align expects one power-of-two operand".into(),
+        ));
+    }
+    let DirectiveValue::Expr(expr) = &dir.values[0] else {
+        return Err(AsmError::EncodeError(
+            "align requires numeric expression".into(),
+        ));
+    };
+    let EvaluatedExpr::Number(number) = eval_expr(expr, consts)? else {
+        return Err(AsmError::EncodeError(
+            "align requires a resolved constant".into(),
+        ));
+    };
+    let value = u64::try_from(number)
+        .ok()
+        .filter(|value| value.is_power_of_two())
+        .ok_or_else(|| AsmError::EncodeError("align requires a positive power of two".into()))?;
+    Ok(value)
 }
 
 fn reservation_size(

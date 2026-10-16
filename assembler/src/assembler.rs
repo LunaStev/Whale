@@ -1,3 +1,4 @@
+pub use crate::ast::AsmSectionKind;
 use crate::ast::AST;
 use crate::error::AsmError;
 use crate::tokens::tokenize;
@@ -9,6 +10,9 @@ pub struct AssemblerOutput {
 }
 
 pub struct AsmSection {
+    pub kind: AsmSectionKind,
+    /// Maximum power-of-two alignment requested by this section.
+    pub align: u64,
     pub name: String,
     pub data: Vec<u8>,
     /// Unbacked zero storage, used by .bss instead of allocating bytes.
