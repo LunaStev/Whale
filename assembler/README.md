@@ -200,3 +200,21 @@ An immediate 16-bit override and memory PUSH/POP are outside this initial subset
 existing 16/64-bit register forms remain supported. ADC/SBB initially accept
 matching register pairs at 8/16/32/64 bits and use carry/borrow-input opcodes;
 they do not substitute ADD/SUB or implement wide-integer native selection.
+
+## Source diagnostics
+
+`assemble_named("path/input.asm", source, &AMD64)` and
+`assemble_named_with_limits` attach the caller-supplied filename. The original
+`assemble` APIs use `<input>`. Diagnostics carry a half-open UTF-8 byte range and
+one-based Unicode-scalar line/column coordinates; the byte range always addresses
+the original source spelling, including escaped strings. Tokens retain end
+coordinates, and parsed AST nodes retain their ranges through symbol resolution
+and repeated encoding passes. Encoder errors point to their instruction or
+directive; duplicate/conflicting symbol definitions identify both declaration
+sites, and deferred unresolved-reference errors identify the referencing node.
+No source file is read implicitly. The CLI supplies the actual input filename.
+
+`AsmError::Diagnostic` exposes structured location, related declaration and inner
+error fields. `AST::new(items)` supports manually built ASTs without invented
+source ranges; callers can supply `spans` and `source_name` explicitly when they
+have original source metadata.

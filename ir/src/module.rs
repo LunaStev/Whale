@@ -21,6 +21,7 @@ pub struct Module {
     pub global_storage: Vec<crate::GlobalStorage>,
     pub functions: Vec<Function>,
     pub declarations: Vec<crate::FunctionDecl>,
+    pub sources: crate::SourceMetadata,
 }
 
 impl Module {
@@ -32,6 +33,7 @@ impl Module {
             global_storage: Vec::new(),
             functions: Vec::new(),
             declarations: Vec::new(),
+            sources: crate::SourceMetadata::default(),
         }
     }
 }

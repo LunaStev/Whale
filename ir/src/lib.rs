@@ -13,6 +13,7 @@ pub mod layout;
 pub mod limits;
 pub mod module;
 pub mod printer;
+pub mod source;
 pub mod types;
 pub mod value;
 pub mod verifier;
@@ -33,7 +34,7 @@ pub use function::*;
 pub use global_storage::*;
 
 /// Independently versioned printed typed IR and shared execution semantics.
-pub const IR_FORMAT_VERSION: u32 = 6;
+pub const IR_FORMAT_VERSION: u32 = 7;
 pub const SEMANTICS_VERSION: u32 = 1;
 pub use instr::*;
 pub use interpreter::*;
@@ -41,6 +42,7 @@ pub use layout::*;
 pub use limits::*;
 pub use module::*;
 pub use printer::*;
+pub use source::*;
 pub use types::*;
 pub use value::*;
 pub use verifier::*;

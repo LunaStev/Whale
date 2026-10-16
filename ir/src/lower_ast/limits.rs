@@ -15,6 +15,8 @@ pub struct AstLimits {
     pub max_string_bytes: usize,
     /// Maximum pretty JSON size; enforced by a bounded serialization writer.
     pub max_output_bytes: usize,
+    /// Work units for optional source mapping during O0 construction.
+    pub max_source_work: usize,
 }
 impl Default for AstLimits {
     fn default() -> Self {
@@ -23,12 +25,15 @@ impl Default for AstLimits {
             max_nodes: 100_000,
             max_string_bytes: 8 * 1024 * 1024,
             max_output_bytes: 8 * 1024 * 1024,
+            max_source_work: 16 * 1024 * 1024,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AstLimitError {
+    Source,
+    SourceWork,
     Depth,
     Nodes,
     Strings,
@@ -37,6 +42,8 @@ pub enum AstLimitError {
 impl std::fmt::Display for AstLimitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Source => "invalid source annotation or duplicate original node identity",
+            Self::SourceWork => "AST source mapping work limit exceeded",
             Self::Depth => "AST nesting limit exceeded",
             Self::Nodes => "AST node limit exceeded",
             Self::Strings => "AST string byte limit exceeded",
@@ -57,9 +64,30 @@ struct Inspect<'a> {
     nodes: usize,
     strings: usize,
     pending: Vec<(Node<'a>, usize)>,
-    extended_ops: bool,
+    extended_ops: u8,
+    source_ids: std::collections::HashSet<u64>,
 }
 impl<'a> Inspect<'a> {
+    fn source(&mut self, annotation: &crate::SourceAnnotation) -> Result<(), AstLimitError> {
+        if !self.source_ids.insert(annotation.id) {
+            return Err(AstLimitError::Source);
+        }
+        self.extended_ops |= 2;
+        if let Some(s) = &annotation.source {
+            self.string(&s.file)?;
+            if s.file.is_empty()
+                || s.file.contains('\0')
+                || s.line == 0
+                || s.column == 0
+                || s.end_line == 0
+                || s.end_column == 0
+                || (s.line, s.column) > (s.end_line, s.end_column)
+            {
+                return Err(AstLimitError::Source);
+            }
+        }
+        Ok(())
+    }
     fn count(&mut self) -> Result<(), AstLimitError> {
         self.nodes = self.nodes.checked_add(1).ok_or(AstLimitError::Nodes)?;
         if self.nodes > self.limits.max_nodes {
@@ -95,13 +123,14 @@ pub fn inspect_program(program: &Program, limits: AstLimits) -> Result<(), AstLi
 pub(crate) fn inspect_program_features(
     program: &Program,
     limits: AstLimits,
-) -> Result<bool, AstLimitError> {
+) -> Result<u8, AstLimitError> {
     let mut i = Inspect {
         limits,
         nodes: 0,
         strings: 0,
         pending: Vec::new(),
-        extended_ops: false,
+        extended_ops: 0,
+        source_ids: std::collections::HashSet::new(),
     };
     i.count()?; // program
     for d in &program.declarations {
@@ -150,8 +179,15 @@ pub(crate) fn inspect_program_features(
                 _ => {}
             },
             Node::Expr(e) => match e {
+                Expr::Located {
+                    annotation,
+                    expression,
+                } => {
+                    i.source(annotation)?;
+                    i.push(Node::Expr(expression), next)?;
+                }
                 Expr::BitNot(value) => {
-                    i.extended_ops = true;
+                    i.extended_ops |= 1;
                     i.push(Node::Expr(value), next)?;
                 }
                 Expr::FunctionRef(s) | Expr::Var(s) => i.string(s)?,
@@ -169,7 +205,7 @@ pub(crate) fn inspect_program_features(
                 Expr::Lit(Lit::Bool(_)) => {}
                 Expr::Binary { left, op, right } => {
                     if !matches!(op, BinOpRef::Add | BinOpRef::Sub | BinOpRef::Mul) {
-                        i.extended_ops = true;
+                        i.extended_ops |= 1;
                     }
                     i.push(Node::Expr(left), next)?;
                     i.push(Node::Expr(right), next)?;
@@ -180,6 +216,13 @@ pub(crate) fn inspect_program_features(
                 }
             },
             Node::Stmt(s) => match s {
+                Stmt::Located {
+                    annotation,
+                    statement,
+                } => {
+                    i.source(annotation)?;
+                    i.push(Node::Stmt(statement), next)?;
+                }
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         i.push(Node::Expr(e), next)?;
@@ -293,6 +336,9 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 pending.push(Disposal::Types(s.params.into_iter()));
             }
             Owned::Expr(e) => match e {
+                Expr::Located { expression, .. } => {
+                    pending.push(Disposal::One(Owned::Expr(*expression)))
+                }
                 Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
@@ -308,6 +354,9 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 _ => {}
             },
             Owned::Stmt(s) => match s {
+                Stmt::Located { statement, .. } => {
+                    pending.push(Disposal::One(Owned::Stmt(*statement)))
+                }
                 Stmt::Return(e) => {
                     if let Some(e) = e {
                         pending.push(Disposal::One(Owned::Expr(e)));

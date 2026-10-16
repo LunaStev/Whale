@@ -5,7 +5,7 @@ use super::debug::dump_bytes;
 
 use assembler::isa::amd64::parser::parse;
 use assembler::tokens::tokenize;
-use assembler::{assemble, isa::AMD64, AssemblerOutput};
+use assembler::{isa::AMD64, AssemblerOutput};
 
 use object::{
     ObjectFile, ObjectFormat, ObjectRelocation, ObjectSymbol, RelocKind as ObjectRelocKind,
@@ -162,7 +162,7 @@ pub fn run(args: Vec<String>) {
             println!("[trace] tokenize start");
         }
         let tokens = tokenize(&src).unwrap_or_else(|e| {
-            eprintln!("Tokenize error: {}", e);
+            eprintln!("Tokenize error: {}", e.with_source_name(&input));
             process::exit(1);
         });
         token_len = Some(tokens.len());
@@ -176,7 +176,7 @@ pub fn run(args: Vec<String>) {
                 println!("[trace] parse start");
             }
             let ast = parse(&tokens).unwrap_or_else(|e| {
-                eprintln!("Parse error: {}", e);
+                eprintln!("Parse error: {}", e.with_source_name(&input));
                 process::exit(1);
             });
             ast_items_len = Some(ast.items.len());
@@ -191,7 +191,7 @@ pub fn run(args: Vec<String>) {
         println!("[trace] assemble start");
     }
     let start_time = Instant::now();
-    let out = assemble(&src, &AMD64).unwrap_or_else(|e| {
+    let out = assembler::assemble_named(&input, &src, &AMD64).unwrap_or_else(|e| {
         eprintln!("Assemble error: {}", e);
         process::exit(1);
     });

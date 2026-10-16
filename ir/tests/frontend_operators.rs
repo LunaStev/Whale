@@ -607,9 +607,9 @@ fn new_ast_and_constant_syntax_requires_its_version_and_old_versions_still_read(
     let expr = bin(B::BitXor, int(8, false, 5), int(8, false, 3));
     let p = program(expr, ty(8, false), true);
     let json = interchange::encode(p.clone()).unwrap();
-    assert!(json.contains("\"format_version\": 3"));
+    assert!(json.contains("\"format_version\": 4"));
     assert!(
-        interchange::decode(&json.replace("\"format_version\": 3", "\"format_version\": 2"))
+        interchange::decode(&json.replace("\"format_version\": 4", "\"format_version\": 2"))
             .unwrap_err()
             .contains("require AST format 3")
     );
@@ -617,18 +617,18 @@ fn new_ast_and_constant_syntax_requires_its_version_and_old_versions_still_read(
     assert!(text.contains("bit_xor(u8 5, u8 3)"));
     for old in [3, 4] {
         assert!(
-            parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
+            parse_module(&text.replace("format_version 7", &format!("format_version {old}")))
                 .unwrap_err()
                 .to_string()
                 .contains("require typed IR format 5")
         );
     }
     let json = interchange::encode(program(int(8, false, 1), ty(8, false), false)).unwrap();
-    interchange::decode(&json.replace("\"format_version\": 3", "\"format_version\": 2")).unwrap();
+    interchange::decode(&json.replace("\"format_version\": 4", "\"format_version\": 2")).unwrap();
     let text = print_module(&lower(&program(int(8, false, 1), ty(8, false), false)).unwrap());
     for old in [3, 4] {
         canonical(
-            &parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
+            &parse_module(&text.replace("format_version 7", &format!("format_version {old}")))
                 .unwrap(),
         );
     }
@@ -673,7 +673,7 @@ fn new_constant_trees_stay_visible_at_o0_and_all_new_forms_are_version_gated() {
         );
         let json = interchange::encode(p).unwrap();
         assert!(interchange::decode(
-            &json.replace("\"format_version\": 3", "\"format_version\": 2")
+            &json.replace("\"format_version\": 4", "\"format_version\": 2")
         )
         .unwrap_err()
         .contains("require AST format 3"));
@@ -685,7 +685,7 @@ fn new_constant_trees_stay_visible_at_o0_and_all_new_forms_are_version_gated() {
     );
     let json = interchange::encode(p.clone()).unwrap();
     assert!(
-        interchange::decode(&json.replace("\"format_version\": 3", "\"format_version\": 2"))
+        interchange::decode(&json.replace("\"format_version\": 4", "\"format_version\": 2"))
             .unwrap_err()
             .contains("require AST format 3")
     );
@@ -693,7 +693,7 @@ fn new_constant_trees_stay_visible_at_o0_and_all_new_forms_are_version_gated() {
     assert!(text.contains("bit_not(u8 1)"));
     for old in [3, 4] {
         assert!(
-            parse_module(&text.replace("format_version 6", &format!("format_version {old}")))
+            parse_module(&text.replace("format_version 7", &format!("format_version {old}")))
                 .unwrap_err()
                 .to_string()
                 .contains("require typed IR format 5")
@@ -725,4 +725,22 @@ fn preserved_references_resolve_once_per_occurrence_in_source_order() {
         .unwrap();
     assert_eq!(value, ConstValue::I(3));
     assert_eq!(calls.get(), 2);
+}
+
+// Existing semantic assertions intentionally inspect the preserved leaf cause.
+fn interpret(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret(module, function, args).map_err(InterpreterError::into_root_cause)
+}
+fn interpret_with_options(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+    options: InterpreterOptions,
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret_with_options(module, function, args, options)
+        .map_err(InterpreterError::into_root_cause)
 }

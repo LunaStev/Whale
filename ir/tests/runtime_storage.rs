@@ -392,7 +392,7 @@ fn new_operations_have_exact_result_operands_and_are_gated_from_all_prior_format
     let text = print_module(&m);
     for version in [3, 4, 5] {
         assert!(parse_module(
-            &text.replace("format_version 6", &format!("format_version {version}"))
+            &text.replace("format_version 7", &format!("format_version {version}"))
         )
         .unwrap_err()
         .to_string()
@@ -404,7 +404,7 @@ fn new_operations_have_exact_result_operands_and_are_gated_from_all_prior_format
         ] {
             let text = print_module(&module("void", body));
             assert!(parse_module(
-                &text.replace("format_version 6", &format!("format_version {version}"))
+                &text.replace("format_version 7", &format!("format_version {version}"))
             )
             .is_err());
         }
@@ -506,4 +506,22 @@ fn floating_storage_representation_remains_bit_exact_but_execution_is_explicitly
         interpret(&m, FunctionId(0), &[]),
         Err(InterpreterError::UnsupportedGlobal(GlobalId(0)))
     ));
+}
+
+// Existing semantic assertions intentionally inspect the preserved leaf cause.
+fn interpret(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret(module, function, args).map_err(InterpreterError::into_root_cause)
+}
+fn interpret_with_options(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+    options: InterpreterOptions,
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret_with_options(module, function, args, options)
+        .map_err(InterpreterError::into_root_cause)
 }

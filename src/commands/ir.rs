@@ -156,7 +156,7 @@ pub fn run(args: Vec<String>) {
             let program = interchange::decode(&source)
                 .unwrap_or_else(|e| fail(format!("Failed to parse socket JSON: {e}")));
             let module = lower_o0(&program, target.name(), target.data_layout())
-                .unwrap_or_else(|e| fail(format!("lower_o0 failed: {e:?}")));
+                .unwrap_or_else(|e| fail(format!("lower_o0 failed: {e}")));
             if do_verify {
                 ir::verify_module(&module)
                     .unwrap_or_else(|e| fail(format!("verify failed: {e:?}")));
@@ -195,14 +195,14 @@ pub fn run(args: Vec<String>) {
 fn print_help() {
     stdout(concat!(
         "Usage: whale ir <command> [options]", "\n",
-        "  verify <input.wir>             Read and verify format 3/4/5/6 typed IR", "\n",
+        "  verify <input.wir>             Read and verify format 3/4/5/6/7 typed IR", "\n",
         "  print <input.wir> [-o <path>]   Verify and write canonical typed IR", "\n",
         "  run <input.wir> --function @fN [--arg <literal> ...] [--max-steps <u64>] [--max-memory <u64>]", "\n",
         "    Execute integer/bool, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.", "\n",
         "  lower <socket.json> [-o <path>] Lower AST JSON (requires socket-cli)", "\n",
         "  lower options: --target x86_64-whale-linux, --no-verify", "\n",
-        "  AST envelope: reads format_version 2/3, writes 3; semantics_version: 1, features: [], program: AST", "\n",
-        "  Typed IR reads format_version 3/4/5/6, writes 6; semantics_version 1. Legacy undef is invalid.", "\n",
+        "  AST envelope: reads format_version 2/3/4, writes 4; semantics_version: 1, features: [], program: AST", "\n",
+        "  Typed IR reads format_version 3/4/5/6/7, writes 7; semantics_version 1. Legacy undef is invalid.", "\n",
         "  Integer literals are decimal; floats use exact-width 0x storage bits.", "\n",
         "  Unknown fields, versions, instructions and trailing input are rejected.", "\n",
     ));

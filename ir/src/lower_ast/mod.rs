@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-pub const AST_FORMAT_VERSION: u32 = 3;
+pub const AST_FORMAT_VERSION: u32 = 4;
 /// Compatibility alias for the explicitly versioned AST format.
 pub const SOCKET_VERSION: u32 = AST_FORMAT_VERSION;
 pub mod interchange;

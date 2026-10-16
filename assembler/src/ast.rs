@@ -1,6 +1,30 @@
+use crate::error::{AsmError, SourceSpan};
 #[derive(Debug, Clone)]
 pub struct AST {
     pub items: Vec<ASTNode>,
+    /// Source ranges remain parallel to items through encoding/constant passes.
+    pub spans: Vec<SourceSpan>,
+    pub source_name: String,
+}
+impl AST {
+    /// Manually constructed ASTs may omit source metadata.
+    pub fn new(items: Vec<ASTNode>) -> Self {
+        Self {
+            items,
+            spans: Vec::new(),
+            source_name: "<input>".into(),
+        }
+    }
+    pub fn error_at(&self, error: AsmError, item: usize, previous: Option<usize>) -> AsmError {
+        let Some(span) = self.spans.get(item).copied() else {
+            return error;
+        };
+        error.at(
+            &self.source_name,
+            span,
+            previous.and_then(|item| self.spans.get(item).copied()),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -15,7 +39,10 @@ pub enum ASTNode {
     Directive(Directive),
     Label(String),
     Section(String),
-    SectionAttributes { name: String, kind: AsmSectionKind },
+    SectionAttributes {
+        name: String,
+        kind: AsmSectionKind,
+    },
     Global(String),
     Extern(String),
     Const {

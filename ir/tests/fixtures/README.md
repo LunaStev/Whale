@@ -16,7 +16,7 @@ calls; the cast case includes signed extension, integer-to-float and float
 truncation with memory loads/stores.
 
 `text_parser.rs` reads every retained output, verifies it and requires canonical
-print-parse-print equality, upgrading the header to format 6. These tests do not require a Wave checkout
+print-parse-print equality, upgrading the header to format 7. These tests do not require a Wave checkout
 or claim native execution. To regenerate with a matching Wave checkout and a
 Whale dependency containing this reader/printer, run from the Wave root:
 
@@ -25,8 +25,8 @@ cargo run -- --whale build /path/to/wave-control.wave --emit=ir
 cargo run -- --whale build /path/to/wave-casts.wave --emit=ir
 ```
 
-Legacy AST JSON format 2 remains readable; canonical AST JSON is format 3.
-Canonical typed text IR is format 6 (the reader also accepts 3/4/5). Readers reject
+Legacy AST JSON formats 2/3 remain readable; canonical AST JSON is format 4.
+Canonical typed text IR is format 7 (the reader also accepts 3/4/5/6). Readers reject
 unsupported versions; fixtures are migrated explicitly when the format changes.
 
 ## Scalar integer execution oracle
@@ -58,3 +58,26 @@ lifetime end and same-allocation pointer ordering/differences. Run `@f1` for u32
 `@f3` for u32 42 and `@f7` for i128 16. `@f4` traps on uninitialized global storage,
 `@f5` on a read-only write and `@f6` on an expired stored alias. A fresh public
 interpreter invocation recreates globals; calls in that invocation share them.
+
+
+## Source-aware runtime failures
+
+`runtime-diagnostics-v7.wir` retains original source identities for a direct call,
+an indirect call, division and a terminator. `ir run ... --function @f0` reports
+`division by zero`, `original.wave:11:13`, IR `@f2 %b0 instruction 1`, and both
+caller edges. Source filenames are provided metadata; the interpreter never opens
+them or invents locations from display names/canonical text.
+
+Library failures add `InterpreterError::Diagnostic` only for relevant original
+metadata or nested caller edges. `root_cause()` and `into_root_cause()` expose the
+unchanged typed trap/budget cause; `diagnostic()` exposes structured original/IR
+sites and callers. Trace edges are outermost-to-innermost within the retained
+innermost tail. `InterpreterOptions::max_trace_frames` defaults to 64 and is hard
+clamped to 256; zero retains only an omitted count. Diagnostic source filename/span
+copies have a separate 1 MiB total budget. Omitted source details and caller edges
+have explicit counts; original/IR IDs remain when source details are omitted.
+
+```sh
+cargo test -p ir --all-features --locked --test runtime_diagnostics
+cargo test --locked --test runtime_diagnostics_cli
+```

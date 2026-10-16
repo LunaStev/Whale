@@ -25,7 +25,7 @@ fn canonical_fixtures_preserve_scoped_sparse_ids_block_order_and_wave_output() {
     ] {
         assert_eq!(
             print_module(&roundtrip(text)),
-            text.replace("format_version 3", "format_version 6")
+            text.replace("format_version 3", "format_version 7")
         );
     }
     let m = parse_module(include_str!("fixtures/text-identities-v3.wir")).unwrap();

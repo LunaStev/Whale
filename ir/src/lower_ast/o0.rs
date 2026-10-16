@@ -61,6 +61,7 @@ pub fn lower_o0_with_limits(
         }
     }
     let mut mb = ModuleBuilder::new(target.name(), datalayout);
+    mb.set_source_work_limit(limits.max_source_work);
 
     for d in &program.declarations {
         let signature = super::support::signature_to_whale(&d.signature)?;
@@ -108,11 +109,16 @@ pub fn lower_o0_with_limits(
             return Err(LowerError::TypeMismatch {
                 expected: decl_ty,
                 got: vty,
-            });
+            }
+            .at_expression(&g.init));
         }
 
         let align = crate::allocation_align(&vty, target).map_err(LowerError::Layout)?;
         let id = mb.add_global_const(g.name.clone(), expression, v.clone(), align);
+        mb.retain_const_sources(&g.init)?;
+        if let frontend::Expr::Located { annotation, .. } = &g.init {
+            mb.annotate_global_source(id, annotation)?;
+        }
         gconsts.insert(g.name.clone(), (id, vty, v));
     }
 
@@ -171,6 +177,7 @@ fn lower_function_o0(
         }
     }
 
+    fb.finish_source_mapping()?;
     fb.finish();
     Ok(())
 }
@@ -193,6 +200,24 @@ fn lower_stmt_o0(
     }
 
     match stmt {
+        frontend::Stmt::Located {
+            annotation,
+            statement,
+        } => {
+            let checkpoint = fb.source_checkpoint()?;
+            lower_stmt_o0(
+                fb,
+                env,
+                global_consts,
+                loop_stack,
+                statement,
+                func_ret_ty,
+                target,
+            )
+            .map_err(|e| e.at(annotation))?;
+            fb.annotate_source(annotation, checkpoint)?;
+            Ok(())
+        }
         frontend::Stmt::Return(opt) => {
             if *func_ret_ty == Type::Void {
                 if opt.is_some() {
@@ -209,7 +234,8 @@ fn lower_stmt_o0(
                 return Err(LowerError::TypeMismatch {
                     expected: func_ret_ty.clone(),
                     got: ty,
-                });
+                }
+                .at_expression(e));
             }
 
             fb.ret(Some(v));
@@ -232,10 +258,22 @@ fn lower_stmt_o0(
                 return Err(LowerError::TypeMismatch {
                     expected: decl_ty,
                     got: cty,
-                });
+                }
+                .at_expression(init));
             }
 
+            fb.retain_const_sources(init)?;
+            let checkpoint = if matches!(init, frontend::Expr::Located { .. }) {
+                Some(fb.source_checkpoint()?)
+            } else {
+                None
+            };
             let id = fb.const_decl(name.clone(), expression, cv.clone());
+            if let (frontend::Expr::Located { annotation, .. }, Some(checkpoint)) =
+                (init, checkpoint)
+            {
+                fb.annotate_source(annotation, checkpoint)?;
+            }
             env.insert(
                 name.clone(),
                 Binding::Const {
@@ -257,7 +295,8 @@ fn lower_stmt_o0(
                     return Err(LowerError::TypeMismatch {
                         expected: decl_ty,
                         got: vty,
-                    });
+                    }
+                    .at_expression(init_expr));
                 }
                 let slot = fb.alloca_in_entry(decl_ty.clone(), align);
                 fb.store(decl_ty.clone(), v, slot, align);
@@ -299,7 +338,8 @@ fn lower_stmt_o0(
                         return Err(LowerError::TypeMismatch {
                             expected: ty,
                             got: vty,
-                        });
+                        }
+                        .at_expression(value));
                     }
                     let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
                     fb.store(ty, v, ptr, align);
@@ -308,14 +348,7 @@ fn lower_stmt_o0(
             }
         }
 
-        frontend::Stmt::ExprStmt(frontend::Expr::Call { callee, args }) => {
-            lower_call(fb, env, global_consts, callee, args, target)?;
-            Ok(())
-        }
-        frontend::Stmt::ExprStmt(e) => {
-            let _ = lower_expr_o0(fb, env, global_consts, e, target)?;
-            Ok(())
-        }
+        frontend::Stmt::ExprStmt(e) => lower_discarded_expr(fb, env, global_consts, e, target),
 
         frontend::Stmt::If {
             cond,
@@ -327,7 +360,8 @@ fn lower_stmt_o0(
                 return Err(LowerError::TypeMismatch {
                     expected: Type::Bool,
                     got: cty,
-                });
+                }
+                .at_expression(cond));
             }
 
             let then_bb = fb.create_block("if.then");
@@ -391,7 +425,8 @@ fn lower_stmt_o0(
                 return Err(LowerError::TypeMismatch {
                     expected: Type::Bool,
                     got: cty,
-                });
+                }
+                .at_expression(cond));
             }
             fb.cbr(cv, body_bb, exit_bb);
 
@@ -442,6 +477,30 @@ fn lower_stmt_o0(
     }
 }
 
+fn lower_discarded_expr(
+    fb: &mut crate::FunctionBuilder<'_>,
+    env: &mut HashMap<String, Binding>,
+    global_consts: &ConstMap,
+    expr: &frontend::Expr,
+    target: crate::Target,
+) -> Result<(), LowerError> {
+    match expr {
+        frontend::Expr::Located {
+            annotation,
+            expression,
+        } => {
+            let checkpoint = fb.source_checkpoint()?;
+            lower_discarded_expr(fb, env, global_consts, expression, target)
+                .map_err(|e| e.at(annotation))?;
+            fb.annotate_source(annotation, checkpoint)
+        }
+        frontend::Expr::Call { callee, args } => {
+            lower_call(fb, env, global_consts, callee, args, target).map(|_| ())
+        }
+        _ => lower_expr_o0(fb, env, global_consts, expr, target).map(|_| ()),
+    }
+}
+
 fn lower_expr_o0(
     fb: &mut crate::FunctionBuilder<'_>,
     env: &mut HashMap<String, Binding>,
@@ -450,6 +509,16 @@ fn lower_expr_o0(
     target: crate::Target,
 ) -> Result<(ValueId, Type), LowerError> {
     match expr {
+        frontend::Expr::Located {
+            annotation,
+            expression,
+        } => {
+            let checkpoint = fb.source_checkpoint()?;
+            let result = lower_expr_o0(fb, env, global_consts, expression, target)
+                .map_err(|e| e.at(annotation))?;
+            fb.annotate_source(annotation, checkpoint)?;
+            Ok(result)
+        }
         frontend::Expr::NullFunction(sig) => {
             let signature = super::support::signature_to_whale(sig)?;
             let value = fb
@@ -599,25 +668,80 @@ fn eval_const_expr(
 ) -> Result<(ConstExpr, ConstValue), LowerError> {
     let expression = preserve_const_expr(expr, ctx)?;
     let value = expression
-        .evaluate(&|reference| match reference {
-            ConstRef::Global(id) => ctx
-                .global_consts
-                .values()
-                .find(|(other, _, _)| *other == id)
-                .map(|(_, ty, value)| (ty.clone(), value.clone())),
-            ConstRef::Local(id) => ctx.local_consts.and_then(|env| {
-                env.values().find_map(|binding| match binding {
-                    Binding::Const {
-                        id: other,
-                        ty,
-                        value,
-                    } if *other == id => Some((ty.clone(), value.clone())),
-                    _ => None,
-                })
-            }),
-        })
-        .map_err(LowerError::ConstantEvaluation)?;
+        .evaluate_with_error_site(
+            &|reference| match reference {
+                ConstRef::Global(id) => ctx
+                    .global_consts
+                    .values()
+                    .find(|(other, _, _)| *other == id)
+                    .map(|(_, ty, value)| (ty.clone(), value.clone())),
+                ConstRef::Local(id) => ctx.local_consts.and_then(|env| {
+                    env.values().find_map(|binding| match binding {
+                        Binding::Const {
+                            id: other,
+                            ty,
+                            value,
+                        } if *other == id => Some((ty.clone(), value.clone())),
+                        _ => None,
+                    })
+                }),
+            },
+            crate::IrLimits::default(),
+        )
+        .map_err(|(error, failed)| {
+            let error = LowerError::ConstantEvaluation(error);
+            match const_annotation_at(expr, &expression, failed) {
+                Some(annotation) => error.at(annotation),
+                None => error,
+            }
+        })?;
     Ok((expression, value))
+}
+
+/// Pair original wrappers with their preserved typed nodes. This runs only on
+/// failure; the central evaluator has already validated every branch and visited
+/// each evaluated operation once. Wrappers do not create typed expression nodes.
+fn const_annotation_at<'a>(
+    original: &'a frontend::Expr,
+    preserved: &ConstExpr,
+    failed: &ConstExpr,
+) -> Option<&'a crate::SourceAnnotation> {
+    let mut pending = vec![(original, preserved, None)];
+    while let Some((original, preserved, inherited)) = pending.pop() {
+        if let frontend::Expr::Located {
+            annotation,
+            expression,
+        } = original
+        {
+            pending.push((expression, preserved, Some(annotation)));
+            continue;
+        }
+        if std::ptr::eq(preserved, failed) {
+            return inherited;
+        }
+        match (original, &preserved.kind) {
+            (frontend::Expr::BitNot(value), ConstExprKind::Not(typed)) => {
+                pending.push((value, typed, inherited));
+            }
+            (
+                frontend::Expr::Binary { left, right, .. },
+                ConstExprKind::Binary {
+                    left: l, right: r, ..
+                },
+            )
+            | (
+                frontend::Expr::Cmp { left, right, .. },
+                ConstExprKind::Compare {
+                    left: l, right: r, ..
+                },
+            ) => {
+                pending.push((right, r, inherited));
+                pending.push((left, l, inherited));
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn preserve_const_expr(
@@ -625,6 +749,10 @@ fn preserve_const_expr(
     ctx: &ConstEvalCtx<'_>,
 ) -> Result<ConstExpr, LowerError> {
     match expr {
+        frontend::Expr::Located {
+            annotation,
+            expression,
+        } => preserve_const_expr(expression, ctx).map_err(|e| e.at(annotation)),
         frontend::Expr::NullFunction(_)
         | frontend::Expr::Call { .. }
         | frontend::Expr::FunctionRef(_) => Err(LowerError::NonConstExpr),

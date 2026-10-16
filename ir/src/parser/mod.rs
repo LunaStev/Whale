@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Bounded reader for the canonical, typed text IR (formats 3/4/5/6; canonical output 6).
+//! Bounded reader for versioned canonical typed text IR.
 mod instruction;
 mod lexer;
 mod syntax;

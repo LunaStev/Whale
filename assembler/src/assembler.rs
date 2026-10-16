@@ -1,5 +1,4 @@
 pub use crate::ast::AsmSectionKind;
-use crate::ast::AST;
 use crate::error::AsmError;
 use crate::tokens::tokenize;
 use crate::traits::ISA;
@@ -91,7 +90,27 @@ pub fn assemble_with_limits(
     isa: &impl ISA,
     limits: &AssemblyLimits,
 ) -> Result<AssemblerOutput, AsmError> {
-    let tokens = tokenize(source)?;
-    let ast: AST = isa.parse(&tokens)?;
+    assemble_named_with_limits("<input>", source, isa, limits)
+}
+/// Assemble a named UTF-8 source with filename/range diagnostics.
+pub fn assemble_named(
+    source_name: &str,
+    source: &str,
+    isa: &impl ISA,
+) -> Result<AssemblerOutput, AsmError> {
+    assemble_named_with_limits(source_name, source, isa, &AssemblyLimits::default())
+}
+pub fn assemble_named_with_limits(
+    source_name: &str,
+    source: &str,
+    isa: &impl ISA,
+    limits: &AssemblyLimits,
+) -> Result<AssemblerOutput, AsmError> {
+    let tokens = tokenize(source).map_err(|error| error.with_source_name(source_name))?;
+    let mut ast = isa
+        .parse(&tokens)
+        .map_err(|error| error.with_source_name(source_name))?;
+    ast.source_name = source_name.into();
     isa.encode_with_limits(&ast, limits)
+        .map_err(|error| ast.error_at(error, 0, None))
 }

@@ -425,7 +425,7 @@ impl<'a> Parser<'a> {
         self.expect("{")?;
         self.expect("format_version")?;
         let version: u32 = self.number()?;
-        if version != 3 && version != 4 && version != 5 && version != IR_FORMAT_VERSION {
+        if !(3..=IR_FORMAT_VERSION).contains(&version) {
             return Err(self.previous_error("unsupported IR format version"));
         }
         self.format_version = version;
@@ -454,6 +454,55 @@ impl<'a> Parser<'a> {
         while !self.eat("}") {
             self.node()?;
             match self.word()? {
+                "source_file" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let id = self.id("@s")?;
+                    let name = self.string()?;
+                    module.sources.files.push(SourceFile { id, name });
+                }
+                "original" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let id = self.number::<u64>()?;
+                    let span = if self.eat("none") {
+                        None
+                    } else {
+                        Some(SourceSpan {
+                            file: self.id("@s")?,
+                            line: self.number()?,
+                            column: self.number()?,
+                            end_line: self.number()?,
+                            end_column: self.number()?,
+                        })
+                    };
+                    module.sources.originals.push(OriginalNode { id, span });
+                }
+                "source_map" => {
+                    if self.format_version < 7 {
+                        return Err(self.error("source metadata requires IR format 7"));
+                    }
+                    let target = match self.word()? {
+                        "instruction" => SourceTarget::Instruction {
+                            function: FunctionId(self.id("@f")?),
+                            block: self.block_id()?,
+                            index: self.number()?,
+                        },
+                        "terminator" => SourceTarget::Terminator {
+                            function: FunctionId(self.id("@f")?),
+                            block: self.block_id()?,
+                        },
+                        "global" => SourceTarget::Global(GlobalId(self.id("@g")?)),
+                        _ => return Err(self.previous_error("unknown source mapping target")),
+                    };
+                    let original = self.number()?;
+                    module
+                        .sources
+                        .mappings
+                        .push(SourceMapping { target, original });
+                }
                 "global" => {
                     let id = GlobalId(self.id("@g")?);
                     let location = self.tokens[self.at].location;

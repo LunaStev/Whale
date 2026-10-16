@@ -57,6 +57,10 @@ pub enum TypeRef {
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Stmt {
+    Located {
+        annotation: crate::SourceAnnotation,
+        statement: Box<Stmt>,
+    },
     Return(Option<Expr>),
 
     ConstDecl {
@@ -92,6 +96,10 @@ pub enum Stmt {
 #[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
 #[derive(Clone, Debug)]
 pub enum Expr {
+    Located {
+        annotation: crate::SourceAnnotation,
+        expression: Box<Expr>,
+    },
     BitNot(Box<Expr>),
     FunctionRef(String),
     NullFunction(SignatureRef),

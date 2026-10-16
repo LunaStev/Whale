@@ -22,26 +22,41 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
     let mut positions = HashMap::new();
     let mut reserved = HashSet::new();
     let mut scope = None;
-    for node in &ast.items {
+    let mut constant_sites = HashMap::<String, usize>::new();
+    let mut reserved_sites = HashMap::<String, usize>::new();
+    for (node_index, node) in ast.items.iter().enumerate() {
         match node {
             ASTNode::Label(name) => {
-                let resolved = resolve_symbol_name(name, &scope)?;
+                let resolved = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
+                reserved_sites.entry(resolved.clone()).or_insert(node_index);
                 reserved.insert(resolved.clone());
                 if !name.starts_with('.') {
                     scope = Some(resolved);
                 }
             }
             ASTNode::Extern(name) => {
-                reserved.insert(resolve_symbol_name(name, &scope)?);
+                let resolved = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
+                reserved_sites.entry(resolved.clone()).or_insert(node_index);
+                reserved.insert(resolved);
             }
             ASTNode::Const { name, expr } => {
-                let name = resolve_symbol_name(name, &scope)?;
+                let name = resolve_symbol_name(name, &scope)
+                    .map_err(|error| ast.error_at(error, node_index, None))?;
                 if positions.insert(name.clone(), definitions.len()).is_some() {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate constant definition '{name}'"
-                    )));
+                    return Err(ast.error_at(
+                        AsmError::SymbolError(format!("Duplicate constant definition '{name}'")),
+                        node_index,
+                        constant_sites.get(&name).copied(),
+                    ));
                 }
-                definitions.push((name, resolve_expr_symbols(expr, &scope)?));
+                constant_sites.insert(name.clone(), node_index);
+                definitions.push((
+                    name,
+                    resolve_expr_symbols(expr, &scope)
+                        .map_err(|error| ast.error_at(error, node_index, None))?,
+                ));
             }
             _ => {}
         }
@@ -50,9 +65,15 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
     let mut ready = VecDeque::new();
     for (position, (name, expr)) in definitions.iter().enumerate() {
         if reserved.contains(name) {
-            return Err(AsmError::SymbolError(format!(
-                "Constant '{name}' conflicts with a label or extern symbol"
-            )));
+            let declaration = constant_sites[name];
+            let previous = reserved_sites[name];
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!(
+                    "Constant '{name}' conflicts with a label or extern symbol"
+                )),
+                declaration.max(previous),
+                Some(declaration.min(previous)),
+            ));
         }
         match expr {
             ExprValue::Number(_) => ready.push_back(position),
@@ -60,9 +81,13 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
                 name: dependency, ..
             } => {
                 let dependency = positions.get(dependency).ok_or_else(|| {
-                    AsmError::SymbolError(format!(
-                        "equ requires a constant expression; unresolved symbol '{dependency}'"
-                    ))
+                    ast.error_at(
+                        AsmError::SymbolError(format!(
+                            "equ requires a constant expression; unresolved symbol '{dependency}'"
+                        )),
+                        constant_sites[name],
+                        None,
+                    )
                 })?;
                 dependents[*dependency].push(position);
             }
@@ -71,10 +96,14 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
     let mut values = HashMap::new();
     while let Some(position) = ready.pop_front() {
         let (name, expr) = &definitions[position];
-        let EvaluatedExpr::Number(value) = eval_expr(expr, &values)? else {
-            return Err(AsmError::SymbolError(format!(
-                "Unresolved constant dependency for '{name}'"
-            )));
+        let EvaluatedExpr::Number(value) = eval_expr(expr, &values)
+            .map_err(|error| ast.error_at(error, constant_sites[name], None))?
+        else {
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!("Unresolved constant dependency for '{name}'")),
+                constant_sites[name],
+                None,
+            ));
         };
         values.insert(name.clone(), value);
         ready.extend(dependents[position].iter().copied());
@@ -83,9 +112,13 @@ fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
         .iter()
         .find(|(name, _)| !values.contains_key(name))
     {
-        return Err(AsmError::SymbolError(format!(
-            "Constant dependency cycle prevents resolving '{name}'"
-        )));
+        return Err(ast.error_at(
+            AsmError::SymbolError(format!(
+                "Constant dependency cycle prevents resolving '{name}'"
+            )),
+            constant_sites[name],
+            None,
+        ));
     }
     Ok(values)
 }
@@ -140,7 +173,12 @@ fn encode_once(
     let mut instruction_offsets = vec![0; ast.items.len()];
     let mut extern_symbols = HashSet::<String>::new();
     let mut global_symbols = HashSet::<String>::new();
+    let mut label_sites = HashMap::<String, usize>::new();
+    let mut extern_sites = HashMap::<String, usize>::new();
+    let mut global_sites = HashMap::<String, usize>::new();
+    let mut relocation_sites = HashMap::new();
     let mut symbol_metadata = HashMap::new();
+    let mut metadata_sites = HashMap::<String, usize>::new();
 
     sections.push(AsmSection {
         kind: AsmSectionKind::Text,
@@ -155,221 +193,252 @@ fn encode_once(
     let mut current_nonlocal_label: Option<String> = None;
 
     for (node_index, node) in ast.items.iter().enumerate() {
-        match node {
-            ASTNode::Section(name) | ASTNode::SectionAttributes { name, .. } => {
-                let explicit = match node {
-                    ASTNode::SectionAttributes { kind, .. } => Some(*kind),
-                    _ => None,
-                };
-                if let Some(idx) = sections.iter().position(|s| s.name == *name) {
-                    if explicit.is_some_and(|kind| kind != sections[idx].kind) {
-                        return Err(AsmError::EncodeError(format!(
-                            "Incompatible section redeclaration '{name}'"
-                        )));
-                    }
-                    current_section_idx = idx;
-                } else {
-                    let default = AsmSectionKind::default_for_name(name);
-                    let kind = explicit.unwrap_or(default);
-                    if matches!(name.as_str(), ".text" | ".data" | ".rodata" | ".bss")
-                        && kind != default
-                    {
-                        return Err(AsmError::EncodeError(format!(
-                            "Standard section '{name}' has incompatible kind"
-                        )));
-                    }
-                    sections.push(AsmSection {
-                        name: name.clone(),
-                        kind,
-                        align: kind.default_alignment(),
-                        data: Vec::new(),
-                        zero_fill: 0,
-                        relocs: Vec::new(),
-                    });
-                    current_section_idx = sections.len() - 1;
-                }
-            }
-            ASTNode::Global(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                global_symbols.insert(resolved);
-            }
-            ASTNode::Extern(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if defined_labels.contains(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Extern symbol '{}' was already defined in this file",
-                        resolved
-                    )));
-                }
-                if !extern_symbols.insert(resolved.clone()) {
-                    continue;
-                }
-                symbols.push(AsmSymbol {
-                    kind: crate::SymbolKind::NoType,
-                    size: 0,
-                    visibility: crate::SymbolVisibility::Default,
-                    name: resolved,
-                    section_index: None,
-                    offset: 0,
-                    is_global: true,
-                });
-            }
-            ASTNode::SymbolMetadata {
-                name,
-                kind,
-                size,
-                visibility,
-            } => {
-                let name = resolve_symbol_name(name, &current_nonlocal_label)?;
-                let size = resolve_expr_symbols(size, &current_nonlocal_label)?;
-                let EvaluatedExpr::Number(size) = eval_expr(&size, consts)? else {
-                    return Err(AsmError::SymbolError(format!(
-                        "symbol '{name}' size must be a constant"
-                    )));
-                };
-                let size = u64::try_from(size).map_err(|_| {
-                    AsmError::SymbolError(format!("symbol '{name}' size must be a nonnegative u64"))
-                })?;
-                if symbol_metadata
-                    .insert(name.clone(), (*kind, size, *visibility))
-                    .is_some()
-                {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate symbol metadata for '{name}'"
-                    )));
-                }
-            }
-            ASTNode::Const { .. } => {}
-            ASTNode::Label(name) => {
-                let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
-                if !name.starts_with('.') {
-                    current_nonlocal_label = Some(resolved.clone());
-                }
-                if extern_symbols.contains(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Label '{}' conflicts with extern declaration",
-                        resolved
-                    )));
-                }
-                if consts.contains_key(&resolved) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Label '{}' conflicts with constant definition",
-                        resolved
-                    )));
-                }
-                if !defined_labels.insert(resolved.clone()) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Duplicate label definition '{}'",
-                        resolved
-                    )));
-                }
-                let section = &sections[current_section_idx];
-                let offset = (section.data.len() as u64)
-                    .checked_add(section.zero_fill)
-                    .ok_or_else(|| AsmError::EncodeError("section size overflow".into()))?;
-                label_locs.insert(resolved.clone(), (current_section_idx, offset));
-                jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
-                symbols.push(AsmSymbol {
-                    kind: crate::SymbolKind::NoType,
-                    size: 0,
-                    visibility: crate::SymbolVisibility::Default,
-                    name: resolved.clone(),
-                    section_index: Some(current_section_idx),
-                    offset,
-                    is_global: global_symbols.contains(&resolved),
-                });
-            }
-            ASTNode::Instruction(ins) => {
-                let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
-                let inst = resolve_instruction_consts(&scoped, consts)?;
-                let sec = &mut sections[current_section_idx];
-                if sec.kind == AsmSectionKind::Bss {
-                    return Err(AsmError::EncodeError(
-                        "instructions are not valid in BSS".into(),
-                    ));
-                }
-                let cur_off = sec.data.len();
-                let mut instruction_bytes = Vec::new();
-                let mut instruction_relocs = Vec::new();
-                encode_instruction(
-                    &inst,
-                    &mut instruction_bytes,
-                    &mut instruction_relocs,
-                    current_section_idx,
-                    jump_hint_layout
-                        .map(|layout| layout.instruction_offsets[node_index])
-                        .unwrap_or(cur_off),
-                    jump_hint_layout
-                        .map(|layout| &layout.labels)
-                        .unwrap_or(&jump_known_locs),
-                    BranchRelaxation {
-                        previous_len: jump_hint_layout
-                            .map(|layout| layout.instruction_lengths[node_index])
-                            .unwrap_or(0),
-                        force_near: forced_near.contains(&node_index),
-                    },
-                )?;
-                // Alignment padding can offset an earlier shrink. Once a short
-                // branch must grow, keep it near: each branch changes size at most
-                // twice, so relaxation cannot oscillate around alignment edges.
-                if jump_hint_layout
-                    .is_some_and(|layout| layout.instruction_lengths[node_index] == 2)
-                    && instruction_bytes.len() > 2
-                    && (inst.mnemonic == "jmp" || condition_code(&inst.mnemonic).is_some())
-                {
-                    forced_near.insert(node_index);
-                }
-                instruction_lengths[node_index] = instruction_bytes.len();
-                instruction_offsets[node_index] = cur_off;
-                reserve_output(
-                    &mut sec.data,
-                    instruction_bytes.len(),
-                    &mut materialized,
-                    limits,
-                )?;
-                sec.data.extend_from_slice(&instruction_bytes);
-                for reloc in &mut instruction_relocs {
-                    reloc.offset += cur_off;
-                }
-                sec.relocs.extend(instruction_relocs);
-            }
-            ASTNode::Directive(dir) => {
-                let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
-                let sec = &mut sections[current_section_idx];
-                if scoped.name == "align" {
-                    let alignment = alignment_value(&scoped, consts)?;
-                    sec.align = sec.align.max(alignment);
-                    let offset = (sec.data.len() as u64)
-                        .checked_add(sec.zero_fill)
-                        .ok_or_else(|| AsmError::EncodeError("Section size overflow".into()))?;
-                    let padding = offset.wrapping_neg() & (alignment - 1);
-                    offset
-                        .checked_add(padding)
-                        .ok_or_else(|| AsmError::EncodeError("Alignment size overflow".into()))?;
-                    if sec.kind == AsmSectionKind::Bss {
-                        sec.zero_fill = sec.zero_fill.checked_add(padding).ok_or_else(|| {
-                            AsmError::EncodeError("BSS alignment overflow".into())
-                        })?;
+        let original_section = current_section_idx;
+        let relocation_start = sections[original_section].relocs.len();
+        (|| -> Result<(), AsmError> {
+            match node {
+                ASTNode::Section(name) | ASTNode::SectionAttributes { name, .. } => {
+                    let explicit = match node {
+                        ASTNode::SectionAttributes { kind, .. } => Some(*kind),
+                        _ => None,
+                    };
+                    if let Some(idx) = sections.iter().position(|s| s.name == *name) {
+                        if explicit.is_some_and(|kind| kind != sections[idx].kind) {
+                            return Err(AsmError::EncodeError(format!(
+                                "Incompatible section redeclaration '{name}'"
+                            )));
+                        }
+                        current_section_idx = idx;
                     } else {
-                        let extra = usize::try_from(padding).map_err(|_| {
-                            AsmError::EncodeError("Alignment exceeds host capacity".into())
-                        })?;
-                        reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
-                        let fill = if sec.kind == AsmSectionKind::Text {
-                            0x90
-                        } else {
-                            0
-                        };
-                        sec.data.resize(sec.data.len() + extra, fill);
+                        let default = AsmSectionKind::default_for_name(name);
+                        let kind = explicit.unwrap_or(default);
+                        if matches!(name.as_str(), ".text" | ".data" | ".rodata" | ".bss")
+                            && kind != default
+                        {
+                            return Err(AsmError::EncodeError(format!(
+                                "Standard section '{name}' has incompatible kind"
+                            )));
+                        }
+                        sections.push(AsmSection {
+                            name: name.clone(),
+                            kind,
+                            align: kind.default_alignment(),
+                            data: Vec::new(),
+                            zero_fill: 0,
+                            relocs: Vec::new(),
+                        });
+                        current_section_idx = sections.len() - 1;
                     }
-                } else if sec.kind == AsmSectionKind::Bss {
-                    encode_bss_directive(&scoped, sec, consts)?;
-                } else {
-                    let extra = directive_size(&scoped, consts)?;
-                    reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
-                    encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
+                }
+                ASTNode::Global(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    global_sites.entry(resolved.clone()).or_insert(node_index);
+                    global_symbols.insert(resolved);
+                }
+                ASTNode::Extern(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    if defined_labels.contains(&resolved) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Extern symbol '{}' was already defined in this file",
+                                resolved
+                            )),
+                            node_index,
+                            label_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    extern_sites.entry(resolved.clone()).or_insert(node_index);
+                    if extern_symbols.insert(resolved.clone()) {
+                        symbols.push(AsmSymbol {
+                            kind: crate::SymbolKind::NoType,
+                            size: 0,
+                            visibility: crate::SymbolVisibility::Default,
+                            name: resolved,
+                            section_index: None,
+                            offset: 0,
+                            is_global: true,
+                        });
+                    }
+                }
+                ASTNode::SymbolMetadata {
+                    name,
+                    kind,
+                    size,
+                    visibility,
+                } => {
+                    let name = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    let size = resolve_expr_symbols(size, &current_nonlocal_label)?;
+                    let EvaluatedExpr::Number(size) = eval_expr(&size, consts)? else {
+                        return Err(AsmError::SymbolError(format!(
+                            "symbol '{name}' size must be a constant"
+                        )));
+                    };
+                    let size = u64::try_from(size).map_err(|_| {
+                        AsmError::SymbolError(format!(
+                            "symbol '{name}' size must be a nonnegative u64"
+                        ))
+                    })?;
+                    if symbol_metadata
+                        .insert(name.clone(), (*kind, size, *visibility))
+                        .is_some()
+                    {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Duplicate symbol metadata for '{name}'"
+                            )),
+                            node_index,
+                            metadata_sites.get(&name).copied(),
+                        ));
+                    }
+                    metadata_sites.insert(name, node_index);
+                }
+                ASTNode::Const { .. } => {}
+                ASTNode::Label(name) => {
+                    let resolved = resolve_symbol_name(name, &current_nonlocal_label)?;
+                    if !name.starts_with('.') {
+                        current_nonlocal_label = Some(resolved.clone());
+                    }
+                    if extern_symbols.contains(&resolved) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Label '{}' conflicts with extern declaration",
+                                resolved
+                            )),
+                            node_index,
+                            extern_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    if consts.contains_key(&resolved) {
+                        return Err(AsmError::SymbolError(format!(
+                            "Label '{}' conflicts with constant definition",
+                            resolved
+                        )));
+                    }
+                    if !defined_labels.insert(resolved.clone()) {
+                        return Err(ast.error_at(
+                            AsmError::SymbolError(format!(
+                                "Duplicate label definition '{}'",
+                                resolved
+                            )),
+                            node_index,
+                            label_sites.get(&resolved).copied(),
+                        ));
+                    }
+                    label_sites.insert(resolved.clone(), node_index);
+                    let section = &sections[current_section_idx];
+                    let offset = (section.data.len() as u64)
+                        .checked_add(section.zero_fill)
+                        .ok_or_else(|| AsmError::EncodeError("section size overflow".into()))?;
+                    label_locs.insert(resolved.clone(), (current_section_idx, offset));
+                    jump_known_locs.insert(resolved.clone(), (current_section_idx, offset));
+                    symbols.push(AsmSymbol {
+                        kind: crate::SymbolKind::NoType,
+                        size: 0,
+                        visibility: crate::SymbolVisibility::Default,
+                        name: resolved.clone(),
+                        section_index: Some(current_section_idx),
+                        offset,
+                        is_global: global_symbols.contains(&resolved),
+                    });
+                }
+                ASTNode::Instruction(ins) => {
+                    let scoped = resolve_instruction_symbols(ins, &current_nonlocal_label)?;
+                    let inst = resolve_instruction_consts(&scoped, consts)?;
+                    let sec = &mut sections[current_section_idx];
+                    if sec.kind == AsmSectionKind::Bss {
+                        return Err(AsmError::EncodeError(
+                            "instructions are not valid in BSS".into(),
+                        ));
+                    }
+                    let cur_off = sec.data.len();
+                    let mut instruction_bytes = Vec::new();
+                    let mut instruction_relocs = Vec::new();
+                    encode_instruction(
+                        &inst,
+                        &mut instruction_bytes,
+                        &mut instruction_relocs,
+                        current_section_idx,
+                        jump_hint_layout
+                            .map(|layout| layout.instruction_offsets[node_index])
+                            .unwrap_or(cur_off),
+                        jump_hint_layout
+                            .map(|layout| &layout.labels)
+                            .unwrap_or(&jump_known_locs),
+                        BranchRelaxation {
+                            previous_len: jump_hint_layout
+                                .map(|layout| layout.instruction_lengths[node_index])
+                                .unwrap_or(0),
+                            force_near: forced_near.contains(&node_index),
+                        },
+                    )?;
+                    // Alignment padding can offset an earlier shrink. Once a short
+                    // branch must grow, keep it near: each branch changes size at most
+                    // twice, so relaxation cannot oscillate around alignment edges.
+                    if jump_hint_layout
+                        .is_some_and(|layout| layout.instruction_lengths[node_index] == 2)
+                        && instruction_bytes.len() > 2
+                        && (inst.mnemonic == "jmp" || condition_code(&inst.mnemonic).is_some())
+                    {
+                        forced_near.insert(node_index);
+                    }
+                    instruction_lengths[node_index] = instruction_bytes.len();
+                    instruction_offsets[node_index] = cur_off;
+                    reserve_output(
+                        &mut sec.data,
+                        instruction_bytes.len(),
+                        &mut materialized,
+                        limits,
+                    )?;
+                    sec.data.extend_from_slice(&instruction_bytes);
+                    for reloc in &mut instruction_relocs {
+                        reloc.offset += cur_off;
+                    }
+                    sec.relocs.extend(instruction_relocs);
+                }
+                ASTNode::Directive(dir) => {
+                    let scoped = resolve_directive_symbols(dir, &current_nonlocal_label)?;
+                    let sec = &mut sections[current_section_idx];
+                    if scoped.name == "align" {
+                        let alignment = alignment_value(&scoped, consts)?;
+                        sec.align = sec.align.max(alignment);
+                        let offset = (sec.data.len() as u64)
+                            .checked_add(sec.zero_fill)
+                            .ok_or_else(|| AsmError::EncodeError("Section size overflow".into()))?;
+                        let padding = offset.wrapping_neg() & (alignment - 1);
+                        offset.checked_add(padding).ok_or_else(|| {
+                            AsmError::EncodeError("Alignment size overflow".into())
+                        })?;
+                        if sec.kind == AsmSectionKind::Bss {
+                            sec.zero_fill =
+                                sec.zero_fill.checked_add(padding).ok_or_else(|| {
+                                    AsmError::EncodeError("BSS alignment overflow".into())
+                                })?;
+                        } else {
+                            let extra = usize::try_from(padding).map_err(|_| {
+                                AsmError::EncodeError("Alignment exceeds host capacity".into())
+                            })?;
+                            reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
+                            let fill = if sec.kind == AsmSectionKind::Text {
+                                0x90
+                            } else {
+                                0
+                            };
+                            sec.data.resize(sec.data.len() + extra, fill);
+                        }
+                    } else if sec.kind == AsmSectionKind::Bss {
+                        encode_bss_directive(&scoped, sec, consts)?;
+                    } else {
+                        let extra = directive_size(&scoped, consts)?;
+                        reserve_output(&mut sec.data, extra, &mut materialized, limits)?;
+                        encode_directive(&scoped, &mut sec.data, &mut sec.relocs, consts)?;
+                    }
                 }
             }
+            Ok(())
+        })()
+        .map_err(|error| ast.error_at(error, node_index, None))?;
+        for relocation in relocation_start..sections[original_section].relocs.len() {
+            relocation_sites.insert((original_section, relocation), node_index);
         }
     }
 
@@ -380,17 +449,25 @@ fn encode_once(
         .filter(|name| !defined_labels.contains(*name) && !extern_symbols.contains(*name))
         .min()
     {
-        return Err(AsmError::SymbolError(format!(
-            "Global symbol '{name}' has no definition or extern declaration"
-        )));
+        return Err(ast.error_at(
+            AsmError::SymbolError(format!(
+                "Global symbol '{name}' has no definition or extern declaration"
+            )),
+            global_sites[name],
+            None,
+        ));
     }
 
     let symbol_names: HashSet<_> = symbols.iter().map(|s| &s.name).collect();
     for name in symbol_metadata.keys() {
         if !symbol_names.contains(name) {
-            return Err(AsmError::SymbolError(format!(
-                "Metadata symbol '{name}' has no label or extern declaration"
-            )));
+            return Err(ast.error_at(
+                AsmError::SymbolError(format!(
+                    "Metadata symbol '{name}' has no label or extern declaration"
+                )),
+                metadata_sites[name],
+                None,
+            ));
         }
     }
     for sym in &mut symbols {
@@ -404,10 +481,14 @@ fn encode_once(
                     .checked_add(section.zero_fill)
                     .ok_or_else(|| AsmError::SymbolError("symbol section size overflow".into()))?;
                 if sym.offset.checked_add(*size).is_none_or(|end| end > extent) {
-                    return Err(AsmError::SymbolError(format!(
-                        "Symbol '{}' size exceeds its section",
-                        sym.name
-                    )));
+                    return Err(ast.error_at(
+                        AsmError::SymbolError(format!(
+                            "Symbol '{}' size exceeds its section",
+                            sym.name
+                        )),
+                        metadata_sites[&sym.name],
+                        None,
+                    ));
                 }
             }
         }
@@ -416,13 +497,10 @@ fn encode_once(
         }
     }
 
-    for sec in &sections {
-        for reloc in &sec.relocs {
+    for (section_index, sec) in sections.iter().enumerate() {
+        for (relocation_index, reloc) in sec.relocs.iter().enumerate() {
             if !defined_labels.contains(&reloc.symbol) && !extern_symbols.contains(&reloc.symbol) {
-                return Err(AsmError::SymbolError(format!(
-                    "Undefined symbol '{}' (define it, declare with extern, or define with equ)",
-                    reloc.symbol
-                )));
+                return Err(ast.error_at(AsmError::SymbolError(format!("Undefined symbol '{}' (define it, declare with extern, or define with equ)",reloc.symbol)),relocation_sites[&(section_index,relocation_index)],None));
             }
         }
     }

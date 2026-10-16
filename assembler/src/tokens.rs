@@ -1,4 +1,4 @@
-use crate::error::AsmError;
+use crate::error::{AsmError, SourceSpan};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -15,403 +15,263 @@ pub enum TokenKind {
     Divide,
     Newline,
 }
-
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     /// UTF-8 byte offset into the original source.
     pub position: usize,
+    pub end_position: usize,
     pub line: usize,
-    /// One-based Unicode scalar column; tabs count as one column.
+    /// One-based Unicode-scalar column; tabs count as one column.
     pub column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
 }
-
-fn lexer_err<S: Into<String>>(msg: S, line: usize, column: usize) -> AsmError {
-    AsmError::LexerError(format!(
-        "{} at line {}, column {}",
-        msg.into(),
-        line,
-        column
-    ))
-}
-
-pub fn tokenize(src: &str) -> Result<Vec<Token>, AsmError> {
-    let mut chars = src.chars().peekable();
-    let mut tokens = Vec::new();
-
-    let mut pos = 0usize;
-    let mut line = 1usize;
-    let mut column = 1usize;
-
-    while let Some(&ch) = chars.peek() {
-        match ch {
-            ';' => {
-                while let Some(&c) = chars.peek() {
-                    if c == '\n' || c == '\r' {
-                        break;
-                    }
-                    chars.next();
-                    pos += c.len_utf8();
-                    column += 1;
-                }
-            }
-
-            ' ' | '\t' => {
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '\n' | '\r' => {
-                tokens.push(Token {
-                    kind: TokenKind::Newline,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                if ch == '\r' && chars.peek() == Some(&'\n') {
-                    chars.next();
-                    pos += 1;
-                }
-                line += 1;
-                column = 1;
-            }
-
-            ',' => {
-                tokens.push(Token {
-                    kind: TokenKind::Comma,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            ':' => {
-                tokens.push(Token {
-                    kind: TokenKind::Colon,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '[' => {
-                tokens.push(Token {
-                    kind: TokenKind::LBracket,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            ']' => {
-                tokens.push(Token {
-                    kind: TokenKind::RBracket,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '+' => {
-                tokens.push(Token {
-                    kind: TokenKind::Plus,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '-' => {
-                tokens.push(Token {
-                    kind: TokenKind::Minus,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '*' => {
-                tokens.push(Token {
-                    kind: TokenKind::Multiply,
-                    position: pos,
-                    line,
-                    column,
-                });
-                chars.next();
-                pos += 1;
-                column += 1;
-            }
-
-            '"' => {
-                let start_pos = pos;
-                let start_line = line;
-                let start_col = column;
-
-                chars.next();
-                pos += 1;
-                column += 1;
-
-                let mut s = Vec::new();
-                let mut closed = false;
-                // Multiline quoted strings preserve their source bytes. CRLF is
-                // one display line, as are lone CR and LF.
-                while let Some(c) = chars.next() {
-                    pos += c.len_utf8();
-                    if c == '"' {
-                        column += 1;
-                        closed = true;
-                        break;
-                    }
-                    if c == '\\' {
-                        let escape_line = line;
-                        let escape_column = column;
-                        column += 1;
-                        let escaped = chars.next().ok_or_else(|| {
-                            lexer_err("Truncated escape", escape_line, escape_column)
-                        })?;
-                        pos += escaped.len_utf8();
-                        column += 1;
-                        let byte = match escaped {
-                            '"' => b'"',
-                            '\\' => b'\\',
-                            'n' => b'\n',
-                            'r' => b'\r',
-                            't' => b'\t',
-                            '0' => 0,
-                            'x' => {
-                                let mut value = 0;
-                                for _ in 0..2 {
-                                    let digit = chars.next().ok_or_else(|| {
-                                        lexer_err(
-                                            "Truncated byte escape; expected two hex digits",
-                                            escape_line,
-                                            escape_column,
-                                        )
-                                    })?;
-                                    pos += digit.len_utf8();
-                                    column += 1;
-                                    let digit = digit
-                                        .to_digit(16)
-                                        .filter(|_| digit.is_ascii_hexdigit())
-                                        .ok_or_else(|| {
-                                            lexer_err(
-                                                "Invalid byte escape; expected two hex digits",
-                                                escape_line,
-                                                escape_column,
-                                            )
-                                        })?;
-                                    value = value * 16 + digit as u8;
-                                }
-                                value
-                            }
-                            _ => {
-                                return Err(lexer_err(
-                                    "Unknown string escape",
-                                    escape_line,
-                                    escape_column,
-                                ))
-                            }
-                        };
-                        s.push(byte);
-                        continue;
-                    }
-                    let mut encoded = [0; 4];
-                    s.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
-                    if c == '\r' || c == '\n' {
-                        if c == '\r' && chars.peek() == Some(&'\n') {
-                            chars.next();
-                            pos += 1;
-                            s.push(b'\n');
-                        }
-                        line += 1;
-                        column = 1;
-                    } else {
-                        column += 1;
-                    }
-                }
-                if !closed {
-                    return Err(lexer_err(
-                        "Unterminated string literal",
-                        start_line,
-                        start_col,
-                    ));
-                }
-
-                tokens.push(Token {
-                    kind: TokenKind::StringLiteral(s),
-                    position: start_pos,
-                    line: start_line,
-                    column: start_col,
-                });
-            }
-
-            c if c.is_ascii_digit() => {
-                let start_pos = pos;
-                let start_line = line;
-                let start_col = column;
-                let mut n = String::new();
-
-                if ch == '0' {
-                    let mut look = chars.clone();
-                    look.next();
-                    if let Some(radix_mark) = look.next() {
-                        if radix_mark == 'x' || radix_mark == 'X' {
-                            chars.next();
-                            chars.next();
-                            pos += 2;
-                            column += 2;
-
-                            while let Some(&d) = chars.peek() {
-                                if d.is_ascii_hexdigit() {
-                                    n.push(d);
-                                    chars.next();
-                                    pos += 1;
-                                    column += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            if n.is_empty() {
-                                return Err(lexer_err("Invalid hex number", start_line, start_col));
-                            }
-                            let parsed = i128::from_str_radix(&n, 16).map_err(|_| {
-                                lexer_err("Hex number out of range", start_line, start_col)
-                            })?;
-                            if parsed > u64::MAX as i128 {
-                                return Err(lexer_err(
-                                    "Number exceeds unsigned 64-bit range",
-                                    start_line,
-                                    start_col,
-                                ));
-                            }
-                            tokens.push(Token {
-                                kind: TokenKind::Number(parsed),
-                                position: start_pos,
-                                line: start_line,
-                                column: start_col,
-                            });
-                            continue;
-                        } else if radix_mark == 'b' || radix_mark == 'B' {
-                            chars.next();
-                            chars.next();
-                            pos += 2;
-                            column += 2;
-
-                            while let Some(&d) = chars.peek() {
-                                if d == '0' || d == '1' {
-                                    n.push(d);
-                                    chars.next();
-                                    pos += 1;
-                                    column += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            if n.is_empty() {
-                                return Err(lexer_err(
-                                    "Invalid binary number",
-                                    start_line,
-                                    start_col,
-                                ));
-                            }
-                            let parsed = i128::from_str_radix(&n, 2).map_err(|_| {
-                                lexer_err("Binary number out of range", start_line, start_col)
-                            })?;
-                            if parsed > u64::MAX as i128 {
-                                return Err(lexer_err(
-                                    "Number exceeds unsigned 64-bit range",
-                                    start_line,
-                                    start_col,
-                                ));
-                            }
-                            tokens.push(Token {
-                                kind: TokenKind::Number(parsed),
-                                position: start_pos,
-                                line: start_line,
-                                column: start_col,
-                            });
-                            continue;
-                        }
-                    }
-                }
-
-                while let Some(&d) = chars.peek() {
-                    if d.is_ascii_digit() {
-                        n.push(d);
-                        chars.next();
-                        pos += 1;
-                        column += 1;
-                    } else {
-                        break;
-                    }
-                }
-                let parsed = n
-                    .parse::<i128>()
-                    .map_err(|_| lexer_err("Decimal number out of range", start_line, start_col))?;
-                if parsed > u64::MAX as i128 {
-                    return Err(lexer_err(
-                        "Number exceeds unsigned 64-bit range",
-                        start_line,
-                        start_col,
-                    ));
-                }
-                tokens.push(Token {
-                    kind: TokenKind::Number(parsed),
-                    position: start_pos,
-                    line: start_line,
-                    column: start_col,
-                });
-            }
-
-            c if c.is_alphanumeric() || c == '_' || c == '.' => {
-                let start_pos = pos;
-                let start_line = line;
-                let start_col = column;
-                let mut id = String::new();
-
-                while let Some(&d) = chars.peek() {
-                    if d.is_alphanumeric() || d == '_' || d == '.' {
-                        id.push(d);
-                        chars.next();
-                        pos += d.len_utf8();
-                        column += 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                tokens.push(Token {
-                    kind: TokenKind::Identifier(id),
-                    position: start_pos,
-                    line: start_line,
-                    column: start_col,
-                });
-            }
-
-            _ => return Err(lexer_err(format!("Unexpected char '{}'", ch), line, column)),
+impl Token {
+    pub fn span(&self) -> SourceSpan {
+        SourceSpan {
+            start: self.position,
+            end: self.end_position,
+            line: self.line,
+            column: self.column,
         }
     }
-
+}
+#[derive(Clone, Copy)]
+struct Mark {
+    position: usize,
+    line: usize,
+    column: usize,
+}
+struct Cursor<'a> {
+    source: &'a str,
+    position: usize,
+    line: usize,
+    column: usize,
+    previous_cr: bool,
+}
+impl<'a> Cursor<'a> {
+    fn mark(&self) -> Mark {
+        Mark {
+            position: self.position,
+            line: self.line,
+            column: self.column,
+        }
+    }
+    fn peek(&self) -> Option<char> {
+        self.source[self.position..].chars().next()
+    }
+    fn bump(&mut self) -> Option<char> {
+        let ch = self.peek()?;
+        self.position += ch.len_utf8();
+        match ch {
+            '\r' => {
+                self.line += 1;
+                self.column = 1;
+                self.previous_cr = true;
+            }
+            '\n' => {
+                if !self.previous_cr {
+                    self.line += 1;
+                }
+                self.column = 1;
+                self.previous_cr = false;
+            }
+            _ => {
+                self.column += 1;
+                self.previous_cr = false;
+            }
+        }
+        Some(ch)
+    }
+    fn token(&self, kind: TokenKind, start: Mark) -> Token {
+        Token {
+            kind,
+            position: start.position,
+            end_position: self.position,
+            line: start.line,
+            column: start.column,
+            end_line: self.line,
+            end_column: self.column,
+        }
+    }
+    fn error(&self, msg: &str, start: Mark) -> AsmError {
+        let end = if self.position > start.position {
+            self.position
+        } else {
+            self.position + self.peek().map_or(0, char::len_utf8)
+        };
+        AsmError::LexerError(msg.into()).at(
+            "<input>",
+            SourceSpan {
+                start: start.position,
+                end,
+                line: start.line,
+                column: start.column,
+            },
+            None,
+        )
+    }
+}
+pub fn tokenize(source: &str) -> Result<Vec<Token>, AsmError> {
+    let mut c = Cursor {
+        source,
+        position: 0,
+        line: 1,
+        column: 1,
+        previous_cr: false,
+    };
+    let mut tokens = Vec::new();
+    while let Some(ch) = c.peek() {
+        let start = c.mark();
+        let kind = match ch {
+            ';' => {
+                while c.peek().is_some_and(|ch| ch != '\n' && ch != '\r') {
+                    c.bump();
+                }
+                continue;
+            }
+            ' ' | '\t' => {
+                c.bump();
+                continue;
+            }
+            '\n' | '\r' => {
+                c.bump();
+                if ch == '\r' && c.peek() == Some('\n') {
+                    c.bump();
+                }
+                TokenKind::Newline
+            }
+            ',' => {
+                c.bump();
+                TokenKind::Comma
+            }
+            ':' => {
+                c.bump();
+                TokenKind::Colon
+            }
+            '[' => {
+                c.bump();
+                TokenKind::LBracket
+            }
+            ']' => {
+                c.bump();
+                TokenKind::RBracket
+            }
+            '+' => {
+                c.bump();
+                TokenKind::Plus
+            }
+            '-' => {
+                c.bump();
+                TokenKind::Minus
+            }
+            '*' => {
+                c.bump();
+                TokenKind::Multiply
+            }
+            '"' => {
+                c.bump();
+                let mut bytes = Vec::new();
+                loop {
+                    let at = c.mark();
+                    let ch = c
+                        .bump()
+                        .ok_or_else(|| c.error("Unterminated string literal", start))?;
+                    match ch {
+                        '"' => break,
+                        '\\' => {
+                            let escape = c.bump().ok_or_else(|| c.error("Truncated escape", at))?;
+                            let byte = match escape {
+                                '"' => b'"',
+                                '\\' => b'\\',
+                                'n' => b'\n',
+                                'r' => b'\r',
+                                't' => b'\t',
+                                '0' => 0,
+                                'x' => {
+                                    let mut value = 0;
+                                    for _ in 0..2 {
+                                        let digit = c.bump().ok_or_else(|| {
+                                            c.error(
+                                                "Truncated byte escape; expected two hex digits",
+                                                at,
+                                            )
+                                        })?;
+                                        let digit = digit
+                                            .to_digit(16)
+                                            .filter(|_| digit.is_ascii_hexdigit())
+                                            .ok_or_else(|| {
+                                                c.error(
+                                                    "Invalid byte escape; expected two hex digits",
+                                                    at,
+                                                )
+                                            })?;
+                                        value = value * 16 + digit as u8;
+                                    }
+                                    value
+                                }
+                                _ => return Err(c.error("Unknown string escape", at)),
+                            };
+                            bytes.push(byte);
+                        }
+                        _ => {
+                            let mut utf8 = [0; 4];
+                            bytes.extend_from_slice(ch.encode_utf8(&mut utf8).as_bytes());
+                        }
+                    }
+                }
+                TokenKind::StringLiteral(bytes)
+            }
+            ch if ch.is_ascii_digit() => {
+                let rest = &source[c.position..];
+                let radix = if rest.starts_with("0x") || rest.starts_with("0X") {
+                    16
+                } else if rest.starts_with("0b") || rest.starts_with("0B") {
+                    2
+                } else {
+                    10
+                };
+                if radix != 10 {
+                    c.bump();
+                    c.bump();
+                }
+                let digits = c.position;
+                while c.peek().is_some_and(|ch| match radix {
+                    16 => ch.is_ascii_hexdigit(),
+                    2 => matches!(ch, '0' | '1'),
+                    _ => ch.is_ascii_digit(),
+                }) {
+                    c.bump();
+                }
+                if c.position == digits {
+                    return Err(c.error(
+                        if radix == 16 {
+                            "Invalid hex number"
+                        } else {
+                            "Invalid binary number"
+                        },
+                        start,
+                    ));
+                }
+                let number = i128::from_str_radix(&source[digits..c.position], radix)
+                    .ok()
+                    .filter(|n| *n <= u64::MAX as i128)
+                    .ok_or_else(|| c.error("Number exceeds unsigned 64-bit range", start))?;
+                TokenKind::Number(number)
+            }
+            ch if ch.is_alphanumeric() || ch == '_' || ch == '.' => {
+                while c
+                    .peek()
+                    .is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '.')
+                {
+                    c.bump();
+                }
+                TokenKind::Identifier(source[start.position..c.position].into())
+            }
+            _ => return Err(c.error(&format!("Unexpected char '{ch}'"), start)),
+        };
+        tokens.push(c.token(kind, start));
+    }
     Ok(tokens)
 }

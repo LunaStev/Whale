@@ -46,6 +46,7 @@ pub enum VerifyError {
         global: crate::GlobalId,
         reason: crate::GlobalStorageError,
     },
+    SourceMetadata(crate::SourceMetadataError),
     ResourceLimit(crate::LimitError),
     ForbiddenUndef {
         func: String,
@@ -214,6 +215,7 @@ pub fn verify_module_with_stats(
     limits: crate::IrLimits,
 ) -> Result<VerificationStats, VerifyError> {
     crate::limits::check_module(m, limits).map_err(VerifyError::ResourceLimit)?;
+    m.sources.validate(m).map_err(VerifyError::SourceMetadata)?;
     let target = crate::Target::lookup(&m.target).map_err(VerifyError::Target)?;
     target
         .validate_layout(m.datalayout)

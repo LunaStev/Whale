@@ -594,3 +594,28 @@ fn callable_metadata_and_copied_fragments_use_the_shared_memory_budget() {
         matches!(interpret_with_options(&m, FunctionId(8), &[], InterpreterOptions { memory_limits: MemoryLimits { max_pointer_fragments: 15, ..Default::default() }, ..Default::default() }), Err(InterpreterError::MemoryLimit { site, resource: MemoryResource::PointerFragments, limit: 15 }) if site.function == FunctionId(8) && site.instruction == 10)
     );
 }
+
+// Existing semantic assertions intentionally inspect the preserved leaf cause.
+fn interpret(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret(module, function, args).map_err(InterpreterError::into_root_cause)
+}
+fn interpret_with_options(
+    module: &Module,
+    function: FunctionId,
+    args: &[ConstValue],
+    options: InterpreterOptions,
+) -> Result<InterpreterResult, InterpreterError> {
+    ir::interpret_with_options(module, function, args, options)
+        .map_err(InterpreterError::into_root_cause)
+}
+fn interpret_values<'a>(
+    module: &'a Module,
+    function: FunctionId,
+    args: &[RuntimeValue<'_>],
+) -> Result<RuntimeInterpreterResult<'a>, InterpreterError> {
+    ir::interpret_values(module, function, args).map_err(InterpreterError::into_root_cause)
+}

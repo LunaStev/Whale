@@ -3,55 +3,68 @@ use crate::error::AsmError;
 use crate::tokens::{Token, TokenKind};
 
 fn parser_err(tokens: &[Token], pos: usize, msg: &str) -> AsmError {
-    if let Some(tok) = tokens.get(pos) {
-        AsmError::ParserError(format!(
-            "{} at line {}, column {}",
-            msg, tok.line, tok.column
-        ))
-    } else if let Some(tok) = tokens.last() {
-        AsmError::ParserError(format!(
-            "{} near end of input (line {}, column {})",
-            msg, tok.line, tok.column
-        ))
+    let span = if let Some(token) = tokens.get(pos) {
+        token.span()
+    } else if let Some(token) = tokens.last() {
+        crate::error::SourceSpan {
+            start: token.end_position,
+            end: token.end_position,
+            line: token.end_line,
+            column: token.end_column,
+        }
     } else {
-        AsmError::ParserError(format!("{} at line 1, column 1", msg))
-    }
+        crate::error::SourceSpan {
+            start: 0,
+            end: 0,
+            line: 1,
+            column: 1,
+        }
+    };
+    AsmError::ParserError(msg.into()).at("<input>", span, None)
 }
 
 pub fn parse(tokens: &[Token]) -> Result<AST, AsmError> {
     let mut pos = 0;
     let mut items = Vec::new();
-
+    let mut spans = Vec::new();
     while pos < tokens.len() {
-        match &tokens[pos].kind {
-            TokenKind::Identifier(name) => {
-                if pos + 1 < tokens.len() && matches!(tokens[pos + 1].kind, TokenKind::Colon) {
-                    items.push(ASTNode::Label(name.clone()));
-                    pos += 2;
-                    continue;
-                }
-
-                if pos + 1 < tokens.len() {
-                    if let TokenKind::Identifier(eq_kw) = &tokens[pos + 1].kind {
-                        if eq_kw.eq_ignore_ascii_case("equ") {
-                            items.push(parse_const_definition(tokens, &mut pos)?);
-                            continue;
-                        }
-                    }
-                }
-
-                if is_directive(name) {
-                    items.push(parse_directive(tokens, &mut pos)?);
-                    continue;
-                }
-
-                items.push(parse_instruction(tokens, &mut pos)?);
-            }
-            TokenKind::Newline => pos += 1,
-            _ => return Err(parser_err(tokens, pos, "Unexpected token at top level")),
+        if matches!(tokens[pos].kind, TokenKind::Newline) {
+            pos += 1;
+            continue;
         }
+        let start = pos;
+        let node = match &tokens[pos].kind {
+            TokenKind::Identifier(name) => {
+                if matches!(tokens.get(pos + 1).map(|t| &t.kind), Some(TokenKind::Colon)) {
+                    let node = ASTNode::Label(name.clone());
+                    pos += 2;
+                    node
+                } else if matches!(tokens.get(pos+1).map(|t|&t.kind),Some(TokenKind::Identifier(keyword))if keyword.eq_ignore_ascii_case("equ"))
+                {
+                    parse_const_definition(tokens, &mut pos)?
+                } else if is_directive(name) {
+                    parse_directive(tokens, &mut pos)?
+                } else {
+                    parse_instruction(tokens, &mut pos)?
+                }
+            }
+            _ => return Err(parser_err(tokens, pos, "Unexpected token at top level")),
+        };
+        let last = tokens[start..pos]
+            .iter()
+            .rev()
+            .find(|t| !matches!(t.kind, TokenKind::Newline))
+            .unwrap();
+        let mut span = tokens[start].span();
+        span.end = last.end_position;
+        spans.push(span);
+        items.push(node);
     }
-    Ok(AST { items })
+    Ok(AST {
+        items,
+        spans,
+        source_name: "<input>".into(),
+    })
 }
 
 fn parse_const_definition(tokens: &[Token], pos: &mut usize) -> Result<ASTNode, AsmError> {
