@@ -7,6 +7,9 @@ use super::{
 use object::{ObjectFile, SectionKind};
 const BASE: u64 = 0x400000;
 const PAGE: u64 = 4096;
+// Portable Linux AMD64 lower 48-bit user range, excluding its final guard page.
+// Do not rely on optional LA57 hardware/kernel support for emitted executables.
+const USER_END: u64 = (1 << 47) - PAGE;
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub flags: u32,
@@ -105,8 +108,12 @@ pub fn executable_layout(
         if file_end > max_bytes {
             return Err("executable output byte limit exceeded".into());
         }
-        BASE.checked_add(cursor)
+        let memory_end = BASE
+            .checked_add(cursor)
             .ok_or("executable virtual address overflow")?;
+        if memory_end > USER_END {
+            return Err("executable exceeds portable lower 48-bit user address space".into());
+        }
         segments.push(Segment {
             flags,
             offset: start,

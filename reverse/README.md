@@ -84,6 +84,18 @@ Text rendering is canonical presentation, not a promise of identical reassembly
 for every valid x86 encoding. Original bytes and exact encoding fields remain
 available. Relocations suppress the placeholder numeric branch target and carry
 symbol, addend, kind and field location independently.
+
+The byte-identical textual roundtrip contract is limited to the canonical Whale
+encoder outputs retained in `tests/roundtrip.rs`: selected MOV register/immediate,
+ADD/SUB/XOR/CMP/TEST register/immediate, NOT/NEG/IMUL/shift register forms;
+base/index/displacement MOV and MOVZX memory forms; selected scalar SSE register,
+load/store and arithmetic forms; and NOP/RET. The real Wave decoder's mnemonic and
+rendered operands are reassembled and compared with the original encoder bytes.
+This contract excludes symbolic/relocated operands, relative control transfers,
+RIP-relative memory, redundant prefixes and alternative x86 encodings. A human
+listing's address/byte columns are presentation; only its mnemonic/operand facts
+are assembly syntax. Other decoded forms retain their exact bytes and typed
+fields without a textual reassembly guarantee.
 ## Conservative control flow and references
 
 `analyze(input, base, seeds, overlays, limits)` invokes the Wave on-demand CFG
@@ -142,3 +154,46 @@ references and explicit stops. CFG instruction capacity defaults to 16,384 and
 is reduced for small regions. `--max-instructions`, `--max-work` (default
 67,108,864) and `--max-workspace` (default 134,217,728 bytes) bound analysis;
 `--max-output` independently bounds the rendered report.
+
+## Reproducible builds and bounded mutation probe
+
+The helper publishes `reverse-core.meta` alongside the archive and SHA256
+`provenance.json`. The plain metadata schema records ABI revision 1 and FNV-1a
+64-bit fingerprints of the exact compilation bytes (`amd64.wave`, one newline,
+then `cfg.wave`) and archive bytes. The std-only Cargo build script verifies all
+four fields before linking, and watches both source files, metadata and archive.
+A stale source, damaged archive, missing metadata or different ABI is a build
+error with the rebuild command. FNV is a compatibility check, not authentication;
+SHA256 provenance remains available for independent auditing. Compiler/archiver
+failure preserves the complete previous publication. Each output rename is
+atomic; an interrupted multi-file publication is rejected by the guard.
+
+`wave-reverse.yml` builds the official pinned compiler with Rust 1.89.0 and LLVM
+21, explicitly permits locked dependency downloads in CI, and checks the linked
+workspace and CLI. Ordinary Cargo builds neither bootstrap nor download Wave.
+
+The example requires the real linked decoder and CFG; an unavailable core fails:
+
+```sh
+WHALE_WAVE_REVERSE_DIR=/tmp/whale-wave-reverse \
+  cargo build -p reverse --features wave --example fuzz_reverse --locked
+# Linux address-space ceiling plus wall-clock ceiling:
+timeout 300s python3 tools/fuzz_limits.py --memory-mib 512 -- \
+  target/debug/examples/fuzz_reverse --seed 6289366696573784625 --cases 10000 \
+  --out-dir /tmp/reverse-fuzz
+# Reproduce a property failure, panic, or last input before a native signal:
+target/debug/examples/fuzz_reverse --replay /tmp/reverse-fuzz/current.bin \
+  --out-dir /tmp/reverse-replay
+```
+
+The fixed seed, nonempty valid fixtures and deterministic mutation stream exercise
+prefixes, fields, truncations, suffix independence, overlaps, symbolic overlays,
+work limits, block partitions, exact bytes and repeated-result determinism. Cases
+are limited to 128 bytes and 1..100,000 mutations; CFG buffers are capped at 1 MiB
+and work at 1,000,000 per analysis. The case bytes fully determine graph seeds,
+base, overlays and options. `current.bin` is written before entering native code.
+On a caught property failure/panic, the original input and reason are saved before
+at most 256 deletion-minimization attempts, with a separate minimized file. A
+native signal leaves `current.bin` for replay; the external limits stop hangs or
+excessive memory without relying on the process to recover. No external assembler
+or disassembler is needed by this probe; independent golden tests remain separate.

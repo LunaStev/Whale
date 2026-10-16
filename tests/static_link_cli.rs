@@ -108,3 +108,70 @@ fn two_disk_objects_link_and_execute_with_relative_call_and_data_reference() {
     );
     assert_eq!(Command::new(out).status().unwrap().code(), Some(42));
 }
+
+#[test]
+fn cumulative_raw_section_budget_rejects_multiple_small_objects_and_preserves_output() {
+    use object::*;
+    let dir = tempfile::tempdir().unwrap();
+    let mut object = ObjectFile::new(ObjectFormat::ELF64);
+    object.add_section(".text", SectionKind::Text, 1);
+    object.sections[0].data = vec![0xc3];
+    for _ in 1..33_000 {
+        object.add_section(".data", SectionKind::Data, 1);
+    }
+    object.symbols.push(ObjectSymbol {
+        name: "_start".into(),
+        section_index: Some(0),
+        value: 0,
+        size: 1,
+        binding: SymbolBinding::Global,
+        kind: SymbolKind::Function,
+        visibility: SymbolVisibility::Default,
+    });
+    let first = dir.path().join("first.o");
+    fs::write(&first, object.write().unwrap()).unwrap();
+    object.symbols[0].name = "unused".into();
+    let second = dir.path().join("second.o");
+    fs::write(&second, object.write().unwrap()).unwrap();
+    let output = dir.path().join("existing");
+    fs::write(&output, b"old executable").unwrap();
+    let result = whale()
+        .arg("link")
+        .arg(&first)
+        .arg(&second)
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("Sections"),
+        "{result:?}"
+    );
+    assert_eq!(fs::read(&output).unwrap(), b"old executable");
+}
+
+#[test]
+fn unsupported_user_address_extent_fails_before_output_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = assemble(
+        dir.path(),
+        "huge-bss",
+        "section .text\nglobal _start\n_start: ret\nsection .bss\nresb 9223372036854775808\n",
+    );
+    let output = dir.path().join("existing");
+    fs::write(&output, b"old executable").unwrap();
+    let result = whale()
+        .arg("link")
+        .arg(input)
+        .arg("-o")
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("user address"),
+        "{result:?}"
+    );
+    assert_eq!(fs::read(&output).unwrap(), b"old executable");
+}

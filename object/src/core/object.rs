@@ -228,6 +228,15 @@ impl ObjectFile {
         crate::formats::elf_read::read_elf(bytes, limits)
     }
 
+    /// Decode with actual successful resource charges for a shared input budget.
+    /// Auxiliary ELF sections/symbols and repeated name scans remain accounted.
+    pub fn read_with_usage(
+        bytes: &[u8],
+        limits: crate::ObjectReadLimits,
+    ) -> Result<(Self, crate::ObjectReadUsage), crate::ObjectReadError> {
+        crate::formats::elf_read::read_elf_with_usage(bytes, limits)
+    }
+
     /// Typed counterpart of `write`, including output budgets and allocation causes.
     pub fn write_diagnostic(&self) -> Result<Vec<u8>, crate::ObjectError> {
         self.write_diagnostic_with_limit(crate::formats::elf::DEFAULT_MAX_OUTPUT_SIZE)

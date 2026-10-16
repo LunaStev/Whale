@@ -198,3 +198,52 @@ fn high_half_symbol_file_mapping_uses_checked_relative_offsets() {
     assert_eq!(image.symbols[0].region, Some(0));
     assert_eq!(image.symbols[0].offset, 0);
 }
+
+#[test]
+fn relocatable_inspection_shares_actual_reader_work_instead_of_reserving_half() {
+    let mut object = ObjectFile::new(ObjectFormat::ELF64);
+    object.add_section(".text", SectionKind::Text, 1);
+    object.sections[0].data = vec![0xe8, 0, 0, 0, 0, 0xc3];
+    let name = format!("external_{}", "x".repeat(4096));
+    object.symbols.push(ObjectSymbol {
+        name: name.clone(),
+        section_index: None,
+        value: 0,
+        size: 0,
+        binding: SymbolBinding::Global,
+        kind: SymbolKind::Function,
+        visibility: SymbolVisibility::Default,
+    });
+    object.relocations.push(ObjectRelocation {
+        section_index: 0,
+        offset: 1,
+        symbol: name.clone(),
+        kind: RelocKind::PLT32,
+        addend: -4,
+    });
+    let bytes = object.write().unwrap();
+    let (_, usage) = ObjectFile::read_with_usage(&bytes, ObjectReadLimits::default()).unwrap();
+    // Reading alone fits, but image construction still needs a share of the
+    // same allowance. It must not silently start a fresh work budget.
+    let reader_only = ObjectReadLimits {
+        max_work: usage.work,
+        ..Default::default()
+    };
+    ObjectFile::read_with_usage(&bytes, reader_only).unwrap();
+    assert!(Image::elf(&bytes, reader_only)
+        .unwrap_err()
+        .contains("inspection work limit"));
+    // A small metadata allowance is enough even when name inspection dominates
+    // reader work. Splitting the total in half would reject this valid object.
+    let shared = ObjectReadLimits {
+        max_work: usage.work + 128,
+        ..Default::default()
+    };
+    assert!(usage.work > shared.max_work / 2);
+    let image = Image::elf(&bytes, shared).unwrap();
+    assert_eq!(image.regions[0].bytes, [0xe8, 0, 0, 0, 0, 0xc3]);
+    assert_eq!(image.symbols[0].name, name);
+    assert_eq!(image.relocations[0].symbol, name);
+    assert_eq!(image.relocations[0].offset, 1);
+    assert_eq!(image.relocations[0].width, 4);
+}

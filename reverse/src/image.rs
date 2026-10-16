@@ -64,13 +64,15 @@ impl<'a> Image<'a> {
         }
     }
     fn relocatable(view: ElfView<'a>, limits: ObjectReadLimits) -> Result<Self, String> {
-        let read_limits = ObjectReadLimits {
-            max_work: limits.max_work / 2,
-            ..limits
-        };
-        let mut work = limits.max_work - limits.max_work / 2;
-        let object =
-            ObjectFile::read_with_limits(view.bytes(), read_limits).map_err(|e| e.to_string())?;
+        let (object, usage) =
+            ObjectFile::read_with_usage(view.bytes(), limits).map_err(|e| e.to_string())?;
+        // Reader and image projection consume one allowance. Successful reads
+        // report actual charges so string-heavy objects can use their budget
+        // without reserving half for the much smaller image metadata pass.
+        let mut work = limits
+            .max_work
+            .checked_sub(usage.work)
+            .ok_or("ELF inspection work limit exceeded")?;
         let mut image = Self {
             kind: "elf64-amd64-relocatable",
             entry: None,
@@ -386,6 +388,6 @@ impl<'a> Image<'a> {
 fn charge(work: &mut usize, count: usize) -> Result<(), String> {
     *work = work
         .checked_sub(count)
-        .ok_or("executable inspection work limit exceeded")?;
+        .ok_or("ELF inspection work limit exceeded")?;
     Ok(())
 }

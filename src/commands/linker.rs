@@ -64,9 +64,15 @@ fn execute(args: Vec<String>) -> Result<(), String> {
         return Err("link requires 1..4096 input objects/archives".into());
     }
     let output = output.ok_or("missing output (-o)")?;
-    let mut linker = Linker::new(OutputFormat::ELF64Executable);
-    linker.set_entry(entry.unwrap_or_else(|| "_start".into()));
     let mut remaining = input_limit.unwrap_or(super::input::OBJECT_INPUT_BYTES);
+    let mut linker = Linker::with_read_limits(
+        OutputFormat::ELF64Executable,
+        object::ObjectReadLimits {
+            max_input_bytes: usize::try_from(remaining).unwrap_or(usize::MAX),
+            ..object::ObjectReadLimits::default()
+        },
+    );
+    linker.set_entry(entry.unwrap_or_else(|| "_start".into()));
     for input in &inputs {
         let bytes =
             super::input::read(Path::new(input), remaining).map_err(|e| format!("{input}: {e}"))?;
@@ -78,8 +84,9 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                 .add_archive(&bytes)
                 .map_err(|e| format!("{input}: {e}"))?;
         } else {
-            let object = object::ObjectFile::read(&bytes).map_err(|e| format!("{input}: {e}"))?;
-            linker.add_object(object);
+            linker
+                .add_object_bytes(&bytes)
+                .map_err(|e| format!("{input}: {e}"))?;
         }
     }
     let bytes = linker

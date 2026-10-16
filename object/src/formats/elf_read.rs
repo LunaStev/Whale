@@ -40,6 +40,20 @@ impl Default for ObjectReadLimits {
     }
 }
 
+/// Actual successful reader charges, including raw auxiliary table records and
+/// repeated name inspections/copies. Callers can subtract these from shared limits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ObjectReadUsage {
+    pub input_bytes: usize,
+    pub sections: usize,
+    pub program_headers: usize,
+    pub symbols: usize,
+    pub relocations: usize,
+    pub payload_bytes: usize,
+    pub string_bytes: usize,
+    pub work: usize,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ElfHeader {
     pub kind: u16,
@@ -354,6 +368,13 @@ struct RawSymbol<'a> {
 }
 
 pub fn read_elf(bytes: &[u8], limits: ObjectReadLimits) -> Result<ObjectFile> {
+    read_elf_with_usage(bytes, limits).map(|(object, _)| object)
+}
+
+pub fn read_elf_with_usage(
+    bytes: &[u8],
+    limits: ObjectReadLimits,
+) -> Result<(ObjectFile, ObjectReadUsage)> {
     let view = ElfView::parse(bytes, limits)?;
     let h = view.header;
     if h.kind != 1 {
@@ -400,9 +421,9 @@ pub fn read_elf(bytes: &[u8], limits: ObjectReadLimits) -> Result<ObjectFile> {
                         .section(index),
                 );
             }
-            if section.kind == 8 {
-                view.range(section.offset, 0)?;
-            } else {
+            // NOBITS sh_offset is conceptual and can exceed EOF (alignment
+            // alone may place it there); there is no file range to access.
+            if section.kind != 8 {
                 view.range(section.offset, section.size)?;
             }
         }
@@ -753,5 +774,15 @@ pub fn read_elf(bytes: &[u8], limits: ObjectReadLimits) -> Result<ObjectFile> {
         }
     }
     object.validate_diagnostic()?;
-    Ok(object)
+    let usage = ObjectReadUsage {
+        input_bytes: bytes.len(),
+        sections: h.section_count,
+        program_headers: h.program_count,
+        symbols: count,
+        relocations: relocation_count,
+        payload_bytes: budget.payload,
+        string_bytes: budget.strings,
+        work: budget.work,
+    };
+    Ok((object, usage))
 }

@@ -1,0 +1,53 @@
+name: Bounded fuzz campaigns
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  schedule:
+    - cron: '41 3 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whale-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    name: ${{ matrix.target }} / bounded mutation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [assembler, object]
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      WHALE_FUZZ_ARTIFACT_DIR: .ci-artifacts/fuzz
+      CASES: ${{ github.event_name == 'schedule' && '50000' || '512' }}
+      SEED: '1464353100'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - run: rustup toolchain install stable --profile minimal
+      - name: Build real library boundary targets
+        run: python tools/ci.py run --name fuzz-build --timeout 300 -- cargo build --all-features --locked --example fuzz_boundaries
+      - name: Execute nonempty corpus and bounded mutations
+        run: python tools/ci.py run --name fuzz-${{ matrix.target }} --timeout 330 -- python tools/fuzz_smoke.py --binary target/debug/examples/fuzz_boundaries --target ${{ matrix.target }} --cases "$CASES" --seed "$SEED" --timeout 300 --memory-mib 512
+      - name: Retain logs, original failures, minimized inputs and replay commands
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-${{ matrix.target }}-${{ github.run_id }}
+          path: .ci-artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

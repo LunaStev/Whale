@@ -76,3 +76,26 @@ fn syscall_only_executable_runs_with_the_asserted_exit_status() {
     fs::remove_file(path).unwrap();
     assert_eq!(status.unwrap().code(), Some(37));
 }
+
+#[test]
+fn sparse_bss_must_fit_portable_lower_user_address_space() {
+    let mut o = program();
+    o.add_section(".bss", SectionKind::Bss, 1);
+    o.sections[1].zero_fill = 1 << 63;
+    assert!(write_executable(&[o.clone()], "_start", 8192)
+        .unwrap_err()
+        .contains("user address"));
+    o.sections[1].zero_fill = 1 << 40;
+    let bytes = write_executable(&[o.clone()], "_start", 8192).unwrap();
+    assert_eq!(bytes.len(), 4096);
+    assert_eq!(u64at(&bytes, 64 + 56 + 40), 1 << 40);
+    // The final user page is reserved; an exclusive end at its start is legal.
+    let end = (1u64 << 47) - 4096;
+    o.sections[1].zero_fill = end - 0x401000;
+    assert!(write_executable(&[o.clone()], "_start", 8192).is_ok());
+    o.sections[1].zero_fill += 1;
+    assert!(write_executable(&[o.clone()], "_start", 8192).is_err());
+    o.sections[1].zero_fill = 1;
+    o.sections[1].align = 1 << 47;
+    assert!(write_executable(&[o], "_start", 8192).is_err());
+}

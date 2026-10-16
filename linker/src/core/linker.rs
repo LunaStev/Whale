@@ -4,29 +4,49 @@ use super::{
     selection::{select, LinkInput},
 };
 use crate::diagnostic::{LinkError, LinkErrorKind};
-use object::ObjectFile;
+use object::{ObjectFile, ObjectReadLimits};
 
 pub struct Linker {
     inputs: Vec<LinkInput>,
     output_format: OutputFormat,
     entry: String,
+    read_budget: archive::ReadBudget,
 }
 pub enum OutputFormat {
     ELF64Executable,
 }
 impl Linker {
     pub fn new(format: OutputFormat) -> Self {
+        Self::with_read_limits(format, ObjectReadLimits::default())
+    }
+    /// Reader limits are cumulative across every byte-loaded object and archive.
+    /// Already-owned objects passed to `add_object` remain caller allocations.
+    pub fn with_read_limits(format: OutputFormat, limits: ObjectReadLimits) -> Self {
         Self {
             inputs: Vec::new(),
             output_format: format,
             entry: "_start".into(),
+            read_budget: archive::ReadBudget::new(limits),
         }
     }
     pub fn add_object(&mut self, object: ObjectFile) {
         self.inputs.push(LinkInput::Object(object));
     }
+    pub fn add_object_bytes(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
+        let index = self.inputs.len();
+        let object = self.read_budget.object(bytes).map_err(|mut error| {
+            error.contexts.push(whale_diagnostic::Context::Input(index));
+            error
+        })?;
+        self.inputs.push(LinkInput::Object(object));
+        Ok(())
+    }
     pub fn add_archive(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
-        let members = archive::read_objects(bytes)?;
+        let index = self.inputs.len();
+        let members = self.read_budget.archive(bytes).map_err(|mut error| {
+            error.contexts.push(whale_diagnostic::Context::Input(index));
+            error
+        })?;
         self.inputs.push(LinkInput::Archive(members));
         Ok(())
     }

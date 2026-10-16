@@ -10,10 +10,10 @@ cargo build --locked --all-features --examples
 python3 tools/fuzz_smoke.py --binary target/debug/examples/fuzz_boundaries --cases 512 --seed 1464353100
 ```
 
-Each target is independently visible (`assembler`, `ir`, `ast`). The runner
+Each target is independently visible (`assembler`, `object`, `ir`, `ast`). The runner
 rejects an empty corpus or a corpus with no valid seed. Arguments cap runs at
 100,000 mutations; the Python wrapper bounds each process to 60 seconds by
-default. Inputs and seed/replay reads are capped at 8192 bytes. Assembler output
+default, with a Linux RLIMIT_AS ceiling of 512 MiB (`--memory-mib`). Inputs and seed/replay reads are capped at 8192 bytes. Assembler output
 is capped at 64 KiB and relaxation at 32 passes. IR parsing/verifying uses 4096
 tokens, 8192 nodes, depth 32 and 131072 analysis work. AST lowering additionally
 uses depth 16, 2048 nodes, 8192 string bytes, 65536 source-mapping work units and
@@ -26,7 +26,9 @@ Seed cases retain malformed syntax, numeric overflow, huge reservations, sparse
 IR identities, unknown versions, nested aggregates, strict JSON and exact-width
 float/call inputs. Mutations are byte insertion/deletion/repetition/bit flips and
 boundary-token injection. Library rejections are expected outcomes; a panic is
-a failure. Failure inputs are deletion-minimized and written under
+a failure. The original failing bytes and replay command are saved before at
+most 256 deletion-minimization attempts or five seconds of reduction. Both the
+original and minimized bytes are written under
 `WHALE_FUZZ_ARTIFACT_DIR` (default `/tmp/whale-fuzz` for direct runs, or
 `.ci-artifacts/fuzz` through the smoke script), with the originating seed and an
 exact replay command:
@@ -93,6 +95,14 @@ decoder because JSON Schema sees an already-parsed object. Every accepted
 lowering result must verify. Schema references are local; validation never fetches
 remote schemas. The normal Rust numeric syntax regression runs without Python.
 
-CI can call these exact smoke commands after building the examples. Scheduling
-longer campaigns is a separate task; this change supplies bounded targets,
-retained corpora and repeatable local/CI entry points.
+The object target feeds arbitrary ELF bytes through the bounded ET_REL reader
+and writer, and `WOM1` model bytes through public-model validation and semantic
+write/read/write comparisons. Retained seeds include NASM metadata, malformed
+relocations/tables, sparse BSS and conceptual NOBITS offsets beyond EOF. The
+reader bounds sections, symbols, relocations, payload, copied/inspected strings
+and work; BSS stays sparse.
+
+CI runs all four targets on pull requests. `fuzz.yml` also gives assembler and
+object separate jobs, with weekly scheduled campaigns of 50,000 cases each,
+300-second process deadlines and 512 MiB address-space limits. Logs, originals,
+minimized inputs and exact replay commands are retained as artifacts.

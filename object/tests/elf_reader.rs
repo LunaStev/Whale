@@ -475,3 +475,29 @@ fn typed_writer_distinguishes_output_budget_layout_and_invalid_input_causes() {
     assert_eq!(e.kind, ObjectErrorKind::InvalidSection);
     assert!(e.contexts.contains(&Context::Symbol("function".into())));
 }
+
+#[test]
+fn sparse_nobits_alignment_may_put_conceptual_file_offset_beyond_eof() {
+    for alignment in [32768, 1u64 << 63] {
+        let mut object = ObjectFile::new(ObjectFormat::ELF64);
+        let section = object.add_section("sparse", SectionKind::Bss, alignment);
+        object.sections[section].zero_fill = 1 << 60;
+        let bytes = object.write().unwrap();
+        assert!(bytes.len() < 1024);
+        let view = ElfView::parse(&bytes, ObjectReadLimits::default()).unwrap();
+        assert!(view.section(1).unwrap().offset > bytes.len() as u64);
+        let imported = ObjectFile::read_with_limits(
+            &bytes,
+            ObjectReadLimits {
+                max_payload_bytes: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            (imported.sections[0].align, imported.sections[0].zero_fill),
+            (alignment, 1 << 60)
+        );
+        assert!(imported.sections[0].data.is_empty());
+    }
+}

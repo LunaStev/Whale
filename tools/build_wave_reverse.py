@@ -19,6 +19,20 @@ import tempfile
 
 WAVE_REVISION = "e0952ed65d07e14c6ed0aa64f3c9a5532dd7533b"
 ABI_VERSION = 1
+METADATA_NAME = "reverse-core.meta"
+
+
+def fnv64(data):
+    """Compatibility fingerprint, not a cryptographic trust check."""
+    value = 0xcbf29ce484222325
+    for byte in data:
+        value = ((value ^ byte) * 0x100000001b3) & 0xffffffffffffffff
+    return f"{value:016x}"
+
+
+def fingerprint_metadata(source, archive):
+    return (f"schema=1\nabi_version={ABI_VERSION}\n"
+            f"source_fnv64={fnv64(source)}\narchive_fnv64={fnv64(archive)}\n")
 
 
 def run(arguments, **kwargs):
@@ -50,10 +64,9 @@ def main():
     output = args.out_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[1]
-    kernels = [root / "reverse/wave/amd64.wave"]
-    cfg_kernel = root / "reverse/wave/cfg.wave"
-    if cfg_kernel.exists():
-        kernels.append(cfg_kernel)
+    kernels = [root / "reverse/wave/amd64.wave", root / "reverse/wave/cfg.wave"]
+    kernel_contents = [path.read_bytes() for path in kernels]
+    kernel_bytes = b"\n".join(kernel_contents)
     environment = os.environ.copy()
     environment["WAVE_STD_REVISION"] = WAVE_REVISION
     environment["CARGO_INCREMENTAL"] = "0"
@@ -73,7 +86,7 @@ def main():
         compiler = output / "bootstrap/debug/wavec"
         # A single compilation unit lets the CFG call the same Wave decoder.
         kernel = temporary / "reverse.wave"
-        kernel.write_text("\n".join(path.read_text() for path in kernels))
+        kernel.write_bytes(kernel_bytes)
         obj = temporary / "reverse.o"
         run([compiler, "-O" + args.opt_level, "-C", "relocation-model=pic", "--std-root", source / "std",
              "--target=x86_64-unknown-linux-gnu", "build", kernel, "--freestanding",
@@ -85,13 +98,19 @@ def main():
             "backend": "wave-llvm-bootstrap", "host": "x86_64-unknown-linux-gnu",
             "rustc": rustc, "opt_level": args.opt_level,
             "compiler_sha256": digest(compiler), "archive_sha256": digest(candidate),
-            "kernels": {str(path.relative_to(root)): digest(path) for path in kernels},
+            "kernels": {str(path.relative_to(root)): hashlib.sha256(content).hexdigest()
+                        for path, content in zip(kernels, kernel_contents)},
         }
-        # Last-good archive survives any failed compilation or archiving.
-        os.replace(candidate, output / candidate.name)
+        # Prepare every publication file before touching the last-good set.
+        # Each rename is atomic. An interruption between renames is rejected by
+        # the fingerprint guard rather than silently linking mixed generations.
         metadata = temporary / "provenance.json"
         metadata.write_text(json.dumps(provenance, indent=2) + "\n")
-        os.replace(metadata, output / "provenance.json")
+        fingerprint = temporary / METADATA_NAME
+        fingerprint.write_text(fingerprint_metadata(kernel_bytes, candidate.read_bytes()))
+        os.replace(candidate, output / candidate.name)
+        os.replace(metadata, output / metadata.name)
+        os.replace(fingerprint, output / fingerprint.name)
     print(f"WHALE_WAVE_REVERSE_DIR={output}")
 
 

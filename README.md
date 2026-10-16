@@ -752,8 +752,25 @@ weak references do not. Later inputs do not rescan earlier archives. GNU and BSD
 long names are supported. Unused members do not introduce duplicate definitions.
 
 `--max-input` caps the sum of input bytes and `--max-output` caps the complete
-executable, both defaulting to 256 MiB. Archive parsing is limited to 4096 members
-and 1 MiB of names; selection has 10 million work units and a 4096-object cap.
+executable, both defaulting to 256 MiB. Decoded inputs share additional cumulative
+limits: 256 MiB of copied payloads, 16 MiB of inspected/copied names, 65,279 raw
+sections, one million raw symbols and relocations each, and 536,870,912 reader
+work units. Auxiliary ELF records and unused archive members consume these limits;
+physical archive bytes are counted once. Archive parsing also limits each archive
+to 4096 members and 1 MiB of member names, checking names before copying them.
+Selection has 10 million work units and a 4096-object cap.
+
+Library clients can choose reader limits with `Linker::with_read_limits` and load
+objects through `add_object_bytes`; all archives and byte-loaded objects share the
+same remaining budget. `ObjectFile::read_with_usage` exposes successful reader
+charges for other streaming consumers. Failed additions leave both the input list
+and remaining budget unchanged. Already-owned objects passed to `add_object`
+remain caller allocations and still undergo structural and output validation.
+
+Loadable ranges must fit the lower 48-bit user address space, excluding its final
+4 KiB guard page; optional five-level paging is not assumed. BSS remains sparse:
+a 1 TiB zero-filled region can still produce a small executable when its addresses
+fit this range. Alignment and logical BSS extent cannot bypass the address check.
 Outputs publish atomically after validation and protect every input alias. Unix
 executables receive mode 0755 without copying setuid/setgid bits. The produced
 artifact targets Linux AMD64 regardless of the machine running Whale.
