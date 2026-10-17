@@ -1,6 +1,6 @@
 use crate::{interpreter::InterpreterError, verifier::VerifyError};
 
-use whale_diagnostic::{Context, Diagnostic, SourceLocation, ToDiagnostic};
+use diagnostic::{Context, Diagnostic, SourceLocation, ToDiagnostic};
 
 impl ToDiagnostic for VerifyError {
     fn diagnostic(&self) -> Diagnostic {

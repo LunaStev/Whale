@@ -187,9 +187,9 @@ pub fn apply_relocations(
     Ok(payloads)
 }
 
-impl whale_diagnostic::ToDiagnostic for RelocationError {
-    fn diagnostic(&self) -> whale_diagnostic::Diagnostic {
-        use whale_diagnostic::{Context, Diagnostic};
+impl diagnostic::ToDiagnostic for RelocationError {
+    fn diagnostic(&self) -> diagnostic::Diagnostic {
+        use diagnostic::{Context, Diagnostic};
         let code = match self.kind {
             RelocationErrorKind::InvalidInput => "link.relocation.input",
             RelocationErrorKind::Resolution => "link.relocation.symbol",

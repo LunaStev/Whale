@@ -42,7 +42,10 @@ change an unrelated remote silently. Start new work from the latest upstream
 
 | Area | Responsibility |
 | --- | --- |
-| [assembler/](assembler/) | Assembly tokenization, parsing, AMD64 encoding, symbols, and relocations |
+| [assembler/](assembler/) | Shared assembly APIs, diagnostics, symbols, and relocations |
+| [assembler/amd64/](assembler/amd64/) | AMD64 parser, encoder, and tests |
+| [backend-api/](backend-api/) | IR backend support checks and artifact emission |
+| [toolchain/](toolchain/) | Target, assembler, and backend registration |
 | [object/](object/) | Object model and ELF serialization |
 | [target-spec/](target-spec/) | Supported output targets, data layouts, and object identities |
 | [ir/](ir/) | Shared IR, builders, verification, and feature-gated socket lowering |
@@ -63,7 +66,7 @@ For a focused regression, start with the affected component:
 
 | Component | Source and test locations | Focused command from the repository root |
 | --- | --- | --- |
-| Assembler | [assembler/src/](assembler/src/) and [assembler/tests/](assembler/tests/) | `cargo test -p assembler --locked` |
+| Assembler | [assembler/src/](assembler/src/) and [assembler/amd64/](assembler/amd64/) | `cargo test -p amd64 --locked` |
 | Object | [object/src/](object/src/) | `cargo test -p object --locked` |
 | IR | [ir/src/](ir/src/) and [ir/tests/](ir/tests/) | `cargo test -p ir --all-features --locked` |
 | Linker | [linker/src/](linker/src/) | `cargo test -p linker --locked` |
@@ -72,6 +75,17 @@ For a focused regression, start with the affected component:
 
 Run the workspace checks in [Local verification](#5-local-verification) after
 the focused regression; a single component check does not cover its consumers.
+
+### Adding an assembler or IR target
+
+Put architecture-specific assembler crates under `assembler/<architecture>` and
+name each crate after its architecture, such as `amd64`. Implement
+`assembler::extension::Assembler`; each implementation owns its parser and AST.
+For an IR backend, implement `backend_api::Backend` and declare its `TargetSpec`.
+Register extensions through `toolchain::Registry`; built-ins are composed in
+`src/builtins.rs`. Keep target implementations out of the shared API crates.
+See `examples/external-target/` for a complete registration and emission example;
+run `cargo test -p external-target --locked` when changing extension contracts.
 
 ## 3. Submit a contribution
 

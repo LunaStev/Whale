@@ -6,9 +6,9 @@ alignment, struct layout or byte order. It neither loads nor executes code.
 
 ```rust
 use object::{ObjectFile, ObjectReadLimits};
-use whale_diagnostic::{Context, ToDiagnostic};
+use diagnostic::{Context, ToDiagnostic};
 
-fn inspect(bytes: &[u8]) -> Result<ObjectFile, whale_diagnostic::Diagnostic> {
+fn inspect(bytes: &[u8]) -> Result<ObjectFile, diagnostic::Diagnostic> {
     ObjectFile::read_with_limits(bytes, ObjectReadLimits {
         max_input_bytes: 1024 * 1024,
         max_work: 8 * 1024 * 1024,

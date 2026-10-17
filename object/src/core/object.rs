@@ -6,7 +6,7 @@ use crate::core::symbol::ObjectSymbol;
 
 use std::collections::HashSet;
 
-pub use whale_target::{Endian, Machine, ObjectFormat, ObjectTarget, Target};
+pub use target_spec::{Endian, Machine, ObjectFormat, ObjectTarget, Target};
 
 #[derive(Clone)]
 pub struct ObjectFile {

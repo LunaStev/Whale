@@ -4,11 +4,11 @@ use std::time::Instant;
 
 use super::debug::dump_bytes;
 
-use assembler::isa::amd64::parser::parse;
+use amd64::parser::parse;
 
 use assembler::tokens::tokenize;
 
-use assembler::{isa::AMD64, AssemblerOutput};
+use assembler::AssemblerOutput;
 
 use object::{
     ObjectFile, ObjectFormat, ObjectRelocation, ObjectSymbol, RelocKind as ObjectRelocKind,
@@ -182,10 +182,13 @@ pub fn run(args: Vec<String>) {
         println!("[trace] assemble start");
     }
     let start_time = Instant::now();
-    let out = assembler::assemble_named(&input, &src, &AMD64).unwrap_or_else(|e| {
-        eprintln!("Assemble error: {}", e);
-        process::exit(1);
-    });
+    let registry = crate::builtins::registry();
+    let out = registry
+        .assemble("amd64", &input, &src, &assembler::AssemblyLimits::default())
+        .unwrap_or_else(|e| {
+            eprintln!("Assemble error: {}", e);
+            process::exit(1);
+        });
     let elapsed = start_time.elapsed();
 
     if trace_enable {
@@ -271,6 +274,12 @@ fn build_elf_from_asm_output(out: &AssemblerOutput) -> Result<Vec<u8>, String> {
                 .unwrap_or(true);
 
             let kind = match reloc.kind {
+                assembler::assembler::RelocKind::TargetSpecific { .. } => {
+                    return Err(
+                        "target-specific relocation cannot be written by the AMD64 ELF adapter"
+                            .into(),
+                    );
+                },
                 assembler::assembler::RelocKind::Absolute64 => ObjectRelocKind::Absolute64,
                 assembler::assembler::RelocKind::Absolute32 => ObjectRelocKind::Absolute32,
                 assembler::assembler::RelocKind::SignedAbsolute32 => {

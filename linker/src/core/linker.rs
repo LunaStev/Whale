@@ -42,7 +42,7 @@ impl Linker {
     pub fn add_object_bytes(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
         let index = self.inputs.len();
         let object = self.read_budget.object(bytes).map_err(|mut error| {
-            error.contexts.push(whale_diagnostic::Context::Input(index));
+            error.contexts.push(diagnostic::Context::Input(index));
             error
         })?;
         self.inputs.push(LinkInput::Object(object));
@@ -52,7 +52,7 @@ impl Linker {
     pub fn add_archive(&mut self, bytes: &[u8]) -> Result<(), LinkError> {
         let index = self.inputs.len();
         let members = self.read_budget.archive(bytes).map_err(|mut error| {
-            error.contexts.push(whale_diagnostic::Context::Input(index));
+            error.contexts.push(diagnostic::Context::Input(index));
             error
         })?;
         self.inputs.push(LinkInput::Archive(members));
@@ -79,7 +79,7 @@ impl Linker {
                     message: format!("link input {index}: {e}"),
                     contexts: {
                         let mut contexts = e.contexts.clone();
-                        contexts.push(whale_diagnostic::Context::Input(index));
+                        contexts.push(diagnostic::Context::Input(index));
                         contexts
                     },
                     input_cause: Some(Box::new(e)),

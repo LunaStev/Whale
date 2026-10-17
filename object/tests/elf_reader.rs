@@ -2,7 +2,7 @@ use object::formats::elf_read::ElfView;
 
 use object::*;
 
-use whale_diagnostic::{Context, ToDiagnostic};
+use diagnostic::{Context, ToDiagnostic};
 
 fn fixture() -> Vec<u8> {
     let hex = include_str!("fixtures/nasm-rel.hex");

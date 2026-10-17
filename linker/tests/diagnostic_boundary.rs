@@ -2,7 +2,7 @@ use linker::{core::linker::OutputFormat, LinkErrorKind, Linker};
 
 use object::{ObjectErrorKind, ObjectFile, ObjectFormat, SectionKind};
 
-use whale_diagnostic::{Context, ToDiagnostic};
+use diagnostic::{Context, ToDiagnostic};
 
 #[test]
 fn checked_linker_preserves_input_identity_and_original_typed_validation_cause() {

@@ -1,7 +1,8 @@
 //! The documented canonical subset is tested through the actual Wave decoder.
 #[cfg(whale_wave_reverse)]
 mod native {
-    use assembler::{assemble, isa::AMD64};
+    use amd64::AMD64;
+    use assembler::assemble;
 
     #[test]
     fn canonical_operand_text_reassembles_the_documented_subset_exactly() {

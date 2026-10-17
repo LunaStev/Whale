@@ -1,0 +1,10 @@
+[package]
+name = "backend-api"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+
+[dependencies]
+ir = { path = "../ir" }
+target-spec = { path = "../target-spec" }
+diagnostic = { path = "../diagnostic" }

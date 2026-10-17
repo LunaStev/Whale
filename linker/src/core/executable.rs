@@ -169,7 +169,7 @@ pub fn write_executable_checked(
         .ok_or_else(|| LinkError::new(K::Entry, "entry address overflow"))?;
     let payloads = apply_relocations(objects, &layout, max_bytes).map_err(|e| {
         let mut result = LinkError::new(K::Relocation, e.to_string());
-        result.contexts = whale_diagnostic::ToDiagnostic::diagnostic(&e).contexts;
+        result.contexts = diagnostic::ToDiagnostic::diagnostic(&e).contexts;
         result.relocation_cause = Some(Box::new(e));
         result
     })?;

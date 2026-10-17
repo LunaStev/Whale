@@ -1,6 +1,6 @@
 # Shared diagnostic conversion boundary
 
-`whale_diagnostic::ToDiagnostic` converts a component's existing typed error into
+`diagnostic::ToDiagnostic` converts a component's existing typed error into
 one data-only envelope with stable `component`, `phase`, `code`, human `message`
 and ordered typed `contexts`. Match codes and contexts directly; do not classify
 English messages. `Display` is one renderer of those same fields. JSON consumers

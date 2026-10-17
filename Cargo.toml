@@ -2,6 +2,10 @@
 members = [
     "diagnostic",
     "assembler",
+    "assembler/amd64",
+    "backend-api",
+    "toolchain",
+    "examples/external-target",
     "reverse",
     "target-spec",
     "object",
@@ -24,6 +28,8 @@ wave-reverse = ["reverse/wave"]
 
 [dependencies]
 assembler = { path = "assembler" }
+amd64 = { path = "assembler/amd64" }
+toolchain = { path = "toolchain" }
 reverse = { path = "reverse" }
 linker = { path = "linker" }
 object = { path = "object" }

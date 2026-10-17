@@ -5,5 +5,5 @@ edition = "2021"
 rust-version.workspace = true
 
 [dependencies]
-whale-diagnostic = { path = "../diagnostic" }
+diagnostic = { path = "../diagnostic" }
 object = { path = "../object" }

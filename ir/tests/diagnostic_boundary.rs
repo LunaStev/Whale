@@ -1,6 +1,6 @@
 use ir::*;
 
-use whale_diagnostic::{Context, ToDiagnostic};
+use diagnostic::{Context, ToDiagnostic};
 
 #[test]
 fn parser_and_verifier_keep_typed_categories_and_available_locations() {

@@ -1,0 +1,12 @@
+[package]
+name = "toolchain"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+
+[dependencies]
+assembler = { path = "../assembler" }
+backend-api = { path = "../backend-api" }
+target-spec = { path = "../target-spec" }
+ir = { path = "../ir" }
+diagnostic = { path = "../diagnostic" }

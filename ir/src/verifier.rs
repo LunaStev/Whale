@@ -221,10 +221,34 @@ pub fn verify_module_with_stats(
     m: &Module,
     limits: crate::IrLimits,
 ) -> Result<VerificationStats, VerifyError> {
-    crate::limits::check_module(m, limits).map_err(VerifyError::ResourceLimit)?;
-    m.sources.validate(m).map_err(VerifyError::SourceMetadata)?;
     let target = crate::Target::lookup(&m.target).map_err(VerifyError::Target)?;
     target.validate_layout(m.datalayout).map_err(VerifyError::Target)?;
+    verify_module_for_target_with_stats(m, &target.specification(), limits)
+}
+
+/// Verify against an explicitly supplied target contract; no global registry is used.
+pub fn verify_module_for_target(
+    m: &Module,
+    target: &target_spec::TargetSpec,
+    limits: crate::IrLimits,
+) -> Result<(), VerifyError> {
+    verify_module_for_target_with_stats(m, target, limits).map(|_| ())
+}
+
+pub fn verify_module_for_target_with_stats(
+    m: &Module,
+    target: &target_spec::TargetSpec,
+    limits: crate::IrLimits,
+) -> Result<VerificationStats, VerifyError> {
+    crate::limits::check_module(m, limits).map_err(VerifyError::ResourceLimit)?;
+    m.sources.validate(m).map_err(VerifyError::SourceMetadata)?;
+    target.validate().map_err(|e| VerifyError::Target(crate::TargetError::Contract(e)))?;
+    if m.target != target.id || m.datalayout != target.storage.data {
+        return Err(VerifyError::Target(crate::TargetError::Contract(format!(
+            "module target/layout does not match {}",
+            target.id
+        ))));
+    }
     let indexed: Vec<_> = m.functions.iter().map(IndexedFunction::new).collect();
     let analysis = AnalysisBudget {
         limit: limits.max_analysis_work,
@@ -253,7 +277,7 @@ pub fn verify_module_with_stats(
                 if let Some((operation, ty)) = storage {
                     // Category errors keep their existing diagnostics below.
                     if operands::is_storable(ty) {
-                        crate::layout_of_with_limit(ty, target, limits.max_type_depth).map_err(
+                        crate::layout_for_target(ty, target, limits.max_type_depth).map_err(
                             |reason| VerifyError::InvalidMemoryLayout {
                                 func: f.name.clone(),
                                 operation,
@@ -301,7 +325,7 @@ pub fn verify_module_with_stats(
         if g.link_name.as_deref().is_some_and(|link| !links.insert(link)) {
             return Err(error(crate::GlobalStorageError::LinkNameCollision));
         }
-        crate::layout_of_with_limit(&g.ty, target, limits.max_type_depth).map_err(|reason| {
+        crate::layout_for_target(&g.ty, target, limits.max_type_depth).map_err(|reason| {
             VerifyError::InvalidMemoryLayout {
                 func: g.name.clone(),
                 operation: "global storage",

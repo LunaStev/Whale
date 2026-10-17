@@ -219,7 +219,7 @@ impl ReadBudget {
             let object = next.member(member.bytes).map_err(|cause| {
                 let mut error = input_error(cause);
                 error.message = format!("archive member {:?}: {}", member.name, error.message);
-                error.contexts.push(whale_diagnostic::Context::Object {
+                error.contexts.push(diagnostic::Context::Object {
                     name: "archive".into(),
                     member: Some(member.name.clone()),
                 });

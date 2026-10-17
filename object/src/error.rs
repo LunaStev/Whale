@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 use std::fmt;
 
-use whale_diagnostic::{Context, Diagnostic, ToDiagnostic};
+use diagnostic::{Context, Diagnostic, ToDiagnostic};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ObjectErrorKind {

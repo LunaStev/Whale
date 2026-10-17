@@ -1,7 +1,7 @@
 //! Machine-readable conversion boundary for reusable linker entry points.
 use std::fmt;
 
-use whale_diagnostic::{Context, Diagnostic, ToDiagnostic};
+use diagnostic::{Context, Diagnostic, ToDiagnostic};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkErrorKind {

@@ -22,11 +22,13 @@ pub enum LayoutError {
     Overflow,
     DepthLimit,
     ZeroSizedPointerArithmetic,
+    InvalidTarget,
 }
 
 impl fmt::Display for LayoutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::InvalidTarget => "invalid target storage layout",
             Self::Void => "void has no storage layout",
             Self::Overflow => "type layout exceeds the target address space",
             Self::DepthLimit => "type layout nesting limit exceeded",
@@ -49,27 +51,41 @@ pub fn layout_of_with_limit(
     target: Target,
     max_depth: usize,
 ) -> Result<TypeLayout, LayoutError> {
-    let max_depth = max_depth.min(crate::MAX_IR_NESTING);
+    layout_for_target(ty, &target.specification(), max_depth)
+}
+
+/// Layout for an explicitly supplied target, including out-of-tree targets.
+pub fn layout_for_target(
+    ty: &Type,
+    target: &target_spec::TargetSpec,
+    max_depth: usize,
+) -> Result<TypeLayout, LayoutError> {
+    target.validate().map_err(|_| LayoutError::InvalidTarget)?;
+    layout_storage(ty, &target.storage, max_depth.min(crate::MAX_IR_NESTING))
+}
+
+fn layout_storage(
+    ty: &Type,
+    storage: &target_spec::StorageLayout,
+    max_depth: usize,
+) -> Result<TypeLayout, LayoutError> {
     let scalar =
         |size, align| TypeLayout { size, align, field_offsets: Vec::new(), element_stride: None };
-    // A new target must select its own rules rather than inheriting host layout.
-    match target {
-        Target::X86_64WhaleLinux => {},
-    }
-    Ok(match ty {
+    let scalar_for = |size: u64, index: usize| scalar(size, storage.scalar_align[index]);
+    let result = match ty {
         Type::Void => return Err(LayoutError::Void),
-        Type::Bool | Type::I1 | Type::U1 | Type::I8 | Type::U8 => scalar(1, 1),
-        Type::I16 | Type::U16 | Type::F16 => scalar(2, 2),
-        Type::I32 | Type::U32 | Type::F32 => scalar(4, 4),
-        Type::I64 | Type::U64 | Type::F64 => scalar(8, 8),
-        Type::I128 | Type::U128 => scalar(16, 16),
+        Type::Bool | Type::I1 | Type::U1 | Type::I8 | Type::U8 => scalar_for(1, 0),
+        Type::I16 | Type::U16 | Type::F16 => scalar_for(2, 1),
+        Type::I32 | Type::U32 | Type::F32 => scalar_for(4, 2),
+        Type::I64 | Type::U64 | Type::F64 => scalar_for(8, 3),
+        Type::I128 | Type::U128 => scalar_for(16, 4),
         Type::Ptr(_) | Type::FnPtr(_) => {
-            let bytes = target.data_layout().ptr_bits / 8;
-            scalar(u64::from(bytes), bytes)
+            let bytes = storage.data.ptr_bits / 8;
+            scalar(u64::from(bytes), storage.pointer_align)
         },
         Type::Array(element, count) => {
             let remaining = max_depth.checked_sub(1).ok_or(LayoutError::DepthLimit)?;
-            let element = layout_of_with_limit(element, target, remaining)?;
+            let element = layout_storage(element, storage, remaining)?;
             TypeLayout {
                 size: element.size.checked_mul(*count).ok_or(LayoutError::Overflow)?,
                 align: element.align,
@@ -81,7 +97,7 @@ pub fn layout_of_with_limit(
             let remaining = max_depth.checked_sub(1).ok_or(LayoutError::DepthLimit)?;
             let mut result = scalar(0, 1);
             for field in fields {
-                let field = layout_of_with_limit(field, target, remaining)?;
+                let field = layout_storage(field, storage, remaining)?;
                 result.align = result.align.max(field.align);
                 result.size = align_up(result.size, field.align)?;
                 result.field_offsets.push(result.size);
@@ -90,7 +106,12 @@ pub fn layout_of_with_limit(
             result.size = align_up(result.size, result.align)?;
             result
         },
-    })
+    };
+    let max_size = if storage.data.ptr_bits == 32 { u64::from(u32::MAX) } else { u64::MAX };
+    if result.size > max_size {
+        return Err(LayoutError::Overflow);
+    }
+    Ok(result)
 }
 
 fn align_up(size: u64, align: u32) -> Result<u64, LayoutError> {
@@ -102,11 +123,19 @@ fn align_up(size: u64, align: u32) -> Result<u64, LayoutError> {
 /// Alignment for a standalone local/global object, not a field or array element.
 /// SysV AMD64 gives arrays of at least 16 bytes at least 16-byte placement alignment.
 pub fn allocation_align(ty: &Type, target: Target) -> Result<u32, LayoutError> {
-    let layout = layout_of(ty, target)?;
-    Ok(if matches!(ty, Type::Array(..)) && layout.size >= 16 {
-        layout.align.max(16)
-    } else {
-        layout.align
+    allocation_align_for_target(ty, &target.specification())
+}
+
+pub fn allocation_align_for_target(
+    ty: &Type,
+    target: &target_spec::TargetSpec,
+) -> Result<u32, LayoutError> {
+    let layout = layout_for_target(ty, target, 128)?;
+    Ok(match target.storage.large_array {
+        Some((threshold, align)) if matches!(ty, Type::Array(..)) && layout.size >= threshold => {
+            layout.align.max(align)
+        },
+        _ => layout.align,
     })
 }
 

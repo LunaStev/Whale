@@ -1,6 +1,6 @@
 use crate::error::{AsmError, SourceSpan};
 
-use whale_diagnostic::{Context, Diagnostic, SourceLocation, ToDiagnostic};
+use diagnostic::{Context, Diagnostic, SourceLocation, ToDiagnostic};
 
 fn source(name: &str, span: SourceSpan) -> Context {
     Context::Source(SourceLocation {

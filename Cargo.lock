@@ -3,10 +3,27 @@
 version = 4
 
 [[package]]
+name = "amd64"
+version = "0.1.0"
+dependencies = [
+ "assembler",
+ "diagnostic",
+]
+
+[[package]]
 name = "assembler"
 version = "0.1.0"
 dependencies = [
- "whale-diagnostic",
+ "diagnostic",
+]
+
+[[package]]
+name = "backend-api"
+version = "0.1.0"
+dependencies = [
+ "diagnostic",
+ "ir",
+ "target-spec",
 ]
 
 [[package]]
@@ -22,6 +39,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
+name = "diagnostic"
+version = "0.1.0"
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -29,6 +50,18 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "external-target"
+version = "0.1.0"
+dependencies = [
+ "assembler",
+ "backend-api",
+ "diagnostic",
+ "ir",
+ "target-spec",
+ "toolchain",
 ]
 
 [[package]]
@@ -52,10 +85,10 @@ dependencies = [
 name = "ir"
 version = "0.1.0"
 dependencies = [
+ "diagnostic",
  "serde",
  "serde_json",
- "whale-diagnostic",
- "whale-target",
+ "target-spec",
 ]
 
 [[package]]
@@ -74,8 +107,8 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 name = "linker"
 version = "0.1.0"
 dependencies = [
+ "diagnostic",
  "object",
- "whale-diagnostic",
 ]
 
 [[package]]
@@ -94,8 +127,8 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "object"
 version = "0.1.0"
 dependencies = [
- "whale-diagnostic",
- "whale-target",
+ "diagnostic",
+ "target-spec",
 ]
 
 [[package]]
@@ -132,6 +165,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "reverse"
 version = "0.1.0"
 dependencies = [
+ "amd64",
  "assembler",
  "object",
  "serde_json",
@@ -214,6 +248,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "target-spec"
+version = "0.1.0"
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,6 +265,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "toolchain"
+version = "0.1.0"
+dependencies = [
+ "assembler",
+ "backend-api",
+ "diagnostic",
+ "ir",
+ "target-spec",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -236,6 +285,7 @@ checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 name = "whale"
 version = "0.1.0"
 dependencies = [
+ "amd64",
  "assembler",
  "ir",
  "linker",
@@ -245,15 +295,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "toolchain",
 ]
-
-[[package]]
-name = "whale-diagnostic"
-version = "0.1.0"
-
-[[package]]
-name = "whale-target"
-version = "0.1.0"
 
 [[package]]
 name = "winapi-util"

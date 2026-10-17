@@ -2,7 +2,7 @@
 
 use core::fmt;
 
-pub use whale_target::{DataLayout, Endian, Target, TargetError};
+pub use target_spec::{DataLayout, Endian, Target, TargetError};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {

@@ -1,0 +1,14 @@
+[package]
+name = "external-target"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+assembler = { path = "../../assembler" }
+ir = { path = "../../ir" }
+target-spec = { path = "../../target-spec" }
+backend-api = { path = "../../backend-api" }
+toolchain = { path = "../../toolchain" }
+diagnostic = { path = "../../diagnostic" }

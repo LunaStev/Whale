@@ -57,6 +57,11 @@ pub struct Relocation {
 
 #[derive(Debug, Clone)]
 pub enum RelocKind {
+    /// Opaque relocation interpreted only by the owning target implementation.
+    TargetSpecific {
+        namespace: String,
+        code: u32,
+    },
     Absolute64,
     Absolute32,
     /// A sign-extended absolute disp32 address (ELF R_X86_64_32S).
@@ -68,7 +73,7 @@ pub enum RelocKind {
     Relative8,
 }
 
-/// Limits for AMD64 encoding. Sparse BSS does not consume materialized output.
+/// Limits for assembly implementations. Sparse BSS does not consume materialized output.
 #[derive(Debug, Clone, Copy)]
 pub struct AssemblyLimits {
     /// Total materialized bytes across every section, checked before allocation.
@@ -83,13 +88,13 @@ impl Default for AssemblyLimits {
     }
 }
 
-pub fn assemble(source: &str, isa: &impl ISA) -> Result<AssemblerOutput, AsmError> {
+pub fn assemble(source: &str, isa: &(impl ISA + ?Sized)) -> Result<AssemblerOutput, AsmError> {
     assemble_with_limits(source, isa, &AssemblyLimits::default())
 }
 
 pub fn assemble_with_limits(
     source: &str,
-    isa: &impl ISA,
+    isa: &(impl ISA + ?Sized),
     limits: &AssemblyLimits,
 ) -> Result<AssemblerOutput, AsmError> {
     assemble_named_with_limits("<input>", source, isa, limits)
@@ -99,7 +104,7 @@ pub fn assemble_with_limits(
 pub fn assemble_named(
     source_name: &str,
     source: &str,
-    isa: &impl ISA,
+    isa: &(impl ISA + ?Sized),
 ) -> Result<AssemblerOutput, AsmError> {
     assemble_named_with_limits(source_name, source, isa, &AssemblyLimits::default())
 }
@@ -107,7 +112,7 @@ pub fn assemble_named(
 pub fn assemble_named_with_limits(
     source_name: &str,
     source: &str,
-    isa: &impl ISA,
+    isa: &(impl ISA + ?Sized),
     limits: &AssemblyLimits,
 ) -> Result<AssemblerOutput, AsmError> {
     let tokens = tokenize(source).map_err(|error| error.with_source_name(source_name))?;

@@ -9,7 +9,7 @@ default = []
 socket = ["dep:serde", "dep:serde_json"]
 
 [dependencies]
-whale-diagnostic = { path = "../diagnostic" }
-whale-target = { path = "../target-spec" }
+diagnostic = { path = "../diagnostic" }
+target-spec = { path = "../target-spec" }
 serde_json = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

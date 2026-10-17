@@ -12,7 +12,8 @@ fn absent_core_has_an_explicit_capability_error() {
 mod native {
     use super::*;
 
-    use assembler::{assemble, isa::AMD64};
+    use amd64::AMD64;
+    use assembler::assemble;
 
     fn one(bytes: &[u8]) -> Instruction {
         let instruction = decode(bytes, 0).unwrap_or_else(|e| panic!("{bytes:02x?}: {e}"));

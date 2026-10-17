@@ -60,13 +60,11 @@ pub fn check(target: Target, bytes: &[u8]) -> bool {
         Target::Object => unreachable!("binary target handled before UTF-8 conversion"),
         Target::Assembler => {
             if let Ok(tokens) = assembler::tokens::tokenize(source) {
-                let _ = assembler::isa::amd64::parser::parse(&tokens);
+                let _ = amd64::parser::parse(&tokens);
             }
             let limits =
                 assembler::AssemblyLimits { max_output_bytes: 65536, max_relax_iterations: 32 };
-            let Ok(output) =
-                assembler::assemble_with_limits(source, &assembler::isa::AMD64, &limits)
-            else {
+            let Ok(output) = assembler::assemble_with_limits(source, &amd64::AMD64, &limits) else {
                 return false;
             };
             assert!(

@@ -114,6 +114,7 @@ impl Target {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TargetError {
+    Contract(String),
     UnsupportedTarget(String),
     LayoutMismatch { target: Target, actual: DataLayout },
     UnsupportedObjectTarget(ObjectTarget),
@@ -122,6 +123,7 @@ pub enum TargetError {
 impl fmt::Display for TargetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Contract(reason) => f.write_str(reason),
             Self::UnsupportedTarget(name) => {
                 write!(f, "unsupported target {name:?}; supported targets: ")?;
                 for (i, target) in Target::SUPPORTED.iter().enumerate() {
@@ -148,3 +150,6 @@ impl fmt::Display for TargetError {
 }
 
 impl std::error::Error for TargetError {}
+
+pub mod extension;
+pub use extension::{MemoryModel, OutputKind, StorageLayout, TargetSpec};

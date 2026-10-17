@@ -5,7 +5,7 @@ edition = "2021"
 rust-version.workspace = true
 
 [dependencies]
-whale-diagnostic = { path = "../diagnostic" }
-whale-target = { path = "../target-spec" }
+diagnostic = { path = "../diagnostic" }
+target-spec = { path = "../target-spec" }
 # Future dependencies like 'elf' crate if we don't want to build from scratch, 
 # but building basic ELF writer from scratch is a good learning exercise for this project.
