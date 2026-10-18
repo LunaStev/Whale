@@ -67,7 +67,10 @@ RV64I emits no compressed instructions, M/A/F/D/CSR extensions, relaxation hints
 or multi-instruction `li`/`call`/`tail` pseudos. LUI/AUIPC take a raw unsigned
 20-bit upper field. Use explicit JAL/JALR for calls; `%hi`/`%lo`/`%pcrel_hi`
 address construction is not implemented. The object has soft-float ABI flags and
-RVC disabled. LoongArch64 uses ELF object ABI v1 with LP64S flags (`0x41`).
+RVC disabled. FENCE defaults to `iorw,iorw` without operands; explicit sets use
+unique `i`, `o`, `r`, `w` flags or exactly `0` for an empty set, as in
+`fence 0,0`, `fence rw,0` and `fence 0,rw`. LoongArch64 uses ELF object ABI v1
+with LP64S flags (`0x41`).
 
 Registers use A64 `x0..x30`/`w0..w30`, SP/ZR and FP/LR aliases; RV `x0..x31`
 and standard ABI aliases; LoongArch `$r0..$r31` and ABI aliases. LoongArch also

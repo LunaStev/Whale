@@ -69,3 +69,6 @@ a30ff8fe	sb x15,-1(x16)
 0f00f00f	fence
 0f003003	fence rw,rw
 0f00f00f	fence iorw,iorw
+0f000000	fence 0,0
+0f000003	fence rw,0
+0f003000	fence 0,rw

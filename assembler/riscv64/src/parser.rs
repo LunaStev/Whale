@@ -33,6 +33,9 @@ pub(crate) fn memory(text: &str) -> Result<(u32, u32), AsmError> {
 }
 
 pub(crate) fn fence_mask(s: &str) -> Result<u32, AsmError> {
+    if s == "0" {
+        return Ok(0);
+    }
     let mut value = 0;
     for c in s.chars() {
         let bit = match c {
@@ -40,7 +43,7 @@ pub(crate) fn fence_mask(s: &str) -> Result<u32, AsmError> {
             'o' => 4,
             'r' => 2,
             'w' => 1,
-            _ => return Err(error("fence sets use i,o,r,w")),
+            _ => return Err(error("fence sets use i,o,r,w or literal 0")),
         };
         if value & bit != 0 {
             return Err(error("duplicate fence flag"));
@@ -92,10 +95,15 @@ mod tests {
     }
 
     #[test]
+    fn fence_accepts_literal_zero_for_an_empty_set() {
+        assert_eq!(fence_mask("0").unwrap(), 0);
+    }
+
+    #[test]
     fn fence_requires_unique_known_flags() {
         assert_eq!(fence_mask("iorw").unwrap(), 15);
         assert_eq!(fence_mask("rw").unwrap(), 3);
-        for bad in ["rr", "ii", "rwz", "RW"] {
+        for bad in ["rr", "ii", "rwz", "RW", "0r", "r0", "00", "+0", "-0", "0x0"] {
             assert!(fence_mask(bad).is_err(), "{bad}");
         }
     }

@@ -19,3 +19,26 @@ fn matches_retained_independent_encodings() {
         assert_eq!(output.sections[0].data, expected, "{source}");
     }
 }
+
+#[test]
+fn rejects_malformed_fence_sets() {
+    for source in [
+        "fence 0r,rw",
+        "fence rw,0r",
+        "fence 00,rw",
+        "fence rw,00",
+        "fence +0,rw",
+        "fence rw,+0",
+        "fence ,rw",
+        "fence rw,",
+        "fence rr,rw",
+        "fence rw,ww",
+        "fence z,rw",
+        "fence rw,z",
+    ] {
+        assert!(
+            riscv64::RiscV64.assemble("fence.s", source, &AssemblyLimits::default()).is_err(),
+            "{source}"
+        );
+    }
+}
