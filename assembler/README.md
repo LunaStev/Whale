@@ -71,8 +71,11 @@ RVC disabled. LoongArch64 uses ELF object ABI v1 with LP64S flags (`0x41`).
 
 Registers use A64 `x0..x30`/`w0..w30`, SP/ZR and FP/LR aliases; RV `x0..x31`
 and standard ABI aliases; LoongArch `$r0..$r31` and ABI aliases. LoongArch also
-accepts the names without `$`. Numeric control-transfer operands are **byte
-displacements from the current instruction**. JIRL takes a numeric byte offset
+accepts the names without `$`. Register names are case-insensitive. Numeric
+suffixes use unsigned decimal digits without leading zeros, so names such as
+`x+1`, `x01` and `$r01` are rejected rather than normalized to register 1.
+Numeric control-transfer operands are **byte displacements from the current
+instruction**. JIRL takes a numeric byte offset
 relative to its register; indirect control flow does not create label fixups.
 
 ## Shared source and relocation rules
