@@ -2,7 +2,7 @@
 //! A64 instruction selection, pseudo expansion and operand validation.
 use crate::{
     encoding::{arithmetic, branch, memory, sf},
-    parser::{no_sp, reg, same, shift},
+    parser::{no_sp, reg, same, shift, Reg},
     tables,
 };
 
@@ -38,14 +38,7 @@ pub(crate) fn encode(inst: &Instruction, cx: &mut Context<'_>) -> Result<u32, As
             let rd = reg(&a[0])?;
             if let Ok(value) = fixed::integer(&a[1]) {
                 no_sp(rd)?;
-                let (opcode, bits) = if (0..65536).contains(&value) {
-                    (0x52800000, value as u32)
-                } else if (-65536..0).contains(&value) {
-                    (0x12800000, (!value as u32) & 0xffff)
-                } else {
-                    return Err(error("mov immediate requires a single 16-bit MOVZ/MOVN; use movz/movk for larger values"));
-                };
-                Ok(opcode | sf(rd) | bits << 5 | rd.index)
+                mov_immediate(rd, value)
             } else {
                 let rn = reg(&a[1])?;
                 same(rd, rn)?;
@@ -154,4 +147,31 @@ pub(crate) fn encode(inst: &Instruction, cx: &mut Context<'_>) -> Result<u32, As
         },
         _ => Err(error(format!("unsupported A64 instruction {m:?}"))),
     }
+}
+
+fn mov_immediate(rd: Reg, value: i128) -> Result<u32, AsmError> {
+    let mask = u64::MAX >> (64 - rd.width);
+    if value < -(1_i128 << (rd.width - 1)) || value > i128::from(mask) {
+        return Err(error("mov immediate does not fit the destination register width"));
+    }
+    // Keep the existing MOVN encoding for small negative spellings, including W
+    // constants for which a MOVZ in the upper lane would also be legal.
+    if (-65536..0).contains(&value) {
+        return Ok(tables::wide_move("movn") | sf(rd) | ((!value as u32) & 0xffff) << 5 | rd.index);
+    }
+    let bits = value as u64 & mask;
+    for (mnemonic, pattern) in [("movz", bits), ("movn", !bits & mask)] {
+        for lane in 0..rd.width / 16 {
+            let shift = lane * 16;
+            if pattern & !(0xffff_u64 << shift) == 0 {
+                let immediate = (pattern >> shift) as u32;
+                return Ok(tables::wide_move(mnemonic)
+                    | sf(rd)
+                    | lane << 21
+                    | immediate << 5
+                    | rd.index);
+            }
+        }
+    }
+    Err(error("mov immediate requires a single 16-bit MOVZ/MOVN; use movz/movk for larger values"))
 }

@@ -60,8 +60,11 @@ source-located error; it never becomes a guessed encoding.
 
 A64 distinguishes SP from ZR and checks operand widths. Logical immediates,
 extended-register arithmetic and load/store writeback are not implemented.
-MOV immediates must fit one wide-move instruction; use explicit MOVZ/MOVK for
-larger constants. Loads/stores use a base plus immediate, with checked scaling.
+MOV immediates select one MOVZ or MOVN in any legal 16-bit lane: 0/16
+for W registers and 0/16/32/48 for X registers. Signed values and unsigned
+spellings must fit the destination width. Constants requiring several wide
+moves still require explicit MOVZ/MOVK instructions. Loads/stores use a base plus
+immediate, with checked scaling.
 
 RV64I emits no compressed instructions, M/A/F/D/CSR extensions, relaxation hints
 or multi-instruction `li`/`call`/`tail` pseudos. LUI/AUIPC take a raw unsigned
