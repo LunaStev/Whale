@@ -973,6 +973,8 @@ fn wave_record<const N: usize>(kind: u32, fields: &[u64]) -> [u8; N] {
 mod wave_tests {
     use super::*;
 
+    use crate::RelocKind;
+
     #[test]
     fn whole_objects_match_rust_with_bss_symbols_and_signed_relocations() {
         for seed in [0u64, 1, 127, 65535, u32::MAX as u64] {
