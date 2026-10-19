@@ -361,6 +361,12 @@ impl Budget {
     }
 }
 
+/// The gABI requires a nonempty string table to begin and end with NUL. An
+/// empty table is rejected too: every supported table must hold the empty name.
+fn is_string_table(bytes: &[u8]) -> bool {
+    bytes.first() == Some(&0) && bytes.last() == Some(&0)
+}
+
 fn reserve<T>(v: &mut Vec<T>, n: usize) -> Result<()> {
     v.try_reserve_exact(n)
         .map_err(|_| error(Kind::HostAllocation, "ELF metadata allocation failed"))
@@ -430,7 +436,7 @@ pub fn read_elf_with_usage(
         headers.push(section);
     }
     let names = headers[h.string_section];
-    if names.kind != 3 || view.range(names.offset, names.size)?.first() != Some(&0) {
+    if names.kind != 3 || !is_string_table(view.range(names.offset, names.size)?) {
         return Err(
             error(Kind::InvalidName, "invalid section-name string table").section(h.string_section)
         );
@@ -492,8 +498,7 @@ pub fn read_elf_with_usage(
                 }
             },
             3 => {
-                if section.flags != 0
-                    || view.range(section.offset, section.size)?.first() != Some(&0)
+                if section.flags != 0 || !is_string_table(view.range(section.offset, section.size)?)
                 {
                     return Err(error(Kind::InvalidName, "invalid ELF string table").section(index));
                 }

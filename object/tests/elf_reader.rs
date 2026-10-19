@@ -254,10 +254,50 @@ fn malformed_sections_symbols_relas_and_names_preserve_offset_context() {
     assert_eq!(rejected(&b).kind, ObjectErrorKind::OutOfBounds);
     let mut b = good.clone();
     b[strings.offset as usize + strings.size as usize - 1] = b'X';
-    assert_eq!(rejected(&b).kind, ObjectErrorKind::InvalidName);
+    let e = rejected(&b);
+    assert_eq!(e.kind, ObjectErrorKind::InvalidName);
+    assert!(e.diagnostic().contexts.contains(&Context::Section { index: 7, name: None }));
     let mut b = good.clone();
     put32(&mut b, table + 8 * 64 + 40, 7);
     assert_eq!(rejected(&b).kind, ObjectErrorKind::InvalidRelocation);
+}
+
+/// Moves string table `index` to EOF with new `contents`, leaving every name
+/// offset unchanged so the appended tail stays unreferenced.
+fn with_string_table(good: &[u8], index: usize, contents: &[u8]) -> Vec<u8> {
+    let view = ElfView::parse(good, ObjectReadLimits::default()).unwrap();
+    let header = view.header.section_offset as usize + index * 64;
+    let mut b = good.to_vec();
+    let end = b.len() as u64;
+    put64(&mut b, header + 24, end);
+    put64(&mut b, header + 32, contents.len() as u64);
+    b.extend_from_slice(contents);
+    b
+}
+
+#[test]
+fn string_tables_require_a_final_nul_even_when_the_tail_is_unreferenced() {
+    for good in [fixture(), sample().write().unwrap()] {
+        let expected = ObjectFile::read(&good).unwrap();
+        let view = ElfView::parse(&good, ObjectReadLimits::default()).unwrap();
+        let symtab = (1..view.header.section_count)
+            .map(|i| view.section(i).unwrap())
+            .find(|s| s.kind == 2)
+            .unwrap();
+        for index in [view.header.string_section, symtab.link as usize] {
+            let table = view.section(index).unwrap();
+            let original = view.range(table.offset, table.size).unwrap();
+            let valid = [original, &b"unused\0"[..]].concat();
+            let imported = ObjectFile::read(&with_string_table(&good, index, &valid)).unwrap();
+            assert_semantics(&expected, &imported);
+            let bad = [original, &b"unused"[..]].concat();
+            let e = rejected(&with_string_table(&good, index, &bad));
+            assert_eq!(e.kind, ObjectErrorKind::InvalidName, "table {index}");
+            assert!(e.diagnostic().contexts.contains(&Context::Section { index, name: None }));
+            let e = rejected(&with_string_table(&good, index, b""));
+            assert_eq!(e.kind, ObjectErrorKind::InvalidName, "empty table {index}");
+        }
+    }
 }
 
 #[test]
