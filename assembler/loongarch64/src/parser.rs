@@ -11,6 +11,7 @@ pub(crate) fn reg(text: &str) -> Result<u32, AsmError> {
         return Ok(i as u32);
     }
     text.strip_prefix('r')
+        .filter(|n| n.bytes().all(|b| b.is_ascii_digit()) && (n.len() == 1 || !n.starts_with('0')))
         .and_then(|n| n.parse::<u32>().ok())
         .filter(|n| *n < 32)
         .ok_or_else(|| error(format!("invalid LoongArch64 register {text:?}")))
@@ -19,6 +20,22 @@ pub(crate) fn reg(text: &str) -> Result<u32, AsmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_register_names_are_canonical() {
+        for index in 0..32 {
+            let name = format!("r{index}");
+            assert_eq!(reg(&name).unwrap(), index);
+            assert_eq!(reg(&name.to_ascii_uppercase()).unwrap(), index);
+            assert_eq!(reg(&format!("${name}")).unwrap(), index);
+            assert_eq!(reg(&format!("${}", name.to_ascii_uppercase())).unwrap(), index);
+        }
+        for suffix in ["+1", "-1", "-0", "+0", "00", "01", "031", "1x", "１"] {
+            let name = format!("r{suffix}");
+            assert!(reg(&name).is_err(), "accepted {name}");
+            assert!(reg(&format!("${name}")).is_err(), "accepted ${name}");
+        }
+    }
 
     #[test]
     fn abi_aliases_and_numeric_registers_share_identity() {

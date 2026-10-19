@@ -60,19 +60,28 @@ source-located error; it never becomes a guessed encoding.
 
 A64 distinguishes SP from ZR and checks operand widths. Logical immediates,
 extended-register arithmetic and load/store writeback are not implemented.
-MOV immediates must fit one wide-move instruction; use explicit MOVZ/MOVK for
-larger constants. Loads/stores use a base plus immediate, with checked scaling.
+MOV immediates select one MOVZ or MOVN in any legal 16-bit lane: 0/16
+for W registers and 0/16/32/48 for X registers. Signed values and unsigned
+spellings must fit the destination width. Constants requiring several wide
+moves still require explicit MOVZ/MOVK instructions. Loads/stores use a base plus
+immediate, with checked scaling.
 
 RV64I emits no compressed instructions, M/A/F/D/CSR extensions, relaxation hints
 or multi-instruction `li`/`call`/`tail` pseudos. LUI/AUIPC take a raw unsigned
 20-bit upper field. Use explicit JAL/JALR for calls; `%hi`/`%lo`/`%pcrel_hi`
 address construction is not implemented. The object has soft-float ABI flags and
-RVC disabled. LoongArch64 uses ELF object ABI v1 with LP64S flags (`0x41`).
+RVC disabled. FENCE defaults to `iorw,iorw` without operands; explicit sets use
+unique `i`, `o`, `r`, `w` flags or exactly `0` for an empty set, as in
+`fence 0,0`, `fence rw,0` and `fence 0,rw`. LoongArch64 uses ELF object ABI v1
+with LP64S flags (`0x41`).
 
 Registers use A64 `x0..x30`/`w0..w30`, SP/ZR and FP/LR aliases; RV `x0..x31`
 and standard ABI aliases; LoongArch `$r0..$r31` and ABI aliases. LoongArch also
-accepts the names without `$`. Numeric control-transfer operands are **byte
-displacements from the current instruction**. JIRL takes a numeric byte offset
+accepts the names without `$`. Register names are case-insensitive. Numeric
+suffixes use unsigned decimal digits without leading zeros, so names such as
+`x+1`, `x01` and `$r01` are rejected rather than normalized to register 1.
+Numeric control-transfer operands are **byte displacements from the current
+instruction**. JIRL takes a numeric byte offset
 relative to its register; indirect control flow does not create label fixups.
 
 ## Shared source and relocation rules

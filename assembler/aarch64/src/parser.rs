@@ -26,8 +26,13 @@ pub(crate) fn reg(text: &str) -> Result<Reg, AsmError> {
             Some('w') => 32,
             _ => return Err(error(format!("invalid A64 register {text:?}"))),
         };
-        let index = chars
-            .as_str()
+        let suffix = chars.as_str();
+        if !suffix.bytes().all(|b| b.is_ascii_digit())
+            || (suffix.len() > 1 && suffix.starts_with('0'))
+        {
+            return Err(error(format!("invalid A64 register {text:?}")));
+        }
+        let index = suffix
             .parse::<u32>()
             .ok()
             .filter(|n| *n <= 30)
@@ -111,12 +116,36 @@ mod tests {
     }
 
     #[test]
+    fn numeric_register_names_are_canonical() {
+        for prefix in ["x", "w"] {
+            for index in 0..=30 {
+                let name = format!("{prefix}{index}");
+                let register = reg(&name).unwrap();
+                assert_eq!(register.index, index);
+                assert_eq!(reg(&name.to_ascii_uppercase()).unwrap(), register);
+            }
+            for suffix in ["+1", "-1", "-0", "+0", "00", "01", "030", "1x", "１"] {
+                let name = format!("{prefix}{suffix}");
+                assert!(reg(&name).is_err(), "accepted {name}");
+            }
+        }
+        for (alias, numeric) in [("fp", "x29"), ("lr", "x30")] {
+            assert_eq!(reg(alias).unwrap(), reg(numeric).unwrap());
+        }
+        for alias in ["sp", "wsp", "xzr", "wzr", "fp", "lr"] {
+            assert_eq!(reg(alias).unwrap(), reg(&alias.to_ascii_uppercase()).unwrap());
+        }
+    }
+
+    #[test]
     fn memory_requires_64_bit_base_without_writeback() {
         let address = memory("[sp, #-256]").unwrap();
         assert_eq!(address.base, reg("sp").unwrap());
         assert_eq!(address.offset, -256);
         assert_eq!(memory("[x29]").unwrap().offset, 0);
-        for bad in ["[w0]", "[xzr]", "[x0]!", "[x0], #8", "[x0, x1]", "[x0, #4, #8]"] {
+        for bad in
+            ["[w0]", "[xzr]", "[x+1]", "[x01]", "[x0]!", "[x0], #8", "[x0, x1]", "[x0, #4, #8]"]
+        {
             assert!(memory(bad).is_err(), "{bad}");
         }
     }

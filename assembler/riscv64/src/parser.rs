@@ -16,6 +16,7 @@ pub(crate) fn reg(text: &str) -> Result<u32, AsmError> {
         return Ok(i as u32);
     }
     text.strip_prefix('x')
+        .filter(|n| n.bytes().all(|b| b.is_ascii_digit()) && (n.len() == 1 || !n.starts_with('0')))
         .and_then(|n| n.parse::<u32>().ok())
         .filter(|n| *n < 32)
         .ok_or_else(|| error(format!("invalid RV64 register {text:?}")))
@@ -32,6 +33,9 @@ pub(crate) fn memory(text: &str) -> Result<(u32, u32), AsmError> {
 }
 
 pub(crate) fn fence_mask(s: &str) -> Result<u32, AsmError> {
+    if s == "0" {
+        return Ok(0);
+    }
     let mut value = 0;
     for c in s.chars() {
         let bit = match c {
@@ -39,7 +43,7 @@ pub(crate) fn fence_mask(s: &str) -> Result<u32, AsmError> {
             'o' => 4,
             'r' => 2,
             'w' => 1,
-            _ => return Err(error("fence sets use i,o,r,w")),
+            _ => return Err(error("fence sets use i,o,r,w or literal 0")),
         };
         if value & bit != 0 {
             return Err(error("duplicate fence flag"));
@@ -52,6 +56,19 @@ pub(crate) fn fence_mask(s: &str) -> Result<u32, AsmError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_register_names_are_canonical() {
+        for index in 0..32 {
+            let name = format!("x{index}");
+            assert_eq!(reg(&name).unwrap(), index);
+            assert_eq!(reg(&name.to_ascii_uppercase()).unwrap(), index);
+        }
+        for suffix in ["+1", "-1", "-0", "+0", "00", "01", "031", "1x", "１"] {
+            let name = format!("x{suffix}");
+            assert!(reg(&name).is_err(), "accepted {name}");
+        }
+    }
 
     #[test]
     fn abi_aliases_preserve_register_identity() {
@@ -70,16 +87,23 @@ mod tests {
         assert_eq!(memory("-2048(sp)").unwrap(), (2, 0x800));
         assert_eq!(memory("2047(x31)").unwrap(), (31, 0x7ff));
         assert_eq!(memory("(sp)").unwrap(), (2, 0));
-        for bad in ["2048(sp)", "-2049(sp)", "4((sp))", "4(sp))", "4(sp", "4(x32)"] {
+        for bad in
+            ["2048(sp)", "-2049(sp)", "4((sp))", "4(sp))", "4(sp", "4(x32)", "4(x+1)", "4(x01)"]
+        {
             assert!(memory(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn fence_accepts_literal_zero_for_an_empty_set() {
+        assert_eq!(fence_mask("0").unwrap(), 0);
     }
 
     #[test]
     fn fence_requires_unique_known_flags() {
         assert_eq!(fence_mask("iorw").unwrap(), 15);
         assert_eq!(fence_mask("rw").unwrap(), 3);
-        for bad in ["rr", "ii", "rwz", "RW"] {
+        for bad in ["rr", "ii", "rwz", "RW", "0r", "r0", "00", "+0", "-0", "0x0"] {
             assert!(fence_mask(bad).is_err(), "{bad}");
         }
     }

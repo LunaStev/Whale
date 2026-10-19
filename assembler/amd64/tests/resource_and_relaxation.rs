@@ -66,7 +66,7 @@ fn global_declarations_are_defined_or_explicitly_external() {
 
 fn decoded_target(bytes: &[u8], at: usize) -> (usize, usize) {
     match bytes[at] {
-        0xeb | 0x74 => (2, (at as i64 + 2 + bytes[at + 1] as i8 as i64) as usize),
+        0xeb | 0x74 | 0xe2 => (2, (at as i64 + 2 + bytes[at + 1] as i8 as i64) as usize),
         0xe9 => (
             5,
             (at as i64 + 5 + i32::from_le_bytes(bytes[at + 1..at + 5].try_into().unwrap()) as i64)
@@ -124,5 +124,88 @@ fn forward_backward_displacement_boundaries_decode_to_the_final_labels() {
             assert_eq!(decoded_target(bytes, end).1, 0);
             assert!(out.sections[0].relocs.is_empty());
         }
+    }
+}
+
+#[test]
+fn loop_range_checks_use_the_converged_forward_and_backward_layout() {
+    for (mnemonic, opcode, padding) in
+        [("jmp", 0xeb, 124), ("jmp", 0xeb, 125), ("je", 0x74, 124), ("je", 0x74, 125)]
+    {
+        let source = format!("entry: loop .done\n{mnemonic} .done\nresb {padding}\n.done: ret");
+        let out = assemble(&source, &AMD64).unwrap();
+        let bytes = &out.sections[0].data;
+        let done = out.symbols.iter().find(|s| s.name == "entry.done").unwrap().offset as usize;
+        assert_eq!(&bytes[..4], &[0xe2, (padding + 2) as u8, opcode, padding as u8]);
+        assert_eq!(decoded_target(bytes, 0).1, done);
+        assert_eq!(decoded_target(bytes, 2).1, done);
+        assert!(out.sections[0].relocs.is_empty());
+        assert!(limited(&source, 1024, 2).err().unwrap().to_string().contains("did not converge"));
+        assert_eq!(limited(&source, 1024, 3).unwrap().sections[0].data, *bytes);
+    }
+    for padding in [121, 122, 123] {
+        let source = format!("start: nop\njmp done\nresb {padding}\nback: loop start\ndone: ret");
+        let out = assemble(&source, &AMD64).unwrap();
+        let bytes = &out.sections[0].data;
+        let back = out.symbols.iter().find(|s| s.name == "back").unwrap().offset as usize;
+        let done = out.symbols.iter().find(|s| s.name == "done").unwrap().offset as usize;
+        assert_eq!(back, padding + 3);
+        assert_eq!(decoded_target(bytes, back).1, 0);
+        assert_eq!(decoded_target(bytes, 1).1, done);
+        assert!(out.sections[0].relocs.is_empty());
+    }
+}
+
+#[test]
+fn loop_limits_and_alignment_keep_precise_diagnostics_and_final_targets() {
+    for (source, line) in [
+        ("loop done\njmp done\nresb 126\ndone: ret", "line 1,"),
+        ("start: nop\njmp done\nresb 124\nloop start\ndone: ret", "line 4,"),
+        ("extern ext\nlocal: loop local\ncall ext\nresb 128\nloop local", "line 5,"),
+    ] {
+        let error = assembler::assemble_named("loop.asm", source, &AMD64).err().unwrap();
+        let text = error.to_string();
+        assert!(text.contains("out of 8-bit range"), "{text}");
+        assert!(text.contains("loop.asm"), "{text}");
+        assert!(text.contains(line), "{text}");
+    }
+    for source in [
+        "loop done\njmp done\nresb 120\nalign 16\ndone: ret",
+        "jmp done\nagain: loop again\nresb 121\nalign 128\nresb 2\ndone: ret",
+    ] {
+        let out = assemble(source, &AMD64).unwrap();
+        let bytes = &out.sections[0].data;
+        let done = out.symbols.iter().find(|s| s.name == "done").unwrap().offset as usize;
+        let loop_at = if source.starts_with("loop") { 0 } else { 5 };
+        let loop_target = if loop_at == 0 { done } else { loop_at };
+        assert_eq!(decoded_target(bytes, loop_at).1, loop_target);
+        assert_eq!(decoded_target(bytes, if loop_at == 0 { 2 } else { 0 }).1, done);
+        assert!(out.sections[0].relocs.is_empty());
+        assert_eq!(assemble(source, &AMD64).unwrap().sections[0].data, *bytes);
+    }
+}
+
+#[test]
+fn loop_resolution_preserves_other_relocations_and_cross_section_pc8() {
+    let source = "extern ext\nloop local\ncall ext\ndq ext\nlocal: loop ext\nloop other\nsection .other,text\nother: ret";
+    let out = assemble(source, &AMD64).unwrap();
+    let text = &out.sections[0];
+    assert_eq!(decoded_target(&text.data, 0).1, 15);
+    assert_eq!(text.relocs.len(), 4);
+    for (r, offset, symbol) in [
+        (&text.relocs[0], 3, "ext"),
+        (&text.relocs[1], 7, "ext"),
+        (&text.relocs[2], 16, "ext"),
+        (&text.relocs[3], 18, "other"),
+    ] {
+        assert_eq!(r.offset, offset);
+        assert_eq!(r.symbol, symbol);
+    }
+    assert!(matches!(text.relocs[0].kind, RelocKind::Branch32));
+    assert!(matches!(text.relocs[1].kind, RelocKind::Absolute64));
+    for r in &text.relocs[2..] {
+        assert!(matches!(r.kind, RelocKind::Relative8));
+        assert_eq!(r.addend, -1);
+        assert_eq!(text.data[r.offset], 0);
     }
 }

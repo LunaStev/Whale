@@ -19,6 +19,12 @@ struct EncodingLayout {
     instruction_offsets: Vec<usize>,
 }
 
+struct EncodingPass {
+    output: AssemblerOutput,
+    layout: EncodingLayout,
+    relocation_sites: HashMap<(usize, usize), usize>,
+}
+
 // Resolve the one-symbol constant dependency graph before encoding any use.
 // Worklist traversal avoids recursion and repeated whole-source rescans.
 fn resolve_constants(ast: &AST) -> Result<HashMap<String, i128>, AsmError> {
@@ -132,12 +138,13 @@ pub fn encode_with_limits(
     let mut prev_label_locs = None;
     let mut forced_near = HashSet::new();
     for _ in 0..limits.max_relax_iterations {
-        let (out, label_locs) =
+        let mut pass =
             encode_once(ast, prev_label_locs.as_ref(), &consts, limits, &mut forced_near)?;
-        if prev_label_locs.as_ref() == Some(&label_locs) {
-            return Ok(out);
+        if prev_label_locs.as_ref() == Some(&pass.layout) {
+            resolve_loops(ast, &mut pass)?;
+            return Ok(pass.output);
         }
-        prev_label_locs = Some(label_locs);
+        prev_label_locs = Some(pass.layout);
     }
     Err(AsmError::EncodeError(format!(
         "Branch relaxation did not converge within {} passes",
@@ -151,7 +158,7 @@ fn encode_once(
     consts: &HashMap<String, i128>,
     limits: &assembler::AssemblyLimits,
     forced_near: &mut HashSet<usize>,
-) -> Result<(AssemblerOutput, EncodingLayout), AsmError> {
+) -> Result<EncodingPass, AsmError> {
     let mut materialized = 0usize;
     let mut sections = Vec::new();
     let mut symbols = Vec::new();
@@ -482,10 +489,46 @@ fn encode_once(
         }
     }
 
-    Ok((
-        AssemblerOutput { sections, symbols },
-        EncodingLayout { labels: label_locs, instruction_lengths, instruction_offsets },
-    ))
+    Ok(EncodingPass {
+        output: AssemblerOutput { sections, symbols },
+        layout: EncodingLayout { labels: label_locs, instruction_lengths, instruction_offsets },
+        relocation_sites,
+    })
+}
+
+// LOOP has a fixed length, so its displacement cannot affect relaxation. Resolve
+// local PC8 fields only after the whole layout stabilizes; an intermediate near
+// JMP/Jcc or alignment change must not trigger a premature range diagnostic.
+fn resolve_loops(ast: &AST, pass: &mut EncodingPass) -> Result<(), AsmError> {
+    for (section_index, section) in pass.output.sections.iter_mut().enumerate() {
+        let mut retained = 0;
+        for index in 0..section.relocs.len() {
+            let relocation = &section.relocs[index];
+            let target = pass.layout.labels.get(&relocation.symbol);
+            if let Some((_, target_offset)) = target.filter(|(target_section, _)| {
+                matches!(relocation.kind, RelocKind::Relative8) && *target_section == section_index
+            }) {
+                let displacement = i128::from(*target_offset) - relocation.offset as i128
+                    + i128::from(relocation.addend);
+                let displacement = i8::try_from(displacement).map_err(|_| {
+                    ast.error_at(
+                        AsmError::EncodeError(format!(
+                            "loop target '{}' is out of 8-bit range",
+                            relocation.symbol
+                        )),
+                        pass.relocation_sites[&(section_index, index)],
+                        None,
+                    )
+                })?;
+                section.data[relocation.offset] = displacement as u8;
+            } else {
+                section.relocs.swap(retained, index);
+                retained += 1;
+            }
+        }
+        section.relocs.truncate(retained);
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -943,7 +986,7 @@ fn encode_instruction(
             current_offset,
             label_locs,
         ),
-        "loop" => encode_loop(ins, bytes, relocs, current_section, current_offset, label_locs),
+        "loop" => encode_loop(ins, bytes, relocs),
         "ret" => {
             bytes.push(0xC3);
             Ok(())
@@ -1799,9 +1842,6 @@ fn encode_loop(
     ins: &Instruction,
     bytes: &mut Vec<u8>,
     relocs: &mut Vec<Relocation>,
-    current_section: usize,
-    current_offset: usize,
-    label_locs: &HashMap<String, (usize, u64)>,
 ) -> Result<(), AsmError> {
     if ins.operands.len() != 1 {
         return Err(AsmError::EncodeError("loop expects 1 operand".into()));
@@ -1814,20 +1854,6 @@ fn encode_loop(
     }
 
     bytes.push(0xE2);
-
-    if let Some((target_sec, target_off)) = label_locs.get(&label) {
-        if *target_sec == current_section {
-            let disp = *target_off as i64 - (current_offset as i64 + 2);
-            if !(-128..=127).contains(&disp) {
-                return Err(AsmError::EncodeError(format!(
-                    "loop target '{}' is out of 8-bit range",
-                    label
-                )));
-            }
-            bytes.push(disp as i8 as u8);
-            return Ok(());
-        }
-    }
 
     relocs.push(Relocation {
         offset: bytes.len(),

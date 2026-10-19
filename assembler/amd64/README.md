@@ -201,6 +201,14 @@ existing 16/64-bit register forms remain supported. ADC/SBB initially accept
 matching register pairs at 8/16/32/64 bits and use carry/borrow-input opcodes;
 they do not substitute ADD/SUB or implement wide-integer native selection.
 
+## Branch relaxation
+
+Local LOOP displacements are checked after branch relaxation reaches a stable
+layout. Nearby JMP/Jcc encodings can shrink before this fixed two-byte instruction
+is range-checked; the final displacement must still fit signed 8 bits. External
+and cross-section LOOP targets retain PC8 relocations for the linker. The configured
+relaxation pass limit still rejects a layout that has not converged.
+
 ## Source diagnostics
 
 `assemble_named("path/input.asm", source, &AMD64)` and

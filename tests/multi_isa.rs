@@ -63,6 +63,74 @@ fn forward_backward_labels_and_numeric_branch_limits_are_checked() {
 }
 
 #[test]
+fn canonical_numeric_registers_preserve_bytes_and_reject_malformed_names() {
+    let registry = whale::builtins::registry();
+    for (arch, mnemonic, prefix, expected) in [
+        ("aarch64", "add", "x", [0x41, 0x00, 0x03, 0x8b]),
+        ("riscv64", "add", "x", [0xb3, 0x00, 0x31, 0x00]),
+        ("loongarch64", "add.d", "$r", [0x41, 0x8c, 0x10, 0x00]),
+    ] {
+        let source = format!("{mnemonic} {prefix}1,{prefix}2,{prefix}3");
+        let out = assemble(arch, &source);
+        assert_eq!(out.sections[0].data, expected);
+        assert!(out.sections[0].relocs.is_empty());
+        assert_eq!(assemble(arch, &source.to_ascii_uppercase()).sections[0].data, expected);
+        for suffix in ["+1", "-1", "-0", "+0", "00", "01", "000", "１"] {
+            for operand in 0..3 {
+                let mut operands =
+                    [format!("{prefix}1"), format!("{prefix}2"), format!("{prefix}3")];
+                operands[operand] = format!("{prefix}{suffix}");
+                let invalid = format!("{mnemonic} {}", operands.join(","));
+                let error = registry
+                    .assemble(arch, "register.s", &invalid, &AssemblyLimits::default())
+                    .err()
+                    .unwrap_or_else(|| panic!("accepted {arch} {invalid}"))
+                    .to_string();
+                assert!(error.contains("invalid") && error.contains("register"), "{error}");
+                assert!(error.contains("register.s") && error.contains("line 1"), "{error}");
+            }
+        }
+    }
+}
+
+#[test]
+fn cli_rejects_malformed_register_names_without_replacing_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("register.s");
+    let output = directory.path().join("register.o");
+    for (arch, mnemonic, prefix) in
+        [("aarch64", "add", "x"), ("riscv64", "add", "x"), ("loongarch64", "add.d", "$r")]
+    {
+        fs::write(&input, format!("{mnemonic} {prefix}1,{prefix}2,{prefix}3\n")).unwrap();
+        let valid = Command::new(env!("CARGO_BIN_EXE_whale"))
+            .args(["asm", "--arch", arch])
+            .arg(&input)
+            .arg("-o")
+            .arg(&output)
+            .output()
+            .unwrap();
+        assert!(valid.status.success(), "{}", String::from_utf8_lossy(&valid.stderr));
+        let previous = fs::read(&output).unwrap();
+        for suffix in ["+1", "-1", "-0", "01"] {
+            fs::write(&input, format!("{mnemonic} {prefix}{suffix},{prefix}2,{prefix}3\n"))
+                .unwrap();
+            let invalid = Command::new(env!("CARGO_BIN_EXE_whale"))
+                .args(["asm", "--arch", arch])
+                .arg(&input)
+                .arg("-o")
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert!(!invalid.status.success(), "accepted {arch} {prefix}{suffix}");
+            let message = String::from_utf8_lossy(&invalid.stderr);
+            assert!(message.contains("invalid") && message.contains("register"), "{message}");
+            assert!(message.contains("register.s") && message.contains("line 1"), "{message}");
+            assert_eq!(fs::read(&output).unwrap(), previous);
+        }
+    }
+}
+
+#[test]
 fn elf_identity_symbol_relocations_and_sparse_bss_are_preserved() {
     for (arch, machine, elf, call, code) in [
         ("aarch64", Machine::AArch64, 183, "bl", 283),
