@@ -35,9 +35,9 @@ native compilation pipeline are still being developed.
 
 | Component | Available today | Status |
 | --- | --- | --- |
-| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols, ELF64 and initial AMD64/AArch64 COFF output | Available; new ISAs are initial subsets |
+| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols, ELF64 and initial AMD64/AArch64 COFF and Mach-O output | Available; new ISAs are initial subsets |
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
-| Object library | Object model, bounded ELF64 reading and ELF64/COFF relocatable serialization | Available |
+| Object library | Object model, bounded ELF64 reading and ELF64/COFF/Mach-O relocatable serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Reverse | ELF inspection plus opt-in Wave AMD64 disassembly and CFG/xrefs | Experimental |
 | Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
@@ -591,7 +591,7 @@ payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
 
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
-Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 7 output).
+Wave's current typed HIR adapter, tested for canonical print-parse-print equality (legacy format 7 inputs, canonical format 8 output).
 Text parsing does not provide IR execution or native code generation. Format 2
 printed text requires explicit migration; it is not silently accepted. New
 syntax or semantics requires an appropriate version change, with unknown
@@ -876,3 +876,5 @@ Numeric cast legality, rounding and trap rules: [IR casts](ir/CASTS.md).
 Typed struct, pointer and fixed-array frontend forms: [storage lowering](ir/FRONTEND-STORAGE.md).
 
 Observable traps, volatile memory and verified pass APIs: [effects and passes](ir/EFFECTS-AND-PASSES.md).
+
+AMD64/AArch64 Mach-O output: [object scope and relocation mappings](assembler/README.md#macho-leaf-objects).

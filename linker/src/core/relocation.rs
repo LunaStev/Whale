@@ -122,6 +122,7 @@ pub fn apply_relocations(
                 RelocKind::Relative32 | RelocKind::PLT32 => (absolute - i128::from(place), 4),
                 RelocKind::Relative8 => (absolute - i128::from(place), 1),
                 RelocKind::GOTPCREL
+                | RelocKind::MachSpecific { .. }
                 | RelocKind::TargetSpecific { .. }
                 | RelocKind::CoffSpecific { .. } => {
                     return Err(error(
@@ -139,6 +140,7 @@ pub fn apply_relocations(
                 },
                 RelocKind::Relative8 => i8::try_from(value).is_ok(),
                 RelocKind::GOTPCREL
+                | RelocKind::MachSpecific { .. }
                 | RelocKind::TargetSpecific { .. }
                 | RelocKind::CoffSpecific { .. } => false,
             };

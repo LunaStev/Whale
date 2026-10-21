@@ -224,6 +224,7 @@ impl ObjectFile {
     ) -> Result<Vec<u8>, crate::ObjectError> {
         match self.target.format {
             ObjectFormat::ELF64 => crate::formats::elf::write_elf_checked(self, max_output_size),
+            ObjectFormat::MachO64 => crate::formats::macho::write(self, max_output_size),
             ObjectFormat::COFF => crate::formats::coff::write(self, max_output_size),
         }
     }

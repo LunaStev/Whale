@@ -76,6 +76,9 @@ jobs:
         run: python tools/ci.py run --name runner-tests -- python -m unittest discover -s tools -p test_*.py -v
       - name: Run standalone CLI smoke with empty PATH
         run: python tools/ci.py run --name smoke -- python tools/ci_smoke.py --binary ${{ matrix.binary }} --socket ${{ matrix.features == 'all' && 'enabled' || 'disabled' }}
+      - name: Native macOS Mach-O system-link and execution
+        if: startsWith(matrix.platform, 'macos-')
+        run: python tools/ci.py run --name macho-native -- python tools/check_object_oracle.py --binary ${{ matrix.binary }} --format macho --native
       - name: Native Windows COFF system-link and execution
         if: startsWith(matrix.platform, 'windows-')
         run: python tools/ci.py run --name coff-native -- python tools/check_object_oracle.py --binary ${{ matrix.binary }} --format coff --native

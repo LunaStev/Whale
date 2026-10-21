@@ -22,6 +22,10 @@ def cases(version):
     cast = copy.deepcopy(base)
     cast["program"]["functions"][0]["body"] = [{"Return": {"Cast": {"value": literal, "ty": integer, "kind": "Checked"}}}]
     yield "integer-cast", cast, version >= 5, version >= 5
+    for kind in ("Numeric", "Checked"):
+        tagged_cast = copy.deepcopy(cast)
+        tagged_cast["program"]["functions"][0]["body"][0]["Return"]["Cast"]["kind"] = {kind: None}
+        yield "integer-cast-unit-object-" + kind, tagged_cast, version >= 5, version >= 5
     neg = copy.deepcopy(base)
     neg["program"]["functions"][0]["body"] = [{"Return": {"Neg": literal}}]
     yield "unary-negation", neg, version >= 5, version >= 5

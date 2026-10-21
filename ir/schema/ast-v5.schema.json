@@ -527,9 +527,37 @@
                   "$ref": "#/$defs/Type"
                 },
                 "kind": {
-                  "enum": [
-                    "Numeric",
-                    "Checked"
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "Numeric",
+                        "Checked"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Numeric": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "Numeric"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Checked": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "Checked"
+                      ],
+                      "additionalProperties": false
+                    }
                   ]
                 }
               },

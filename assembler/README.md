@@ -173,3 +173,44 @@ Ordinary tests inspect independent field fixtures without external tools. Option
 /path/to/llvm-readobj --linker /path/to/lld-link` checks generated objects with
 LLVM and cross-links both CPU identities. Windows native CI runs the same
 cross-object call/data fixture using MSVC and requires exit 42 on x64 and ARM64.
+
+## Mach-O leaf objects
+
+`ObjectTarget::macho64(Machine::X86_64)` and `Machine::AArch64` select bounded
+little-endian MH_OBJECT serialization. CLI spelling is `--format macho`, with
+`--arch amd64|aarch64` and `.o` output. There are no implicit target aliases,
+Mach-O executables, new reader formats or static-linker target changes.
+
+Headers/load commands, sections, symbols and relocations have separate modules.
+The writer emits LC_SEGMENT_64, LC_SYMTAB, LC_DYSYMTAB and LC_BUILD_VERSION
+(macOS 11 minimum). `.text/.rodata/.data/.bss` map to
+`__TEXT,__text / __TEXT,__const / __DATA,__data / __DATA,__bss`.
+Custom section names retain a leading `__` or replace their optional leading dot
+with `__`; the resulting name must fit 16 bytes. Mapped collisions fail. BSS
+uses virtual size without payload allocation. At most 255 sections, 24-bit symbol
+indices, signed32 relocation offsets and a checked output ceiling are supported.
+
+Local, defined-global and undefined-global symbol partitions have explicit
+indices; names are preserved exactly. **No underscore is inserted automatically**:
+Darwin C `entry` requires assembly `_entry`. nlist has no general size/function
+kind field; these model attributes remain validated but have no such output field.
+Weak/hidden symbols, scattered/subtractor/GOT/TLV/page-pair relocations, absolute32
+and unsupported machines fail explicitly. No metadata is silently inferred from
+an ELF or COFF numeric relocation code.
+
+AMD64 supports unsigned absolute64, signed PC32 and branch32. PC-relative model
+addends use S+A-P; the in-place Mach-O addend adds four for next-IP semantics.
+ARM64 supports unsigned absolute64 and explicit MachSpecific BRANCH26 on aligned
+B/BL instructions with zero branch addend. Assembler B/BL symbolic references map
+through their machine namespace to this relocation. ADR, conditional branches,
+page pairs and nonzero branch addends remain explicit unsupported forms.
+Absolute pointer addends, including the cross-object `payload+4` fixture, are
+written in-place; original object bytes are preserved on success/failure.
+
+The binary layout and numeric IDs follow the primary
+[LLVM Mach-O definitions](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/llvm/include/llvm/BinaryFormat/MachO.h).
+Optional interoperability uses `tools/check_object_oracle.py --format macho` with
+LLVM inspection/ld64.lld cross-linking. Native macOS Intel/ARM64 CI system-links a
+C driver and two Whale objects, executes the cross-object call and dereferences
+the relocated data pointer; both must produce 42. Normal Cargo tests use
+independent field expectations and require no external assembler or linker.

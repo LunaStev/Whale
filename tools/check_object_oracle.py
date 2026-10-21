@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -40,7 +41,7 @@ def windows_environment(arch):
     return environment
 
 
-def sources(arch):
+def _sources(arch):
     if arch == 'amd64':
         return ('''section .text
 global entry
@@ -87,19 +88,27 @@ payload: .word 7,42
 ''')
 
 
+def sources(arch, object_format="coff"):
+    result = _sources(arch)
+    if object_format == "macho":
+        result = tuple(re.sub(r"\b(payload_ref|payload|helper|entry)\b", r"_\1", source)
+                       for source in result)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', required=True, type=Path)
-    parser.add_argument('--format', choices=['coff'], required=True)
+    parser.add_argument('--format', choices=['coff', 'macho'], required=True)
     parser.add_argument('--native', action='store_true')
     parser.add_argument('--readobj', type=Path)
-    parser.add_argument('--linker', type=Path, help='optional cross-host lld-link')
+    parser.add_argument('--linker', type=Path, help='optional cross-host lld-link or ld64.lld')
     args = parser.parse_args()
     binary = args.binary.resolve()
     arches = ['amd64', 'aarch64']
     if args.native:
-        if os.name != 'nt':
-            parser.error('COFF native execution requires Windows')
+        if (args.format == 'coff' and os.name != 'nt') or (args.format == 'macho' and platform.system() != 'Darwin'):
+            parser.error('native execution requires Windows for COFF or macOS for Mach-O')
         arches = ['aarch64' if platform.machine().lower() in ['arm64', 'aarch64'] else 'amd64']
     if not args.native and not args.readobj:
         parser.error('non-native validation requires --readobj')
@@ -107,16 +116,16 @@ def main():
         root = Path(directory)
         for arch in arches:
             objects = []
-            for i, source in enumerate(sources(arch)):
+            for i, source in enumerate(sources(arch, args.format)):
                 source_path = root / f'{arch}-{i}.s'
                 source_path.write_text(source)
-                obj = root / f'{arch}-{i}.obj'
+                obj = root / (f'{arch}-{i}.obj' if args.format == 'coff' else f'{arch}-{i}.o')
                 run([binary, 'asm', '--arch', arch, '--format', args.format, source_path, '-o', obj])
                 objects.append(obj)
                 if args.readobj:
                     run([args.readobj, '--file-headers', '--sections', '--symbols', '--relocations', obj])
             executable = root / f'{arch}.exe'
-            if args.native:
+            if args.native and args.format == 'coff':
                 environment = windows_environment(arch)
                 driver = root / 'driver.c'
                 driver.write_text('extern int entry(void); extern int *payload_ref;\n'
@@ -129,13 +138,29 @@ def main():
                 result = subprocess.run([str(executable)], timeout=30, check=False)
                 if result.returncode != 42:
                     raise AssertionError(f'{arch} COFF linked program returned {result.returncode}')
+            elif args.native:
+                run(['xcrun', 'otool', '-hv', '-l', *objects])
+                run(['xcrun', 'nm', '-m', *objects])
+                driver = root / 'driver.c'
+                driver.write_text('extern int entry(void); extern int *payload_ref;\n'
+                                  'int main(void) { return entry()==42 && *payload_ref==42 ? 42 : 7; }\n')
+                run(['xcrun', 'clang', driver, *objects, '-o', executable], cwd=root)
+                result = subprocess.run([str(executable)], timeout=30, check=False)
+                if result.returncode != 42:
+                    raise AssertionError(f'{arch} Mach-O linked program returned {result.returncode}')
+            elif args.linker and args.format == 'macho':
+                run([args.linker, '-arch', 'arm64' if arch == 'aarch64' else 'x86_64',
+                     '-platform_version', 'macos', '11.0', '11.0', '-e', '_entry',
+                     '-o', executable, *objects])
+                if args.readobj:
+                    run([args.readobj, '--file-headers', executable])
             elif args.linker:
                 run([args.linker, '/entry:entry', '/subsystem:console', '/nodefaultlib',
                      '/machine:' + ('ARM64' if arch == 'aarch64' else 'X64'),
                      '/out:' + str(executable), *objects])
                 if args.readobj:
                     run([args.readobj, '--file-headers', executable])
-            print(f'{arch}: COFF inspection/link' + ('/native exit 42' if args.native else '') + ' passed')
+            print(f'{arch}: {args.format} inspection/link' + ('/native exit 42' if args.native else '') + ' passed')
 
 
 if __name__ == '__main__':

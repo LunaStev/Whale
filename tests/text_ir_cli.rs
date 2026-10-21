@@ -156,8 +156,12 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
     );
     assert!(error.contains(input));
     fs::write(input, include_str!("../ir/tests/fixtures/wave-casts-v3.wir")).unwrap();
+    let converted = run(&["ir", "run", input, "--function", "@f0"]);
+    assert!(converted.status.success(), "{converted:?}");
+    fs::write(input, "module { format_version 3 semantics_version 1 target \"x86_64-whale-linux\" datalayout {ptr=64,endian=little} declare @f0 \"aggregate\": whale () -> void, linkage internal fn @f0 \"aggregate\"() -> void, entry %b0 { %b0 \"entry\": %v0: ptr<array<u8,1>> = alloca array<u8,1>, align 1 %v1: array<u8,1> = load array<u8,1>, ptr<array<u8,1>> %v0, align 1 ret void } }").unwrap();
     let result = run(&["ir", "run", input, "--function", "@f0"]);
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr)
-        .contains("unsupported interpreter operation unsupported cast"));
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("unsupported interpreter operation load")
+    );
 }

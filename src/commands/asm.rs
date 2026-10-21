@@ -82,9 +82,10 @@ pub fn run(args: Vec<String>) {
                 }
                 format = Some(match args.get(i + 1).map(String::as_str) {
                     Some("elf") => object::ObjectFormat::ELF64,
+                    Some("macho") => object::ObjectFormat::MachO64,
                     Some("coff") => object::ObjectFormat::COFF,
                     _ => {
-                        eprintln!("Error: --format requires elf or coff");
+                        eprintln!("Error: --format requires elf, coff or macho");
                         process::exit(1);
                     },
                 });
@@ -288,7 +289,7 @@ fn print_help() {
     println!();
     println!("  whale asm --arch ID <input> -o <output.o>");
     println!("Options:");
-    println!("  --format elf|coff   object format (default elf; COFF: AMD64/AArch64)");
+    println!("  --format elf|coff|macho   object format (default elf; COFF/Mach-O: AMD64/AArch64)");
     println!("  --max-input N   input byte limit (default 8388608 bytes)");
     println!("  --debug-whale   enable debug features");
     println!("  --ast           print parser AST (debug)");
