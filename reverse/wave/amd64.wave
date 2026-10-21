@@ -234,7 +234,7 @@ fun reverse_decode_body(state: ptr<DecodeState>) -> i32 {
             opcode = 12;
         }
         width = 64;
-        if (operand16) {
+        if (operand16 && (state.rex & 8) == 0) {
             width = 16;
         }
         format = 6;
@@ -243,7 +243,7 @@ fun reverse_decode_body(state: ptr<DecodeState>) -> i32 {
         format = 13;
         width = 64;
         immediate_bytes = 4;
-        if (operand16) {
+        if (operand16 && (state.rex & 8) == 0) {
             width = 16;
             immediate_bytes = 2;
         }

@@ -95,6 +95,36 @@ mod native {
     }
 
     #[test]
+    fn stack_operand_size_honors_effective_rex_w_and_legacy_cancellation() {
+        for opcode in [0x50, 0x58] {
+            for (prefix, name, width) in [
+                (vec![0x66, 0x48], "rax", 64),
+                (vec![0x66, 0x49], "r8", 64),
+                (vec![0x66], "ax", 16),
+                (vec![0x48, 0x66], "ax", 16),
+                (vec![0x66, 0x40], "ax", 16),
+            ] {
+                let mut bytes = prefix;
+                bytes.push(opcode);
+                let x = one(&bytes);
+                reg(x.operands[0], name);
+                assert!(matches!(x.operands[0], Operand::Register(r) if r.width == width));
+            }
+        }
+        for (bytes, width, encoded_width, sign_extended) in [
+            (vec![0x66, 0x48, 0x68, 0x34, 0x12, 0xc3, 0x56], 64, 32, true),
+            (vec![0x66, 0x48, 0x6a, 0xff], 64, 8, true),
+            (vec![0x48, 0x66, 0x68, 0x34, 0x12], 16, 16, false),
+            (vec![0x66, 0x40, 0x68, 0x34, 0x12], 16, 16, false),
+            (vec![0x66, 0x6a, 0xff], 16, 8, true),
+        ] {
+            let x = one(&bytes);
+            assert!(matches!(x.operands[0], Operand::Immediate(i) if
+                (i.width, i.encoded_width, i.sign_extended) == (width, encoded_width, sign_extended)));
+        }
+    }
+
+    #[test]
     fn manual_sib_rip_absolute_and_rex_sentinels_are_distinct() {
         let x = one(&[0x4b, 0x8b, 0x44, 0xcc, 0x80]);
         reg(x.operands[0], "rax");

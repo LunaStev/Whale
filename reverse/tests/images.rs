@@ -239,3 +239,106 @@ fn relocatable_inspection_shares_actual_reader_work_instead_of_reserving_half() 
     assert_eq!(image.relocations[0].offset, 1);
     assert_eq!(image.relocations[0].width, 4);
 }
+
+fn write64(bytes: &mut [u8], at: usize, value: u64) {
+    bytes[at..at + 8].copy_from_slice(&value.to_le_bytes());
+}
+
+fn metadata_executable(kind: u8, value: u64, size: u64) -> Vec<u8> {
+    let mut bytes = symbol_executable(1);
+    bytes.resize(0x1191, 0);
+    bytes[60..62].copy_from_slice(&5u16.to_le_bytes());
+    // Retain the code function and add a separate data/TLS owner plus metadata.
+    let owner = 128 + 4 * 64;
+    bytes[owner + 4..owner + 8].copy_from_slice(&1u32.to_le_bytes());
+    for (offset, value) in [(8, 0x403), (16, 0x402000), (24, 0x1008), (32, 16), (48, 8)] {
+        write64(&mut bytes, owner + offset, value);
+    }
+    let symtab = 128 + 2 * 64;
+    write64(&mut bytes, symtab + 24, 0x1100);
+    write64(&mut bytes, symtab + 32, 72);
+    bytes[symtab + 44..symtab + 48].copy_from_slice(&1u32.to_le_bytes());
+    let strings = 128 + 3 * 64;
+    write64(&mut bytes, strings + 24, 0x1180);
+    write64(&mut bytes, strings + 32, 17);
+    bytes[0x1180..].copy_from_slice(b"\0start\0metadata\0\0");
+    for (at, name, info, section, address, length) in
+        [(0x1118, 1u32, 0x12u8, 1u16, 0x401000u64, 1u64), (0x1130, 7, 0x10 | kind, 4, value, size)]
+    {
+        bytes[at..at + 4].copy_from_slice(&name.to_le_bytes());
+        bytes[at + 4] = info;
+        bytes[at + 6..at + 8].copy_from_slice(&section.to_le_bytes());
+        write64(&mut bytes, at + 8, address);
+        write64(&mut bytes, at + 16, length);
+    }
+    bytes
+}
+
+#[test]
+fn zero_sized_notype_boundary_markers_remain_non_code_metadata() {
+    for address in [0x403000, 0x401000] {
+        let bytes = metadata_executable(0, address, 0);
+        let image = Image::elf(&bytes, ObjectReadLimits::default()).unwrap();
+        assert_eq!(image.symbols[0].name, "start");
+        assert_eq!(image.symbols[0].region, Some(0));
+        let marker = &image.symbols[1];
+        assert_eq!(marker.name, "metadata");
+        assert_eq!(marker.address, Some(address));
+        assert_eq!(marker.region, None);
+        assert_eq!(image.entry_offset(&image.regions[0]), 0);
+    }
+    for (kind, size) in [(2, 0), (0, 1), (1, 0)] {
+        assert!(Image::elf(
+            &metadata_executable(kind, 0x403000, size),
+            ObjectReadLimits::default()
+        )
+        .unwrap_err()
+        .contains("defining section"));
+    }
+}
+
+#[test]
+fn tls_offsets_are_omitted_without_losing_static_code_or_claiming_process_addresses() {
+    for offset in [0, 8] {
+        let bytes = metadata_executable(6, offset, 8);
+        let image = Image::elf(&bytes, ObjectReadLimits::default()).unwrap();
+        assert_eq!(image.symbols.len(), 1);
+        assert_eq!(image.symbols[0].name, "start");
+        assert_eq!(image.symbols[0].address, Some(0x401000));
+        assert_eq!(image.symbols[0].region, Some(0));
+        assert_eq!(image.regions[0].bytes, [0xc3]);
+    }
+    // Non-TLS symbols with the same invalid VA still fail owner validation.
+    assert!(Image::elf(&metadata_executable(1, 0, 8), ObjectReadLimits::default()).is_err());
+}
+
+#[test]
+fn pure_bss_load_segments_need_no_file_range_but_preserve_virtual_validation() {
+    let mut bytes = executable();
+    bytes.resize(177, 0);
+    bytes[176] = 0xc3;
+    bytes[56..58].copy_from_slice(&2u16.to_le_bytes());
+    write64(&mut bytes, 24, 0x4000b0);
+    write64(&mut bytes, 96, 177);
+    write64(&mut bytes, 104, 177);
+    bytes[120..124].copy_from_slice(&1u32.to_le_bytes());
+    bytes[124..128].copy_from_slice(&6u32.to_le_bytes());
+    write64(&mut bytes, 128, 0x100000);
+    write64(&mut bytes, 136, 0x500000);
+    write64(&mut bytes, 144, 0x500000);
+    write64(&mut bytes, 152, 0);
+    write64(&mut bytes, 160, 1 << 40);
+    write64(&mut bytes, 168, 4096);
+    for offset in [0, 0x100000] {
+        write64(&mut bytes, 128, offset);
+        let image = Image::elf(&bytes, ObjectReadLimits::default()).unwrap();
+        assert_eq!(image.regions.len(), 1);
+        assert_eq!(image.regions[0].bytes.len(), 177);
+        assert_eq!(image.entry_offset(&image.regions[0]), 176);
+    }
+    for (at, value) in [(152, 1), (128, 0x100001), (136, 0x400000), (136, u64::MAX - 1)] {
+        let mut bad = bytes.clone();
+        write64(&mut bad, at, value);
+        assert!(Image::elf(&bad, ObjectReadLimits::default()).is_err(), "at {at}");
+    }
+}
