@@ -4,6 +4,11 @@
 //! guard, round and sticky bits; only pack performs nearest-even rounding.
 use crate::{BinOp, FloatBits};
 
+#[path = "conversions.rs"]
+mod conversions;
+
+pub use conversions::convert;
+
 #[derive(Clone, Copy)]
 struct Format {
     width: u32,

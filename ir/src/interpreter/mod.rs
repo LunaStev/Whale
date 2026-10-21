@@ -522,6 +522,16 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         {
             return Ok(())
         },
+        Cast {
+            op:
+                CastOp::FExt
+                | CastOp::FTrunc
+                | CastOp::IToF_S
+                | CastOp::IToF_U
+                | CastOp::FToI_S
+                | CastOp::FToI_U,
+            ..
+        } => return Ok(()),
         Cast { op: CastOp::Bitcast, src_ty, dst_ty, .. }
             if (integer::shape(src_ty).is_some() || scalar::float_type(src_ty))
                 && (integer::shape(dst_ty).is_some() || scalar::float_type(dst_ty)) =>
@@ -1481,6 +1491,21 @@ fn run_inner<'module>(
                         get(if get(cond).boolean() { on_true } else { on_false }).clone()
                     },
                     Instruction::Cast { op, src_ty, dst_ty, src, .. } => match op {
+                        CastOp::FExt
+                        | CastOp::FTrunc
+                        | CastOp::IToF_S
+                        | CastOp::IToF_U
+                        | CastOp::FToI_S
+                        | CastOp::FToI_U => Value::Scalar(
+                            crate::float::arithmetic::convert(op, src_ty, dst_ty, scalar(src))
+                                .ok_or({
+                                    InterpreterError::Trap(InterpreterTrap {
+                                        site: at,
+                                        reason: TrapReason::InvalidConversion,
+                                        steps,
+                                    })
+                                })?,
+                        ),
                         CastOp::CheckedInt => Value::Scalar(
                             integer::checked_cast(src_ty, dst_ty, scalar(src)).map_err(
                                 |reason| {

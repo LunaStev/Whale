@@ -356,13 +356,11 @@ fn invalid_arguments_modules_and_unsupported_dead_instructions_fail_before_execu
         interpret(&m, FunctionId(7), &[ConstValue::I(0)]),
         Err(InterpreterError::Verification(_))
     ));
-    for (body, operation) in [
-        (
+    {
+        let (body, operation) = (
             "%v8: ptr<array<u8, 1>> = alloca array<u8, 1>, align 1 %v9: array<u8, 1> = load array<u8, 1>, ptr<array<u8, 1>> %v8, align 1",
             "load",
-        ),
-        ("%v8: f32 = const f32 0x00000000 %v9: f64 = fext f32 %v8 to f64", "unsupported cast"),
-    ] {
+        );
         let m = program(
             &[],
             "void",

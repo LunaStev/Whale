@@ -38,3 +38,19 @@ vectors through both the arithmetic module and the typed interpreter; supported
 constant arithmetic uses the same contract. Further native f32/f64 randomized
 comparisons check ordinary hosts independently. Regeneration requires Python
 only; ordinary Cargo tests use the checked-in data.
+
+## Numeric conversions
+
+IToF_S/U, FToI_S/U and all legal FExt/FTrunc pairs use the same exact
+significand representation and a single destination round. Integer magnitudes
+remain u128 until packing, including signed i128 minimum and unsigned u128
+maximum. Float-to-int truncates magnitude before checking destination limits;
+no intermediate i128 or host saturating cast can hide overflow. Numerical NaNs
+canonicalize on float-width conversion and trap on integer conversion.
+
+`tools/generate_conversion_vectors.py` adds 10,966 independent Fraction vectors
+covering all integer types and all float width pairs, signed endpoints and their
+neighboring representable floats, ties, infinities, payload NaNs and zeros.
+Tests also exhaust all 65,536 binary16 patterns through both wider formats,
+check direct narrowing near a double-rounding counterexample, and assert trap
+identity/order after preceding storage operations.

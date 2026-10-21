@@ -212,7 +212,7 @@ It executes direct and signature-checked indirect Whale calls with integer/Bool/
 data-pointer and function-pointer arguments/results, using one shared fuel and
 memory arena. Function pointers retain their full signature and calling convention
 through mov/phi/select, storage and complete or split byte copies. It rejects
-numerical float conversions, external/SysV execution and general aggregate values in every
+external/SysV execution and general aggregate values in every
 block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
@@ -223,9 +223,9 @@ adjustable verification limits and trap IR identities.
 Constants, arguments/returns, mov/phi/select, stack/global loads and stores, and
 byte copies preserve every bit, including signaling/quiet NaN payloads and
 signed zero. These operations perform no host floating-point conversion.
-Equal-width integer/float `bitcast` reinterprets those bits; `fext`, `ftrunc` and
-numeric integer/float conversions remain unsupported during execution in this batch. Bitcasts
-cannot recover pointer or function-pointer authority from numerical bits.
+Equal-width integer/float `bitcast` reinterprets those bits. Numeric `fext`,
+`ftrunc`, signed/unsigned integer-to-float and float-to-integer conversions execute
+with the [defined rounding and range traps](ir/CASTS.md). Bitcasts cannot recover pointer or function-pointer authority from numerical bits.
 
 ```sh
 cargo run --locked -- ir run ir/tests/fixtures/float-storage-v7.wir --function @f0 --arg 0x7c01
