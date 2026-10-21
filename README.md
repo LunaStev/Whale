@@ -212,7 +212,7 @@ It executes direct and signature-checked indirect Whale calls with integer/Bool/
 data-pointer and function-pointer arguments/results, using one shared fuel and
 memory arena. Function pointers retain their full signature and calling convention
 through mov/phi/select, storage and complete or split byte copies. It rejects
-floating arithmetic/numerical conversions, external/SysV execution and general aggregate values in every
+numerical float conversions, external/SysV execution and general aggregate values in every
 block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
@@ -224,7 +224,7 @@ Constants, arguments/returns, mov/phi/select, stack/global loads and stores, and
 byte copies preserve every bit, including signaling/quiet NaN payloads and
 signed zero. These operations perform no host floating-point conversion.
 Equal-width integer/float `bitcast` reinterprets those bits; `fext`, `ftrunc` and
-numeric integer/float conversions remain unsupported during execution. Bitcasts
+numeric integer/float conversions remain unsupported during execution in this batch. Bitcasts
 cannot recover pointer or function-pointer authority from numerical bits.
 
 ```sh
@@ -238,6 +238,9 @@ budgets as integer storage. A typed field load checks its value bytes without
 requiring surrounding aggregate padding to be initialized. Plain storage and
 copies never canonicalize a NaN; arithmetic and width-changing conversions have
 separate semantics.
+
+Scalar floating arithmetic and unary negation execute at their declared precision; see
+[the rounding, remainder and NaN contract](ir/FLOATING.md).
 
 ### Compare floating values
 

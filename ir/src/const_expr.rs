@@ -46,6 +46,7 @@ pub struct ConstExpr {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConstExprKind {
     Not(Box<ConstExpr>),
+    Neg(Box<ConstExpr>),
     Literal(ConstValue),
     Reference(ConstRef),
     Binary { op: ConstBinaryOp, left: Box<ConstExpr>, right: Box<ConstExpr> },
@@ -77,7 +78,7 @@ impl ConstExpr {
         while let Some(expr) = pending.pop() {
             match &expr.kind {
                 ConstExprKind::Literal(_) => {},
-                ConstExprKind::Not(value) => pending.push(value),
+                ConstExprKind::Neg(value) | ConstExprKind::Not(value) => pending.push(value),
                 ConstExprKind::Reference(reference) => references.push(*reference),
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. } => {
@@ -140,6 +141,17 @@ impl ConstExpr {
                     }
                     resolved.insert(expr as *const ConstExpr, value);
                 },
+                ConstExprKind::Neg(value) => {
+                    if expr.ty != value.ty {
+                        return Err((ConstEvalError::TypeMismatch, expr));
+                    }
+                    if crate::interpreter::integer::shape(&expr.ty).is_none()
+                        && !matches!(expr.ty, Type::F16 | Type::F32 | Type::F64)
+                    {
+                        return Err((ConstEvalError::UnsupportedOperation, expr));
+                    }
+                    inspect.push(value);
+                },
                 ConstExprKind::Not(value) => {
                     if expr.ty != value.ty {
                         return Err((ConstEvalError::TypeMismatch, expr));
@@ -159,7 +171,11 @@ impl ConstExpr {
                         } else if matches!(expr.ty, Type::F16 | Type::F32 | Type::F64) {
                             matches!(
                                 op,
-                                ConstBinaryOp::Add | ConstBinaryOp::Sub | ConstBinaryOp::Mul
+                                ConstBinaryOp::Add
+                                    | ConstBinaryOp::Sub
+                                    | ConstBinaryOp::Mul
+                                    | ConstBinaryOp::Div
+                                    | ConstBinaryOp::Rem
                             )
                         } else {
                             ty_int_bits(&expr.ty).is_some()
@@ -196,10 +212,20 @@ impl ConstExpr {
             let value = match &expr.kind {
                 ConstExprKind::Literal(value) => value.clone(),
                 ConstExprKind::Reference(_) => resolved[&(expr as *const ConstExpr)].clone(),
-                ConstExprKind::Not(value) if phase == 0 => {
+                ConstExprKind::Neg(value) | ConstExprKind::Not(value) if phase == 0 => {
                     pending.push((expr, 1));
                     pending.push((value, 0));
                     continue;
+                },
+                ConstExprKind::Neg(_) => match values.pop().expect("neg operand") {
+                    ConstValue::F(value) => ConstValue::F(crate::float::arithmetic::negate(value)),
+                    value => crate::interpreter::integer::pack(
+                        &expr.ty,
+                        0u128.wrapping_sub(crate::interpreter::integer::raw(
+                            &value,
+                            crate::interpreter::integer::shape(&expr.ty).unwrap().0,
+                        )),
+                    ),
                 },
                 ConstExprKind::Not(_) => const_not(&expr.ty, &values.pop().expect("not operand"))
                     .map_err(|error| (error, expr))?,
@@ -333,23 +359,15 @@ fn const_bin(
         let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
             return Err(ConstEvalError::UnsupportedOperation);
         };
-        let width = a.width();
-        let (a, b) = (a.to_f64(), b.to_f64());
-        let out = match op {
-            ConstBinaryOp::Add => a + b,
-            ConstBinaryOp::Sub => a - b,
-            ConstBinaryOp::Mul => a * b,
+        let op = match op {
+            ConstBinaryOp::Add => crate::BinOp::FAdd,
+            ConstBinaryOp::Sub => crate::BinOp::FSub,
+            ConstBinaryOp::Mul => crate::BinOp::FMul,
+            ConstBinaryOp::Div => crate::BinOp::FDiv,
+            ConstBinaryOp::Rem => crate::BinOp::FRem,
             _ => return Err(ConstEvalError::UnsupportedOperation),
         };
-        let value = if out.is_nan() {
-            match width {
-                16 => crate::FloatBits::F16(0x7e00),
-                32 => crate::FloatBits::F32(0x7fc00000),
-                _ => crate::FloatBits::F64(0x7ff8000000000000),
-            }
-        } else {
-            crate::FloatBits::from_f64(width, out).expect("supported float width")
-        };
+        let value = crate::float::arithmetic::arithmetic(&op, *a, *b).unwrap();
         return Ok(ConstValue::F(value));
     }
 

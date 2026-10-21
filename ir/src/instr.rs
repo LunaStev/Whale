@@ -166,6 +166,13 @@ pub enum Instruction {
         rhs: ValueId,
     },
 
+    /// Modular integer negation or payload-preserving IEEE sign-bit negation.
+    Neg {
+        dst: ValueId,
+        ty: Type,
+        src: ValueId,
+    },
+
     Not {
         dst: ValueId,
         ty: Type,

@@ -61,6 +61,8 @@ pub(crate) fn map_binop(op: frontend::BinOpRef, ty: &Type) -> Result<BinOp, Lowe
             B::Add => BinOp::FAdd,
             B::Sub => BinOp::FSub,
             B::Mul => BinOp::FMul,
+            B::Div => BinOp::FDiv,
+            B::Rem => BinOp::FRem,
             _ => return Err(LowerError::UnsupportedExpr),
         })
     } else if is_int_like(ty) {

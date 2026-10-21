@@ -31,7 +31,7 @@ fn mask(bits: u32) -> u128 {
     }
 }
 
-pub(super) fn raw(value: &ConstValue, bits: u32) -> u128 {
+pub(crate) fn raw(value: &ConstValue, bits: u32) -> u128 {
     (match value {
         ConstValue::I(v) => *v as u128,
         ConstValue::U(v) => *v,
@@ -48,7 +48,7 @@ fn signed(value: u128, bits: u32) -> i128 {
     }
 }
 
-pub(super) fn pack(ty: &Type, value: u128) -> ConstValue {
+pub(crate) fn pack(ty: &Type, value: u128) -> ConstValue {
     let (bits, is_signed) = shape(ty).expect("integer subset checked");
     let value = value & mask(bits);
     if is_signed {

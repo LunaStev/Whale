@@ -146,7 +146,9 @@ impl Budget {
             }
             self.ty(&e.ty)?;
             match &e.kind {
-                ConstExprKind::Not(value) => pending.push((value, depth + 1)),
+                ConstExprKind::Neg(value) | ConstExprKind::Not(value) => {
+                    pending.push((value, depth + 1))
+                },
                 ConstExprKind::Binary { left, right, .. }
                 | ConstExprKind::Compare { left, right, .. } => {
                     pending.push((right, depth + 1));
@@ -206,6 +208,7 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     | Undef { ty, .. }
                     | Mov { ty, .. }
                     | Bin { ty, .. }
+                    | Neg { ty, .. }
                     | Not { ty, .. }
                     | Cmp { ty, .. }
                     | ICmp { ty, .. }

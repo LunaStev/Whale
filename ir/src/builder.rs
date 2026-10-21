@@ -97,6 +97,12 @@ impl<'a> FunctionBuilder<'a> {
         Ok(self.not(ty, src))
     }
 
+    pub fn neg(&mut self, ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Neg { dst, ty, src });
+        dst
+    }
+
     pub fn not(&mut self, ty: Type, src: ValueId) -> ValueId {
         let dst = self.define_value(ty.clone());
         self.cur_block_mut().instructions.push(Instruction::Not { dst, ty, src });
@@ -574,7 +580,9 @@ impl ModuleBuilder {
                     pending.push(right);
                     pending.push(left);
                 },
-                Expr::BitNot(value) | Expr::Cast { value, .. } => pending.push(value),
+                Expr::Neg(value) | Expr::BitNot(value) | Expr::Cast { value, .. } => {
+                    pending.push(value)
+                },
                 _ => {},
             }
         }

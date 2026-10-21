@@ -365,12 +365,19 @@ impl<'a> Parser<'a> {
         {
             return Err(self.error("extended constant operators require typed IR format 5"));
         }
-        if op == "bit_not" {
+        if op == "neg" && self.format_version < 8 {
+            return Err(self.error("constant neg requires typed IR format 8"));
+        }
+        if op == "bit_not" || op == "neg" {
+            let negative = op == "neg";
             self.word()?;
             self.expect("(")?;
             let value = Box::new(self.expression(depth + 1)?);
             self.expect(")")?;
-            Ok(ConstExpr { ty: value.ty.clone(), kind: ConstExprKind::Not(value) })
+            Ok(ConstExpr {
+                ty: value.ty.clone(),
+                kind: if negative { ConstExprKind::Neg(value) } else { ConstExprKind::Not(value) },
+            })
         } else if matches!(
             op,
             "add"

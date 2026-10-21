@@ -495,6 +495,14 @@ fn lower_expr_o0(
         },
         frontend::Expr::Lit(lit) => lower_lit_o0(fb, lit),
 
+        frontend::Expr::Neg(value) => {
+            let (value, ty) = lower_expr_o0(fb, env, global_consts, value, target)?;
+            if !super::support::is_int_like(&ty) && !matches!(ty, Type::F16 | Type::F32 | Type::F64)
+            {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            Ok((fb.neg(ty.clone(), value), ty))
+        },
         frontend::Expr::BitNot(value) => {
             let (value, ty) = lower_expr_o0(fb, env, global_consts, value, target)?;
             if !super::support::is_int_like(&ty) {
@@ -631,7 +639,8 @@ fn const_annotation_at<'a>(
             return inherited;
         }
         match (original, &preserved.kind) {
-            (frontend::Expr::BitNot(value), ConstExprKind::Not(typed)) => {
+            (frontend::Expr::Neg(value), ConstExprKind::Neg(typed))
+            | (frontend::Expr::BitNot(value), ConstExprKind::Not(typed)) => {
                 pending.push((value, typed, inherited));
             },
             (
@@ -682,6 +691,10 @@ fn preserve_const_expr(
                 .get(name)
                 .ok_or_else(|| LowerError::UnknownVariable(name.clone()))?;
             Ok(ConstExpr { ty: ty.clone(), kind: ConstExprKind::Reference(ConstRef::Global(*id)) })
+        },
+        frontend::Expr::Neg(value) => {
+            let value = Box::new(preserve_const_expr(value, ctx)?);
+            Ok(ConstExpr { ty: value.ty.clone(), kind: ConstExprKind::Neg(value) })
         },
         frontend::Expr::BitNot(value) => {
             let value = Box::new(preserve_const_expr(value, ctx)?);

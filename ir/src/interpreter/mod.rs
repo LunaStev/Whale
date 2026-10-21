@@ -471,6 +471,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | Undef { dst, .. }
         | Mov { dst, .. }
         | Bin { dst, .. }
+        | Neg { dst, .. }
         | Not { dst, .. }
         | Cmp { dst, .. }
         | ICmp { dst, .. }
@@ -500,6 +501,8 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
 fn supported(inst: &Instruction) -> Result<(), &'static str> {
     use Instruction::*;
     let unsupported = match inst {
+        Neg { ty, .. } if integer::shape(ty).is_some() || scalar::float_type(ty) => return Ok(()),
+        Bin { ty, .. } if scalar::float_type(ty) => return Ok(()),
         ConstDecl { .. } => return Ok(()),
         Const { ty, .. } if scalar_type(ty) => return Ok(()),
         Mov { ty, .. } | Phi { ty, .. } | Select { ty, .. } if value_type(ty) => return Ok(()),
@@ -540,9 +543,13 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         Undef { .. } => "undef",
         Const { .. } => "non-scalar constant",
         Mov { .. } | Phi { .. } | Select { .. } | Extract { .. } => "non-scalar value",
-        Bin { .. } | Not { .. } | Checked { .. } | Cmp { .. } | ICmp { .. } | FCmp { .. } => {
-            "non-integer arithmetic/comparison"
-        },
+        Neg { .. }
+        | Bin { .. }
+        | Not { .. }
+        | Checked { .. }
+        | Cmp { .. }
+        | ICmp { .. }
+        | FCmp { .. } => "non-integer arithmetic/comparison",
         Cast { .. } => "unsupported cast",
         Alloca { .. } => "alloca",
         Load { .. } => "load",
@@ -1409,6 +1416,26 @@ fn run_inner<'module>(
                         Value::Scalar(value.clone())
                     },
                     Instruction::Mov { src, .. } => get(src).clone(),
+                    Instruction::Bin { op, lhs, rhs, .. }
+                        if matches!(scalar(lhs), ConstValue::F(_)) =>
+                    {
+                        let (ConstValue::F(a), ConstValue::F(b)) = (scalar(lhs), scalar(rhs))
+                        else {
+                            unreachable!()
+                        };
+                        Value::Scalar(ConstValue::F(
+                            crate::float::arithmetic::arithmetic(op, *a, *b).unwrap(),
+                        ))
+                    },
+                    Instruction::Neg { ty, src, .. } => Value::Scalar(match scalar(src) {
+                        ConstValue::F(value) => {
+                            ConstValue::F(crate::float::arithmetic::negate(*value))
+                        },
+                        value => integer::pack(
+                            ty,
+                            0u128.wrapping_sub(integer::raw(value, integer::shape(ty).unwrap().0)),
+                        ),
+                    }),
                     Instruction::Bin { op, ty, lhs, rhs, .. } => Value::Scalar(
                         integer::bin(op, ty, scalar(lhs), scalar(rhs)).map_err(|reason| {
                             InterpreterError::Trap(InterpreterTrap { site: at, reason, steps })

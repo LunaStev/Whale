@@ -177,6 +177,7 @@ fn print_instr(i: &Instruction) -> String {
         Bin { dst, op, ty, lhs, rhs } => {
             format!("{dst}: {ty} = {} {ty} {lhs}, {rhs}", fmt_binop(op))
         },
+        Neg { dst, ty, src } => format!("{dst}: {ty} = neg {ty} {src}"),
         Not { dst, ty, src } => format!("{dst}: {ty} = not {ty} {src}"),
 
         Cmp { dst, op, ty, lhs, rhs } => {
@@ -278,6 +279,7 @@ fn print_instr(i: &Instruction) -> String {
 pub fn print_const_expr(expr: &crate::ConstExpr) -> String {
     use crate::{ConstBinaryOp as B, ConstCompareOp as C, ConstExprKind as K, ConstRef};
     match &expr.kind {
+        K::Neg(value) => format!("neg({})", print_const_expr(value)),
         K::Not(value) => format!("bit_not({})", print_const_expr(value)),
         K::Literal(value) => format!("{} {}", expr.ty, fmt_const(value)),
         K::Reference(reference) => match reference {

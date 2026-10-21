@@ -615,6 +615,7 @@ fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
         | Undef { dst, ty }
         | Mov { dst, ty, .. }
         | Bin { dst, ty, .. }
+        | Neg { dst, ty, .. }
         | Not { dst, ty, .. }
         | Select { dst, ty, .. }
         | Phi { dst, ty, .. }
@@ -674,7 +675,7 @@ fn instr_uses(ins: &Instruction) -> Vec<ValueId> {
         Mov { src, .. } => vec![*src],
 
         Bin { lhs, rhs, .. } | PtrDiff { lhs, rhs, .. } => vec![*lhs, *rhs],
-        Not { src, .. } => vec![*src],
+        Neg { src, .. } | Not { src, .. } => vec![*src],
 
         Cmp { lhs, rhs, .. } => vec![*lhs, *rhs],
         ICmp { lhs, rhs, .. } => vec![*lhs, *rhs],

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+pub mod arithmetic;
+
 /// Exact IEEE storage bits. Equality compares storage, including NaN payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatBits {

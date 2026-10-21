@@ -65,11 +65,16 @@ impl Parser<'_> {
                 let ty = self.ty(0)?;
                 Instruction::Undef { dst, ty }
             },
-            "mov" | "not" => {
+            "mov" | "not" | "neg" => {
                 let dst = required()?;
                 let ty = self.ty(0)?;
                 let src = self.value()?;
-                if op == "mov" {
+                if op == "neg" {
+                    if self.format_version < 8 {
+                        return Err(self.error("neg requires typed IR format 8"));
+                    }
+                    Instruction::Neg { dst, ty, src }
+                } else if op == "mov" {
                     Instruction::Mov { dst, ty, src }
                 } else {
                     Instruction::Not { dst, ty, src }
@@ -404,6 +409,7 @@ impl Parser<'_> {
             | Instruction::Undef { ty, .. }
             | Instruction::Mov { ty, .. }
             | Instruction::Bin { ty, .. }
+            | Instruction::Neg { ty, .. }
             | Instruction::Not { ty, .. }
             | Instruction::Select { ty, .. }
             | Instruction::Phi { ty, .. }

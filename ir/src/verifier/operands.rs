@@ -211,6 +211,10 @@ pub(super) fn verify_instruction(
     ins: &Instruction,
 ) -> Result<(), VerifyError> {
     match ins {
+        Instruction::Neg { ty, src, .. } => {
+            verify_type_category(f, "neg", ty, is_integer(ty) || is_float(ty))?;
+            verify_operand(f, *src, ty)?;
+        },
         Instruction::Cast { dst, op, src_ty, src, dst_ty } => {
             verify_operand(f, *src, src_ty)?;
             if !valid_cast(op, src_ty, dst_ty) {

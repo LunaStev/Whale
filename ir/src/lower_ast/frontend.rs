@@ -98,6 +98,7 @@ pub enum Stmt {
 pub enum Expr {
     Located { annotation: crate::SourceAnnotation, expression: Box<Expr> },
     BitNot(Box<Expr>),
+    Neg(Box<Expr>),
     Cast { value: Box<Expr>, ty: TypeRef, kind: IntegerCast },
     FunctionRef(String),
     NullFunction(SignatureRef),

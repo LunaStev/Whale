@@ -521,6 +521,18 @@
             "Cast"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Neg": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "Neg"
+          ],
+          "additionalProperties": false
         }
       ]
     },

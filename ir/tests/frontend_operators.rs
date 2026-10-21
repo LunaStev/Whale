@@ -352,6 +352,15 @@ fn operators_reject_wrong_categories_widths_signedness_and_skipped_invalid_ir() 
             ))
             .is_err());
             let float = || ast::Expr::Lit(ast::Lit::Float { bits: 32, value: "0x3f800000".into() });
+            if matches!(op, B::Div | B::Rem) {
+                assert!(lower(&program(
+                    bin(op, float(), float()),
+                    ast::TypeRef::Float { bits: 32 },
+                    constant
+                ))
+                .is_ok());
+                continue;
+            }
             assert!(matches!(
                 lower(&program(
                     bin(op, float(), float()),
