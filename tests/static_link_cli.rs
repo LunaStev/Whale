@@ -119,3 +119,43 @@ fn unsupported_user_address_extent_fails_before_output_publication() {
     assert!(String::from_utf8_lossy(&result.stderr).contains("user address"), "{result:?}");
     assert_eq!(fs::read(&output).unwrap(), b"old executable");
 }
+
+#[test]
+fn byte_limit_diagnostics_name_the_offending_flag_before_publication() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("existing");
+    fs::write(&output, b"previous").unwrap();
+    for flag in ["--max-input", "--max-output"] {
+        for (value, message) in [
+            ("nope", "requires a decimal byte count"),
+            ("18446744073709551615", "byte count exceeds host capacity"),
+        ] {
+            let result = whale()
+                .args(["link", "missing.o", "-o"])
+                .arg(&output)
+                .args([flag, value])
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(1));
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains(&format!("{flag} {message}")),
+                "{result:?}"
+            );
+            assert_eq!(fs::read(&output).unwrap(), b"previous");
+        }
+    }
+    let input = assemble(dir.path(), "entry", "section .text\nglobal _start\n_start: ret\n");
+    let result = whale()
+        .arg("link")
+        .arg(input)
+        .arg("-o")
+        .arg(&output)
+        .args(["--max-output", "0"])
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    let diagnostic = String::from_utf8_lossy(&result.stderr);
+    assert!(!diagnostic.contains("decimal byte count"), "{diagnostic}");
+    assert!(!diagnostic.contains("host capacity"), "{diagnostic}");
+    assert_eq!(fs::read(output).unwrap(), b"previous");
+}

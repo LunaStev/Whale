@@ -156,8 +156,10 @@ The reader consumes at most N + 1 bytes, including for growing or streamed
 files. This budget is independent of assembly reservation and ELF output limits.
 Oversized or invalid UTF-8 assembly input preserves an existing output file.
 
-IR stdout writes are fallible: a closed pipe exits successfully, and other write
-errors exit with status 1 and a diagnostic. Canonical IR and scalar results
+CLI stdout writes are fallible: a closed pipe does not cause a panic, and other
+write errors exit with status 1 and a diagnostic. Assembly, object and link
+reporting continues after a closed pipe, preserving completed artifacts and
+real command failures. Successful IR output also treats a closed pipe as success. Canonical IR and scalar results
 retain their normal stdout format. `-o` still publishes atomically. The optional
 Wave bootstrap likewise replaces its archive only after successful creation,
 preserving the previous archive on an archiver failure.

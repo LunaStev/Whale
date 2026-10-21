@@ -8,15 +8,15 @@ pub(super) const ASM_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(super) const OBJECT_INPUT_BYTES: u64 = 256 * 1024 * 1024;
 
-pub(super) fn byte_limit(value: &str) -> Result<u64, &'static str> {
+pub(super) fn byte_limit(value: &str, flag: &str) -> Result<u64, String> {
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return Err("--max-input requires a decimal byte count");
+        return Err(format!("{flag} requires a decimal byte count"));
     }
     value
         .parse::<u64>()
         .ok()
         .filter(|v| *v < usize::MAX as u64)
-        .ok_or("--max-input byte count exceeds host capacity")
+        .ok_or_else(|| format!("{flag} byte count exceeds host capacity"))
 }
 
 pub(super) fn read(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
