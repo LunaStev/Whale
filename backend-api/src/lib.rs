@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Statically linked, out-of-tree code generation. This is a Rust API, not a dylib ABI.
 use diagnostic::{Context, Diagnostic, ToDiagnostic};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use target_spec::TargetSpec;
 
 pub enum Requirement<'a> {
@@ -22,7 +22,10 @@ pub enum Support {
 }
 
 pub struct Artifact {
-    /// Relative portable path. Validated before returning artifacts to callers.
+    /// Relative portable path, with Windows-compatible components. Paths in one
+    /// artifact set must be distinct under ASCII case folding and cannot be
+    /// component-wise ancestors of one another. Unicode case folding is not applied.
+    /// Validated before returning artifacts to callers.
     pub name: String,
     pub bytes: Vec<u8>,
 }
@@ -155,21 +158,61 @@ pub fn compile(
 ) -> Result<Vec<Artifact>, Vec<Diagnostic>> {
     let checked = check(backend, module, target, limits)?;
     let artifacts = backend.emit(&checked)?;
-    let mut names = BTreeSet::new();
     if artifacts.is_empty() {
         return Err(vec![artifact_error("backend emitted no artifacts")]);
     }
+    let mut names = BTreeMap::<String, &str>::new();
     for artifact in &artifacts {
-        if artifact.name.is_empty()
-            || artifact.name.contains(['\\', ':'])
-            || artifact.name.chars().any(char::is_control)
-            || artifact.name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
-            || !names.insert(&artifact.name)
-        {
-            return Err(vec![artifact_error("invalid or duplicate artifact path")]);
+        if !artifact.name.split('/').all(portable_component) {
+            return Err(vec![artifact_error(&format!(
+                "invalid artifact path {:?}",
+                artifact.name
+            ))]);
         }
+        let folded = artifact.name.to_ascii_lowercase();
+        // Prefixes must end at a component boundary: `out` and `out2/a.o`
+        // are independent files. Check both orders without comparing every pair.
+        let ancestor = folded.match_indices('/').find_map(|(at, _)| names.get(&folded[..at]));
+        let prefix = format!("{folded}/");
+        let descendant = names
+            .range(prefix.clone()..)
+            .next()
+            .filter(|(name, _)| name.starts_with(&prefix))
+            .map(|(_, name)| name);
+        if let Some(other) = names.get(&folded).or(ancestor).or(descendant) {
+            return Err(vec![artifact_error(&format!(
+                "artifact path {:?} conflicts with {:?}",
+                artifact.name, other
+            ))]);
+        }
+        names.insert(folded, &artifact.name);
     }
     Ok(artifacts)
+}
+
+fn portable_component(part: &str) -> bool {
+    if part.is_empty()
+        || part == "."
+        || part == ".."
+        || part.ends_with(['.', ' '])
+        || part
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+    {
+        return false;
+    }
+    // Windows also ignores spaces before the extension when recognizing devices.
+    let basename = part.split('.').next().expect("nonempty component").trim_end_matches(' ');
+    let reserved = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+        .iter()
+        .any(|name| basename.eq_ignore_ascii_case(name));
+    let numbered = basename.get(..3).is_some_and(|prefix| {
+        prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT")
+    }) && matches!(
+        basename.get(3..),
+        Some("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³")
+    );
+    !reserved && !numbered
 }
 
 fn artifact_error(message: &str) -> Diagnostic {
@@ -267,5 +310,97 @@ mod tests {
         }
         let p = probe(Support::Expanded);
         assert_eq!(compile(&p, &m, &t, ir::IrLimits::default()).unwrap()[0].bytes, [42]);
+    }
+    fn compile_names(names: &[&str]) -> Result<Vec<Artifact>, Vec<Diagnostic>> {
+        let m = module();
+        let t = ir::Target::X86_64WhaleLinux.specification();
+        let mut p = probe(Support::Direct);
+        p.names = names.iter().map(|s| (*s).to_owned()).collect();
+        compile(&p, &m, &t, ir::IrLimits::default())
+    }
+
+    #[test]
+    fn artifact_ancestors_and_ascii_case_collisions_fail_in_either_order() {
+        for (a, b) in [
+            ("out", "out/module.o"),
+            ("a/b", "a/b/c.o"),
+            ("OUT.o", "out.o"),
+            ("Dir/a.o", "dir/A.o"),
+            ("Dir", "dir/module.o"),
+        ] {
+            for names in [[a, b], [b, a]] {
+                let errors = compile_names(&names).err().unwrap();
+                assert_eq!(errors[0].code, "backend.artifact");
+                assert!(errors[0].message.contains(a), "{}", errors[0]);
+                assert!(errors[0].message.contains(b), "{}", errors[0]);
+            }
+        }
+        // A non-ancestor sorting between a path and its child must not hide it.
+        assert!(compile_names(&["a", "a-b", "a/b.o"]).is_err());
+        assert!(compile_names(&["a/b.o", "a-b", "a"]).is_err());
+    }
+
+    #[test]
+    fn every_artifact_component_must_be_portable() {
+        for part in [
+            "CON",
+            "con.txt",
+            "CON .txt",
+            "COM1 .o",
+            "LPT9 .obj",
+            "NUL .txt",
+            "PrN",
+            "NUL.txt",
+            "AUX",
+            "COM1.obj",
+            "lpt9",
+            "COM¹",
+            "lpt².txt",
+            "CONIN$",
+            "CONOUT$.txt",
+            "out?.o",
+            "a|b.o",
+            "a<b",
+            "a>b",
+            "a*b",
+            "a\"b",
+            "a:b",
+            "out.o.",
+            "out.o ",
+            "bad\nname",
+            "bad\0name",
+            "bad\u{85}name",
+        ] {
+            for name in [part.to_owned(), format!("valid/{part}/file.o")] {
+                let errors = compile_names(&[&name]).err().unwrap();
+                assert_eq!(errors[0].code, "backend.artifact", "{name:?}");
+            }
+        }
+        for number in 1..=9 {
+            for prefix in ["COM", "lPt"] {
+                assert!(compile_names(&[&format!("{prefix}{number}.obj")]).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn valid_artifact_names_keep_their_original_spelling() {
+        let names = [
+            "out",
+            "out2/module.o",
+            "Dir/a.o",
+            "dir/B.o",
+            "한글/λ.o",
+            "Ä.o",
+            "ä.o",
+            "COM0",
+            "COM10",
+            "LPT0.txt",
+            "NULled.o",
+            "CON name.txt",
+            "COM10 .o",
+        ];
+        let artifacts = compile_names(&names).unwrap();
+        assert_eq!(artifacts.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), names);
     }
 }
