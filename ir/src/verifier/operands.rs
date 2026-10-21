@@ -317,6 +317,29 @@ pub(super) fn verify_instruction(
             verify_alignment(f, *align)?;
             verify_type_category(f, "alloca", ty, is_storable(ty))?;
         },
+        Instruction::VolatileLoad { ty, ptr, align, .. } => {
+            verify_alignment(f, *align)?;
+            verify_type_category(
+                f,
+                "volatile load",
+                ty,
+                is_storable(ty)
+                    && !matches!(ty, Type::Array(..) | Type::Struct(_) | Type::Tuple(_)),
+            )?;
+            verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
+        },
+        Instruction::VolatileStore { ty, ptr, value, align } => {
+            verify_alignment(f, *align)?;
+            verify_type_category(
+                f,
+                "volatile store",
+                ty,
+                is_storable(ty)
+                    && !matches!(ty, Type::Array(..) | Type::Struct(_) | Type::Tuple(_)),
+            )?;
+            verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
+            verify_operand(f, *value, ty)?;
+        },
         Instruction::Load { ty, ptr, align, .. } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "load", ty, is_storable(ty))?;

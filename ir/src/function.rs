@@ -2,14 +2,14 @@
 
 use crate::{BasicBlock, BlockId, Type, ValueId};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Param {
     pub name: String,
     pub id: ValueId,
     pub ty: Type,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Function {
     pub id: crate::FunctionId,
     pub name: String,

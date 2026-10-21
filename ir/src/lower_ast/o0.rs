@@ -196,6 +196,20 @@ fn lower_stmt_o0(
             fb.annotate_source(annotation, checkpoint)?;
             Ok(())
         },
+        frontend::Stmt::VolatileStore { pointer, value } => {
+            let (ptr, pty) = lower_expr_o0(fb, env, global_consts, pointer, target)?;
+            let Type::Ptr(ty) = pty else { return Err(LowerError::UnsupportedExpr) };
+            if !super::support::scalar_storage(&ty) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            let (value, actual) = lower_expr_o0(fb, env, global_consts, value, target)?;
+            if actual != *ty {
+                return Err(LowerError::TypeMismatch { expected: *ty, got: actual });
+            }
+            let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
+            fb.volatile_store(*ty, value, ptr, align);
+            Ok(())
+        },
         frontend::Stmt::Store { place, value } => {
             let (ptr, ty) = storage::place(fb, env, global_consts, place, target)?;
             let (v, vty) = lower_expr_o0(fb, env, global_consts, value, target)?;
@@ -471,6 +485,15 @@ fn lower_expr_o0(
             }
             Ok((fb.gep(ptr, vec![index], ty.clone()), ty))
         },
+        frontend::Expr::VolatileLoad(pointer) => {
+            let (ptr, pty) = lower_expr_o0(fb, env, global_consts, pointer, target)?;
+            let Type::Ptr(ty) = pty else { return Err(LowerError::UnsupportedExpr) };
+            if !super::support::scalar_storage(&ty) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
+            Ok((fb.volatile_load((*ty).clone(), ptr, align), *ty))
+        },
         frontend::Expr::NullFunction(sig) => {
             let signature = super::support::signature_to_whale(sig)?;
             let value = fb.null_function(signature.clone()).map_err(LowerError::Call)?;
@@ -701,7 +724,8 @@ fn preserve_const_expr(
         frontend::Expr::Located { annotation, expression } => {
             preserve_const_expr(expression, ctx).map_err(|e| e.at(annotation))
         },
-        frontend::Expr::Struct { .. }
+        frontend::Expr::VolatileLoad(_)
+        | frontend::Expr::Struct { .. }
         | frontend::Expr::Array { .. }
         | frontend::Expr::Field { .. }
         | frontend::Expr::Index { .. }

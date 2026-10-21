@@ -263,8 +263,12 @@ pub fn verify_module_for_target_with_stats(
                 }
                 let storage = match ins {
                     Instruction::Alloca { ty, .. } => Some(("alloca", ty)),
-                    Instruction::Load { ty, .. } => Some(("load", ty)),
-                    Instruction::Store { ty, .. } => Some(("store", ty)),
+                    Instruction::VolatileLoad { ty, .. } | Instruction::Load { ty, .. } => {
+                        Some(("load", ty))
+                    },
+                    Instruction::VolatileStore { ty, .. } | Instruction::Store { ty, .. } => {
+                        Some(("store", ty))
+                    },
                     Instruction::Uninit { ty, .. } => Some(("uninit", ty)),
                     Instruction::Gep { base_ptr, indices, .. } if !indices.is_empty() => {
                         match f.value_type(*base_ptr) {
@@ -619,6 +623,7 @@ fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
         | Not { dst, ty, .. }
         | Select { dst, ty, .. }
         | Phi { dst, ty, .. }
+        | VolatileLoad { dst, ty, .. }
         | Load { dst, ty, .. } => Some((*dst, ty.clone())),
         Cmp { dst, .. } | ICmp { dst, .. } | FCmp { dst, .. } => Some((*dst, Type::Bool)),
         Cast { dst, dst_ty, .. } | Extract { dst, dst_ty, .. } | Gep { dst, dst_ty, .. } => {
@@ -632,6 +637,7 @@ fn instr_result(ins: &Instruction) -> Option<(ValueId, Type)> {
 
         LifetimeEnd { .. }
         | Uninit { .. }
+        | VolatileStore { .. }
         | Store { .. }
         | Memcpy { .. }
         | Memset { .. }
@@ -692,8 +698,10 @@ fn instr_uses(ins: &Instruction) -> Vec<ValueId> {
         Checked { lhs, rhs, .. } => vec![*lhs, *rhs],
 
         Alloca { .. } => vec![],
-        Load { ptr, .. } | Uninit { ptr, .. } | LifetimeEnd { ptr } => vec![*ptr],
-        Store { value, ptr, .. } => vec![*value, *ptr],
+        VolatileLoad { ptr, .. } | Load { ptr, .. } | Uninit { ptr, .. } | LifetimeEnd { ptr } => {
+            vec![*ptr]
+        },
+        VolatileStore { value, ptr, .. } | Store { value, ptr, .. } => vec![*value, *ptr],
 
         Gep { base_ptr, indices, .. } => {
             let mut v = vec![*base_ptr];

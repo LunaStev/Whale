@@ -1181,6 +1181,21 @@ impl<'a> FunctionBuilder<'a> {
         self.cur_block_mut().instructions.push(Instruction::Memcpy { dst, src, n, align });
     }
 
+    pub fn volatile_load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::VolatileLoad { dst, ty, ptr, align });
+        dst
+    }
+
+    pub fn volatile_store(&mut self, ty: Type, value: ValueId, ptr: ValueId, align: u32) {
+        self.cur_block_mut().instructions.push(Instruction::VolatileStore {
+            ty,
+            value,
+            ptr,
+            align,
+        });
+    }
+
     pub fn load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {
         let dst = self.define_value(ty.clone());
         self.cur_block_mut().instructions.push(Instruction::Load { dst, ty, ptr, align });

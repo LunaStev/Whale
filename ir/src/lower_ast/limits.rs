@@ -243,7 +243,7 @@ fn inspect_program_details(
                     i.push(Node::Expr(base), next)?;
                     i.push(Node::Expr(index), next)?;
                 },
-                Expr::Deref(value) | Expr::AddressOf(value) => {
+                Expr::VolatileLoad(value) | Expr::Deref(value) | Expr::AddressOf(value) => {
                     i.extended_ops |= 4;
                     i.push(Node::Expr(value), next)?;
                 },
@@ -307,7 +307,7 @@ fn inspect_program_details(
                     i.source(annotation)?;
                     i.push(Node::Stmt(statement), next)?;
                 },
-                Stmt::Store { place, value } => {
+                Stmt::VolatileStore { pointer: place, value } | Stmt::Store { place, value } => {
                     i.extended_ops |= 4;
                     i.push(Node::Expr(place), next)?;
                     i.push(Node::Expr(value), next)?;
@@ -453,7 +453,7 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                     pending.push(Disposal::One(Owned::Expr(*base)));
                     pending.push(Disposal::One(Owned::Expr(*index)));
                 },
-                Expr::Deref(value) | Expr::AddressOf(value) => {
+                Expr::VolatileLoad(value) | Expr::Deref(value) | Expr::AddressOf(value) => {
                     pending.push(Disposal::One(Owned::Expr(*value)))
                 },
                 Expr::Located { expression, .. } => {
@@ -483,7 +483,7 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 Stmt::Located { statement, .. } => {
                     pending.push(Disposal::One(Owned::Stmt(*statement)))
                 },
-                Stmt::Store { place, value } => {
+                Stmt::VolatileStore { pointer: place, value } | Stmt::Store { place, value } => {
                     pending.push(Disposal::One(Owned::Expr(place)));
                     pending.push(Disposal::One(Owned::Expr(value)));
                 },

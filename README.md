@@ -874,3 +874,5 @@ x86 coverage or recovery of original source code.
 Numeric cast legality, rounding and trap rules: [IR casts](ir/CASTS.md).
 
 Typed struct, pointer and fixed-array frontend forms: [storage lowering](ir/FRONTEND-STORAGE.md).
+
+Observable traps, volatile memory and verified pass APIs: [effects and passes](ir/EFFECTS-AND-PASSES.md).

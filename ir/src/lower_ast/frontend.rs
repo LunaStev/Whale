@@ -63,6 +63,10 @@ pub enum Stmt {
         statement: Box<Stmt>,
     },
     Return(Option<Expr>),
+    VolatileStore {
+        pointer: Expr,
+        value: Expr,
+    },
     Store {
         place: Expr,
         value: Expr,
@@ -108,6 +112,7 @@ pub enum Expr {
     Index { base: Box<Expr>, index: Box<Expr> },
     AddressOf(Box<Expr>),
     Deref(Box<Expr>),
+    VolatileLoad(Box<Expr>),
     PointerOffset { base: Box<Expr>, index: Box<Expr> },
     BitNot(Box<Expr>),
     Neg(Box<Expr>),

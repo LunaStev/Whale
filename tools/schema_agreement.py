@@ -40,6 +40,14 @@ def cases(version):
         {"Return": {"Deref": {"PointerOffset": {"base": {"AddressOf": index}, "index": zero}}}},
     ]
     yield "aggregate-pointer-storage", aggregate, version >= 5, version >= 5
+    volatile = copy.deepcopy(base)
+    address = {"AddressOf": {"Var": "x"}}
+    volatile["program"]["functions"][0]["body"] = [
+        {"VarDecl": {"name": "x", "ty": integer, "init": None}},
+        {"VolatileStore": {"pointer": address, "value": literal}},
+        {"Return": {"VolatileLoad": address}},
+    ]
+    yield "volatile-scalar-storage", volatile, version >= 5, version >= 5
     yield "ordinary-null-link-name", base, True, True
     missing = copy.deepcopy(base); del missing["program"]["functions"][0]["link_name"]
     yield "missing-optional-link-name", missing, True, True

@@ -296,22 +296,30 @@ impl Parser<'_> {
                 let align = self.align()?;
                 Instruction::Uninit { ty, ptr, align }
             },
-            "load" | "store" => {
+            "load" | "store" | "volatile_load" | "volatile_store" => {
+                let volatile = op.starts_with("volatile_");
+                if volatile && self.format_version < 8 {
+                    return Err(self.error("volatile accesses require typed IR format 8"));
+                }
                 let ty = self.ty(0)?;
-                let value = if op == "store" { Some(self.value()?) } else { None };
+                let value = if op.ends_with("store") { Some(self.value()?) } else { None };
                 self.comma()?;
                 let ptr_ty = self.ty(0)?;
                 self.equal_type(&Type::ptr_to(ty.clone()), &ptr_ty)?;
                 let ptr = self.value()?;
                 let align = self.align()?;
                 if let Some(value) = value {
-                    Instruction::Store { ty, value, ptr, align }
+                    if volatile {
+                        Instruction::VolatileStore { ty, value, ptr, align }
+                    } else {
+                        Instruction::Store { ty, value, ptr, align }
+                    }
                 } else {
-                    Instruction::Load {
-                        dst: dst.ok_or_else(|| self.error("load requires a result"))?,
-                        ty,
-                        ptr,
-                        align,
+                    let dst = dst.ok_or_else(|| self.error("load requires a result"))?;
+                    if volatile {
+                        Instruction::VolatileLoad { dst, ty, ptr, align }
+                    } else {
+                        Instruction::Load { dst, ty, ptr, align }
                     }
                 }
             },
@@ -413,6 +421,7 @@ impl Parser<'_> {
             | Instruction::Not { ty, .. }
             | Instruction::Select { ty, .. }
             | Instruction::Phi { ty, .. }
+            | Instruction::VolatileLoad { ty, .. }
             | Instruction::Load { ty, .. } => Some(ty.clone()),
             Instruction::Cmp { .. } | Instruction::ICmp { .. } | Instruction::FCmp { .. } => {
                 Some(Type::Bool)

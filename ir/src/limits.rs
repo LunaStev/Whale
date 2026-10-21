@@ -216,7 +216,9 @@ pub(crate) fn check_module(m: &Module, limits: IrLimits) -> Result<(), LimitErro
                     | Select { ty, .. }
                     | Checked { ty, .. }
                     | Alloca { ty, .. }
+                    | VolatileLoad { ty, .. }
                     | Load { ty, .. }
+                    | VolatileStore { ty, .. }
                     | Store { ty, .. }
                     | Uninit { ty, .. }
                     | GlobalAddr { ty, .. } => b.ty(ty)?,

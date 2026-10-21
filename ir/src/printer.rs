@@ -220,6 +220,12 @@ fn print_instr(i: &Instruction) -> String {
 
         Alloca { dst, ty, align } => format!("{dst}: ptr<{ty}> = alloca {ty}, align {align}"),
 
+        VolatileLoad { dst, ty, ptr, align } => {
+            format!("{dst}: {ty} = volatile_load {ty}, ptr<{ty}> {ptr}, align {align}")
+        },
+        VolatileStore { ty, value, ptr, align } => {
+            format!("volatile_store {ty} {value}, ptr<{ty}> {ptr}, align {align}")
+        },
         Load { dst, ty, ptr, align } => {
             format!("{dst}: {ty} = load {ty}, ptr<{ty}> {ptr}, align {align}")
         },

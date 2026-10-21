@@ -482,6 +482,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | Extract { dst, .. }
         | Checked { dst, .. }
         | Alloca { dst, .. }
+        | VolatileLoad { dst, .. }
         | Load { dst, .. }
         | Gep { dst, .. }
         | NullFunction { dst, .. }
@@ -491,6 +492,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         Call { dst, .. } => *dst,
         LifetimeEnd { .. }
         | Uninit { .. }
+        | VolatileStore { .. }
         | Store { .. }
         | Memcpy { .. }
         | Memset { .. }
@@ -540,7 +542,11 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         },
         Extract { dst_ty, .. } if scalar_type(dst_ty) => return Ok(()),
         Alloca { ty, .. } | Uninit { ty, .. } if allocation_type(ty) => return Ok(()),
-        Load { ty, .. } | Store { ty, .. } if value_type(ty) => return Ok(()),
+        VolatileLoad { ty, .. } | Load { ty, .. } | VolatileStore { ty, .. } | Store { ty, .. }
+            if value_type(ty) =>
+        {
+            return Ok(())
+        },
         Gep { .. } => return Ok(()),
         Cast { op: CastOp::Bitcast, src_ty: Type::Ptr(_), dst_ty: Type::Ptr(_), .. }
         | Cast { op: CastOp::IntToPtr | CastOp::PtrToInt, .. } => return Ok(()),
@@ -562,8 +568,8 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         | FCmp { .. } => "non-integer arithmetic/comparison",
         Cast { .. } => "unsupported cast",
         Alloca { .. } => "alloca",
-        Load { .. } => "load",
-        Store { .. } => "store",
+        VolatileLoad { .. } | Load { .. } => "load",
+        VolatileStore { .. } | Store { .. } => "store",
         Uninit { .. } => "uninit",
         NullFunction { .. } | FunctionAddr { .. } | Call { .. } => return Ok(()),
     };
@@ -1067,7 +1073,8 @@ fn run_inner<'module>(
                             intern_signature(&mut signatures, signature),
                         );
                     },
-                    Instruction::Load { ty: Type::FnPtr(signature), .. } => {
+                    Instruction::VolatileLoad { ty: Type::FnPtr(signature), .. }
+                    | Instruction::Load { ty: Type::FnPtr(signature), .. } => {
                         instruction_signatures.insert(
                             (block.id, index),
                             intern_signature(&mut signatures, signature),
@@ -1540,7 +1547,8 @@ fn run_inner<'module>(
                                 .map_err(|e| memory_failure(e, at, steps))?,
                         )
                     },
-                    Instruction::Load { ty, ptr, align, .. } => memory
+                    Instruction::VolatileLoad { ty, ptr, align, .. }
+                    | Instruction::Load { ty, ptr, align, .. } => memory
                         .load_with_signature(
                             get(ptr).pointer(),
                             ty,
@@ -1548,7 +1556,8 @@ fn run_inner<'module>(
                             prepared[&function].signatures.get(&(current, index)),
                         )
                         .map_err(|e| memory_failure(e, at, steps))?,
-                    Instruction::Store { ty, value, ptr, align } => {
+                    Instruction::VolatileStore { ty, value, ptr, align }
+                    | Instruction::Store { ty, value, ptr, align } => {
                         memory
                             .store(get(ptr).pointer(), ty, get(value), *align)
                             .map_err(|e| memory_failure(e, at, steps))?;

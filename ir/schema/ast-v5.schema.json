@@ -716,6 +716,18 @@
             "Deref"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VolatileLoad": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "VolatileLoad"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -981,6 +993,31 @@
           },
           "required": [
             "Store"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VolatileStore": {
+              "type": "object",
+              "properties": {
+                "pointer": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "pointer",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "VolatileStore"
           ],
           "additionalProperties": false
         }

@@ -10,6 +10,10 @@ mod constant;
 
 pub mod float;
 
+pub mod effects;
+
+pub mod pass;
+
 pub mod function;
 
 pub mod global_storage;

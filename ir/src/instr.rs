@@ -250,6 +250,18 @@ pub enum Instruction {
         ty: Type,
         align: u32,
     },
+    VolatileLoad {
+        dst: ValueId,
+        ty: Type,
+        ptr: ValueId,
+        align: u32,
+    },
+    VolatileStore {
+        ty: Type,
+        value: ValueId,
+        ptr: ValueId,
+        align: u32,
+    },
     Load {
         dst: ValueId,
         ty: Type,
