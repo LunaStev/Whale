@@ -8,7 +8,7 @@ pub struct ArchiveMember<'a> {
 }
 
 pub fn read_archive(bytes: &[u8]) -> Result<Vec<ArchiveMember<'_>>, String> {
-    parse_archive(bytes, 1024 * 1024, 512 * 1024 * 1024).map(|(members, _, _)| members)
+    parse_archive(bytes, 1024 * 1024, usize::MAX, 512 * 1024 * 1024).map(|(members, _, _)| members)
 }
 
 fn charge_archive(work: &mut usize, amount: usize, limit: usize) -> Result<(), String> {
@@ -22,6 +22,7 @@ fn charge_archive(work: &mut usize, amount: usize, limit: usize) -> Result<(), S
 fn parse_archive(
     bytes: &[u8],
     max_names: usize,
+    max_strings: usize,
     max_work: usize,
 ) -> Result<(Vec<ArchiveMember<'_>>, usize, usize), String> {
     if !bytes.starts_with(b"!<arch>\n") {
@@ -35,6 +36,7 @@ fn parse_archive(
     let mut cursor = 8usize;
     let mut members = Vec::new();
     let mut names = 0usize;
+    let mut strings = 0usize;
     let mut long_names = None;
     while cursor < bytes.len() {
         charge_archive(&mut work, 60, max_work)?;
@@ -50,6 +52,7 @@ fn parse_archive(
         let mut payload = bytes.get(start..end).ok_or("archive member exceeds input")?;
         let raw =
             std::str::from_utf8(&header[..16]).map_err(|_| "archive name is not UTF-8")?.trim_end();
+        let mut inspected = None;
         let name = if raw == "//" {
             long_names = Some(payload);
             None
@@ -60,6 +63,7 @@ fn parse_archive(
             charge_archive(&mut work, length, max_work)?;
             let name = payload.get(..length).ok_or("BSD archive name exceeds member")?;
             payload = &payload[length..];
+            inspected = Some(length);
             Some(
                 std::str::from_utf8(name)
                     .map_err(|_| "archive name is not UTF-8")?
@@ -79,6 +83,7 @@ fn parse_archive(
                 None => return Err("unterminated archive long name".into()),
             };
             charge_archive(&mut work, length + 1, max_work)?;
+            inspected = Some(length + 1);
             Some(
                 std::str::from_utf8(&suffix[..length])
                     .map_err(|_| "archive name is not UTF-8")?
@@ -88,10 +93,17 @@ fn parse_archive(
             Some(raw.trim_end_matches('/'))
         };
         if let Some(name) = name {
-            if !name.starts_with("__.SYMDEF") {
+            if !is_bsd_index(name) {
                 names = names
                     .checked_add(name.len())
                     .filter(|n| *n <= max_names)
+                    .ok_or("archive name byte budget exceeded")?;
+                // Keep the owned-name cap independent from the shared reader
+                // budget, which includes both inspected bytes and the copy.
+                strings = strings
+                    .checked_add(inspected.unwrap_or(name.len()))
+                    .and_then(|n| n.checked_add(name.len()))
+                    .filter(|n| *n <= max_strings)
                     .ok_or("archive name byte budget exceeded")?;
                 charge_archive(
                     &mut work,
@@ -115,7 +127,11 @@ fn parse_archive(
             cursor += 1;
         }
     }
-    Ok((members, names, work))
+    Ok((members, strings, work))
+}
+
+fn is_bsd_index(name: &str) -> bool {
+    matches!(name, "__.SYMDEF" | "__.SYMDEF SORTED" | "__.SYMDEF_64" | "__.SYMDEF_64 SORTED")
 }
 
 fn decimal(bytes: &[u8]) -> Result<usize, String> {
@@ -198,7 +214,8 @@ impl ReadBudget {
         next.input(bytes.len()).map_err(input_error)?;
         let (members, names, work) = parse_archive(
             bytes,
-            next.remaining.max_string_bytes.min(1024 * 1024),
+            1024 * 1024,
+            next.remaining.max_string_bytes,
             next.remaining.max_work,
         )
         .map_err(|message| match message.as_str() {

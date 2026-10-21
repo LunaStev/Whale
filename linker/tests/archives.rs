@@ -326,3 +326,115 @@ fn archive_names_and_parser_work_are_preflighted_with_shared_reader_limits() {
         assert!(read_archive(&bytes).unwrap_err().contains("name byte budget"));
     }
 }
+
+fn named_member(out: &mut Vec<u8>, encoding: &str, name: &str, payload: &[u8]) {
+    match encoding {
+        "short" => member(out, &format!("{name}/"), payload),
+        "BSD" => {
+            let mut bytes = name.as_bytes().to_vec();
+            bytes.extend_from_slice(payload);
+            member(out, &format!("#1/{}", name.len()), &bytes);
+        },
+        "GNU" => {
+            member(out, "//", format!("{name}/\n").as_bytes());
+            member(out, "/0", payload);
+        },
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn only_exact_bsd_symbol_indexes_are_skipped_and_prefix_objects_are_extracted() {
+    let helper = object("helper", &[0xb8, 42, 0, 0, 0, 0xc3]).write().unwrap();
+    for encoding in ["short", "BSD", "GNU"] {
+        let mut bytes = b"!<arch>\n".to_vec();
+        named_member(&mut bytes, encoding, "__.SYMDEF_x.o", &helper);
+        let parsed = read_archive(&bytes).unwrap();
+        assert_eq!(parsed.len(), 1, "{encoding}");
+        assert_eq!(parsed[0].name, "__.SYMDEF_x.o");
+        let mut linker = Linker::new(OutputFormat::ELF64Executable);
+        linker.add_object(entry());
+        linker.add_archive(&bytes).unwrap();
+        assert!(linker.link().is_ok(), "{encoding}");
+    }
+    let mut bytes = b"!<arch>\n".to_vec();
+    for name in ["__.SYMDEF", "__.SYMDEF SORTED", "__.SYMDEF_64", "__.SYMDEF_64 SORTED"] {
+        named_member(&mut bytes, "BSD", name, b"not an ELF payload");
+    }
+    assert!(read_archive(&bytes).unwrap().is_empty());
+    assert!(linker::core::archive::read_objects(&bytes).unwrap().is_empty());
+}
+
+#[test]
+fn archive_inspection_and_name_copies_have_exact_shared_string_boundaries() {
+    use linker::core::archive::read_objects_with_limits;
+    let bytes = ObjectFile::new(ObjectFormat::ELF64).write().unwrap();
+    let (_, usage) = ObjectFile::read_with_usage(&bytes, ObjectReadLimits::default()).unwrap();
+    for (encoding, name, inspected) in [
+        ("short", "short.o", 7),
+        ("BSD", "twenty-byte-member.o", 20),
+        // GNU names include the slash and newline inspected to find the end.
+        ("GNU", "twenty-byte-member.o", 22),
+    ] {
+        let mut archive = b"!<arch>\n".to_vec();
+        named_member(&mut archive, encoding, name, &bytes);
+        let exact = usage.string_bytes + inspected + name.len();
+        for max_string_bytes in [usage.string_bytes + name.len(), exact - 1] {
+            let error = read_objects_with_limits(
+                &archive,
+                ObjectReadLimits { max_string_bytes, ..ObjectReadLimits::default() },
+            )
+            .err()
+            .expect("inspection and copying must both be charged");
+            assert_eq!(reader_resource(error), ObjectResource::StringBytes, "{encoding}");
+        }
+        assert_eq!(
+            read_objects_with_limits(
+                &archive,
+                ObjectReadLimits { max_string_bytes: exact, ..ObjectReadLimits::default() },
+            )
+            .unwrap()
+            .len(),
+            1,
+            "{encoding}"
+        );
+    }
+}
+
+#[test]
+fn string_charges_span_archives_objects_and_rollback_a_rejected_input() {
+    let start = entry().write().unwrap();
+    let helper = object("helper", &[0xc3]).write().unwrap();
+    let (_, start_usage) =
+        ObjectFile::read_with_usage(&start, ObjectReadLimits::default()).unwrap();
+    let (_, helper_usage) =
+        ObjectFile::read_with_usage(&helper, ObjectReadLimits::default()).unwrap();
+    let name = "helper.o";
+    let archive_strings = helper_usage.string_bytes + name.len() * 2;
+    let empty = ObjectFile::new(ObjectFormat::ELF64).write().unwrap();
+    let (_, empty_usage) =
+        ObjectFile::read_with_usage(&empty, ObjectReadLimits::default()).unwrap();
+    let mut bytes = b"!<arch>\n".to_vec();
+    named_member(&mut bytes, "short", name, &helper);
+    let mut linker = Linker::with_read_limits(
+        OutputFormat::ELF64Executable,
+        ObjectReadLimits {
+            max_string_bytes: start_usage.string_bytes + archive_strings + empty_usage.string_bytes,
+            ..ObjectReadLimits::default()
+        },
+    );
+    linker.add_object_bytes(&start).unwrap();
+    linker.add_archive(&bytes).unwrap();
+    // A second archive cannot fit; neither its names nor its nested objects may
+    // consume the budget left for a subsequent ordinary object.
+    for _ in 0..2 {
+        assert_eq!(
+            reader_resource(linker.add_archive(&bytes).unwrap_err()),
+            ObjectResource::StringBytes
+        );
+    }
+    // An empty object consumes exactly the remaining allowance and contributes
+    // no duplicate; even a partial name charge on failure would make it fail.
+    linker.add_object_bytes(&empty).unwrap();
+    assert!(linker.link().is_ok());
+}
