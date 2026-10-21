@@ -1,0 +1,121 @@
+{
+  "name": "Bug report",
+  "description": "Report a reproducible Whale failure.",
+  "title": "[Bug] ",
+  "labels": [
+    "bug"
+  ],
+  "body": [
+    {
+      "type": "dropdown",
+      "id": "component",
+      "attributes": {
+        "label": "Whale component",
+        "description": "Choose the smallest affected boundary.",
+        "options": [
+          "Assembler",
+          "IR",
+          "Object",
+          "Linker",
+          "Codegen",
+          "CLI",
+          "CI / release tooling"
+        ]
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "revision",
+      "attributes": {
+        "label": "Whale revision / version",
+        "description": "Commit SHA or whale --version, plus feature flags."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "host",
+      "attributes": {
+        "label": "Build and execution host",
+        "description": "OS, CPU architecture and Rust/compiler version."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "target",
+      "attributes": {
+        "label": "Output target and format",
+        "description": "Target identity, ISA, ELF/COFF format, or not applicable."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "command",
+      "attributes": {
+        "label": "Exact command",
+        "description": "Include command arguments and relevant build flags.",
+        "render": "shell"
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "input",
+      "attributes": {
+        "label": "Minimal input",
+        "description": "Small assembly, typed IR, AST JSON or API reproducer; state when no input is needed.",
+        "render": "text"
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "actual",
+      "attributes": {
+        "label": "Actual result",
+        "description": "Exit status and observed bytes, diagnostic or behavior."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "expected",
+      "attributes": {
+        "label": "Expected result",
+        "description": "Give the expected behavior and contract/reference where known."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "logs",
+      "attributes": {
+        "label": "Additional logs",
+        "description": "Relevant complete diagnostic or inspector output.",
+        "render": "text"
+      },
+      "validations": {
+        "required": false
+      }
+    }
+  ]
+}

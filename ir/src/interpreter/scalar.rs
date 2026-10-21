@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Storage reinterpretation only: no floating-point arithmetic or conversion.
 use super::integer;
+
 use crate::{ConstValue, FloatBits, Type};
 
 pub(super) fn float_type(ty: &Type) -> bool {

@@ -18,6 +18,7 @@ const PREDICATES: [(&str, FCmpPred, [bool; 4]); 14] = [
     ("ugt", FCmpPred::Ugt, [false, false, true, true]),
     ("uge", FCmpPred::Uge, [false, true, true, true]),
 ];
+
 const GENERIC: [(&str, CmpOp, ConstCompareOp, usize); 6] = [
     ("feq", CmpOp::FEq, ConstCompareOp::Eq, 0),
     ("fne", CmpOp::FNe, ConstCompareOp::Ne, 9),

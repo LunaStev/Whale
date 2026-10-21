@@ -2,9 +2,13 @@
 //! A tiny executable bytecode target, deliberately independent of AMD64.
 //! Encoding: CONST=1,u32 dst,i64; ADD=2,u32 dst,u32 lhs,u32 rhs; RET=3,u32 src.
 use assembler::{AsmError, AsmSection, AsmSectionKind, AssemblerOutput, AssemblyLimits};
+
 use backend_api::{Artifact, Backend, CheckedModule, Requirement, Support};
+
 use diagnostic::Diagnostic;
+
 use ir::{BinOp, ConstValue, Instruction, Terminator, Type};
+
 use target_spec::{DataLayout, Endian, MemoryModel, OutputKind, StorageLayout, TargetSpec};
 
 pub const TARGET: &str = "example-bytecode-v1";
@@ -32,10 +36,12 @@ pub fn register(registry: &mut toolchain::Registry) -> Result<(), String> {
 /// Own grammar, parser, and encoding; no shared tokens or AMD64 AST required.
 /// Syntax: `value 42` creates a constant in r0 and returns it.
 pub struct ExampleAssembler;
+
 impl assembler::extension::Assembler for ExampleAssembler {
     fn id(&self) -> &str {
         TARGET
     }
+
     fn assemble(
         &self,
         name: &str,
@@ -71,10 +77,12 @@ impl assembler::extension::Assembler for ExampleAssembler {
 }
 
 pub struct ExampleBackend;
+
 impl Backend for ExampleBackend {
     fn target_id(&self) -> &str {
         TARGET
     }
+
     fn support(&self, requirement: Requirement<'_>, _target: &TargetSpec) -> Support {
         let supported = match requirement {
             Requirement::Type(Type::I64) => true,
@@ -98,6 +106,7 @@ impl Backend for ExampleBackend {
             )
         }
     }
+
     fn validate(&self, checked: &CheckedModule<'_>) -> Result<(), Vec<Diagnostic>> {
         let functions = &checked.module().functions;
         if functions.len() != 1 || !functions[0].params.is_empty() || functions[0].blocks.len() != 1
@@ -108,6 +117,7 @@ impl Backend for ExampleBackend {
         }
         Ok(())
     }
+
     fn emit(&self, checked: &CheckedModule<'_>) -> Result<Vec<Artifact>, Vec<Diagnostic>> {
         let mut bytes = Vec::new();
         for instruction in &checked.module().functions[0].blocks[0].instructions {
@@ -135,9 +145,11 @@ impl Backend for ExampleBackend {
         Ok(vec![Artifact { name: "program.wexample".into(), bytes }])
     }
 }
+
 fn word(bytes: &mut Vec<u8>, value: u32) {
     bytes.extend(value.to_le_bytes());
 }
+
 fn error(message: &str) -> Diagnostic {
     Diagnostic::new("example", "emit", "example.unsupported", message)
 }
@@ -145,6 +157,7 @@ fn error(message: &str) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn module() -> ir::Module {
         let mut builder = ir::ModuleBuilder::new(TARGET, target().storage.data);
         let mut f = builder.begin_function("main", vec![], Type::I64);
@@ -155,6 +168,7 @@ mod tests {
         f.finish();
         builder.finish()
     }
+
     // Independent execution of the artifact proves that the extension emits code.
     fn execute(bytes: &[u8]) -> i64 {
         let mut pc = 0;
@@ -188,6 +202,7 @@ mod tests {
             }
         }
     }
+
     #[test]
     fn external_backend_and_assembler_run_without_builtin_target_changes() {
         let mut registry = toolchain::Registry::new();
@@ -207,6 +222,7 @@ mod tests {
             )
             .is_err());
     }
+
     #[test]
     fn registration_and_semantic_failures_are_reported() {
         let mut registry = toolchain::Registry::new();

@@ -13,6 +13,7 @@ mod native {
     use super::*;
 
     use amd64::AMD64;
+
     use assembler::assemble;
 
     fn one(bytes: &[u8]) -> Instruction {

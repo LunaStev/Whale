@@ -1,4 +1,5 @@
 use amd64::AMD64;
+
 use assembler::{assemble, assemble_with_limits, AsmSectionKind, AssemblyLimits};
 
 fn error(src: &str) -> String {

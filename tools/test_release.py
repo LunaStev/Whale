@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import struct
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -43,11 +44,19 @@ class ReleaseTests(unittest.TestCase):
         self.version = patch("release.invoke")
         invoke = self.version.start()
         self.addCleanup(self.version.stop)
-        invoke.return_value.returncode = 0
-        invoke.return_value.stdout = b"whale 0.1.0\n"
+        self.actual_socket = False
+
+        def probe(binary, args, cwd):
+            if args == ["--version"]:
+                return subprocess.CompletedProcess([], 0, b"whale 0.1.0\n", b"")
+            return subprocess.CompletedProcess([], 1 if self.actual_socket else 2, b"",
+                b"missing input" if self.actual_socket else b"requires feature 'socket-cli'")
+
+        invoke.side_effect = probe
 
     def package(self, target, directory, **kwargs):
         self.binary.write_bytes(executable(target))
+        self.actual_socket = kwargs.get("socket", False)
         return release.package(self.binary, self.root / directory, VERSION, target, SOURCE, **kwargs)
 
     def test_every_native_target_is_reproducible_and_readable(self):
@@ -80,6 +89,33 @@ class ReleaseTests(unittest.TestCase):
             invoke.return_value.stdout = b"whale 9.9.9\n"
             with self.assertRaisesRegex(ValueError, "binary version"):
                 release.package(self.binary, self.root / "bad", VERSION, target, SOURCE)
+
+    def test_socket_mismatches_fail_before_publication_and_preserve_existing_artifacts(self):
+        target = next(iter(release.TARGETS))
+        self.binary.write_bytes(executable(target))
+        for enabled in [False, True]:
+            self.actual_socket = enabled
+            for existing in [False, True]:
+                output = self.root / f"mismatch-{enabled}-{existing}"
+                archive = output / release.archive_name(VERSION, target, SOURCE)
+                if existing:
+                    output.mkdir()
+                    archive.write_bytes(b"previous artifact")
+                with self.assertRaisesRegex(ValueError, "socket-cli availability"):
+                    release.package(self.binary, output, VERSION, target, SOURCE, not enabled)
+                if existing:
+                    self.assertEqual(archive.read_bytes(), b"previous artifact")
+                else:
+                    self.assertFalse(output.exists())
+        for enabled in [False, True]:
+            archive = self.package(target, f"matching-{enabled}", socket=enabled)
+            self.assertEqual(release.validate(archive, VERSION, target, SOURCE, execute=False)["socket_cli"], enabled)
+
+    def test_socket_probe_rejects_success_or_crash_instead_of_inventing_availability(self):
+        for status in [0, -9]:
+            with patch("release.invoke", return_value=subprocess.CompletedProcess([], status, b"", b"")):
+                with self.assertRaisesRegex(ValueError, "socket-cli availability"):
+                    release.check_socket(self.binary, self.root, True)
 
     def test_checksums_require_the_exact_expected_archive_set(self):
         directory = self.root / "dist"

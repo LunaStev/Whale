@@ -161,7 +161,7 @@ corrected before acceptance.
 Run these checks from the repository root with the committed `Cargo.lock`:
 
 ```bash
-cargo fmt --all -- --check
+python3 tools/format-rust.py --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --locked

@@ -31,6 +31,7 @@ impl FloatBits {
     /// any quiet or signaling NaN makes the operands unordered.
     pub fn compare(self, rhs: Self, predicate: &crate::FCmpPred) -> Option<bool> {
         use crate::FCmpPred::*;
+
         use std::cmp::Ordering;
         if self.width() != rhs.width() {
             return None;
