@@ -415,7 +415,8 @@ pub fn read_elf_with_usage(
             if view.range(h.section_offset, 64)?.iter().any(|b| *b != 0) {
                 return Err(error(Kind::InvalidSection, "section zero is not null").section(0));
             }
-        } else {
+        } else if section.kind != 0 {
+            // SHT_NULL is inactive; all other fields are undefined by the gABI.
             if section.align != 0 && !section.align.is_power_of_two() {
                 return Err(error(
                     Kind::InvalidAlignment,
@@ -447,6 +448,9 @@ pub fn read_elf_with_usage(
     mapping.resize(h.section_count, None);
     let mut symbol_table = None;
     for (index, &section) in headers.iter().enumerate().skip(1) {
+        if section.kind == 0 {
+            continue;
+        }
         let name = budget.name(view, names, section.name).map_err(|e| e.section(index))?;
         match section.kind {
             1 | 8 => {
