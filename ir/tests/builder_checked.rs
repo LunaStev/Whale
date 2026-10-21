@@ -75,3 +75,65 @@ fn checked_calls_report_terminated_blocks_and_can_build_neighbors() {
     f.finish();
     verify_module(&m.finish()).unwrap();
 }
+
+#[test]
+fn function_and_storage_link_collisions_fail_atomically_in_both_orders() {
+    fn storage(link: &str) -> GlobalStorage {
+        let mut g = GlobalStorage::internal(
+            "data",
+            Type::U32,
+            GlobalStorageInit::Value(ConstValue::U(0)),
+            false,
+            4,
+        );
+        g.linkage = Linkage::External;
+        g.link_name = Some(link.into());
+        g
+    }
+    fn declare(
+        m: &mut ModuleBuilder,
+        name: &str,
+        link: &str,
+        with_limits: bool,
+    ) -> Result<FunctionId, CallError> {
+        let signature = FunctionSignature::whale(vec![], Type::Void);
+        if with_limits {
+            m.declare_function_with_limits(
+                name,
+                signature,
+                Linkage::External,
+                Some(link.into()),
+                IrLimits::default(),
+            )
+        } else {
+            m.declare_function(name, signature, Linkage::External, Some(link.into()))
+        }
+    }
+    for with_limits in [false, true] {
+        let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
+        assert_eq!(m.try_add_global_storage(storage("exported")), Ok(GlobalId(0)));
+        assert_eq!(
+            declare(&mut m, "function", "exported", with_limits),
+            Err(CallError::LinkNameCollision("exported".into()))
+        );
+        assert_eq!(declare(&mut m, "function", "different", with_limits), Ok(FunctionId(0)));
+        assert_eq!(declare(&mut m, "function", "different", with_limits), Ok(FunctionId(0)));
+        assert_eq!(declare(&mut m, "other", "another", with_limits), Ok(FunctionId(1)));
+        let m = m.finish();
+        assert_eq!(m.declarations.len(), 2);
+        assert_eq!(m.global_storage.len(), 1);
+        verify_module(&m).unwrap();
+
+        let mut m = ModuleBuilder::new("x86_64-whale-linux", DataLayout::default_64bit_le());
+        assert_eq!(declare(&mut m, "function", "exported", with_limits), Ok(FunctionId(0)));
+        assert_eq!(
+            m.try_add_global_storage(storage("exported")),
+            Err(GlobalStorageError::LinkNameCollision)
+        );
+        assert_eq!(m.try_add_global_storage(storage("different")), Ok(GlobalId(0)));
+        let m = m.finish();
+        assert_eq!(m.declarations.len(), 1);
+        assert_eq!(m.global_storage.len(), 1);
+        verify_module(&m).unwrap();
+    }
+}

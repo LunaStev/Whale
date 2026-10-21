@@ -224,3 +224,34 @@ fn load_store_and_alloca_check_access_types_and_explicit_alignments() {
         assert_eq!(verify_module(&m).is_ok(), valid, "{m:?}");
     }
 }
+
+#[test]
+fn integer_division_and_remainder_reject_pointers_in_api_and_text() {
+    let ptr = Type::ptr_to(Type::U8);
+    for (op, spelling, ty) in [
+        (BinOp::SDiv, "sdiv", Type::I32),
+        (BinOp::SRem, "srem", Type::I32),
+        (BinOp::UDiv, "udiv", Type::U32),
+        (BinOp::URem, "urem", Type::U32),
+    ] {
+        for (ty, valid) in [(ptr.clone(), false), (ty, true)] {
+            let m = module(vec![ty.clone(), ty.clone()], Some(ty.clone()), |dst| {
+                Instruction::Bin { dst, op: op.clone(), ty, lhs: ValueId(0), rhs: ValueId(1) }
+            });
+            if valid {
+                verify_module(&m).unwrap();
+                parse_module(&print_module(&m)).unwrap();
+            } else {
+                assert!(
+                    matches!(verify_module(&m), Err(VerifyError::InvalidInstructionType { .. })),
+                    "{spelling}"
+                );
+                let error = parse_module(&print_module(&m)).unwrap_err();
+                assert!(
+                    matches!(error.kind, ParseErrorKind::Verification(ref e) if matches!(**e, VerifyError::InvalidInstructionType { .. })),
+                    "{spelling}: {error}"
+                );
+            }
+        }
+    }
+}

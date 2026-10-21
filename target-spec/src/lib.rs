@@ -64,7 +64,7 @@ impl ObjectTarget {
         if self == Target::X86_64WhaleLinux.object_target() {
             Ok(())
         } else {
-            Err(TargetError::UnsupportedObjectTarget(self))
+            Err(TargetError::UnsupportedAmd64ObjectTarget(self))
         }
     }
 
@@ -142,6 +142,7 @@ pub enum TargetError {
     UnsupportedTarget(String),
     LayoutMismatch { target: Target, actual: DataLayout },
     UnsupportedObjectTarget(ObjectTarget),
+    UnsupportedAmd64ObjectTarget(ObjectTarget),
 }
 
 impl fmt::Display for TargetError {
@@ -166,8 +167,11 @@ impl fmt::Display for TargetError {
             ),
             Self::UnsupportedObjectTarget(target) => write!(
                 f,
-                "unsupported object target {target:?}; supported object target: {:?}",
-                Target::X86_64WhaleLinux.object_target()
+                "unsupported object target {target:?}; supported serialization contract: ELF64, little endian, 64-bit addresses; machines: X86_64, AArch64, RiscV64, LoongArch64"
+            ),
+            Self::UnsupportedAmd64ObjectTarget(target) => write!(
+                f,
+                "unsupported object target {target:?}; this operation requires ELF64, little endian, 64-bit AMD64"
             ),
         }
     }

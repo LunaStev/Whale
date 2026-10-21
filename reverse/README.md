@@ -52,7 +52,8 @@ Missing bytes in a recognized form are `Truncated`; a known required field that
 cannot fit inside 15 bytes is `Overlong`. Fifteen prefix bytes are overlong even
 if no sixteenth input byte is available. Legacy prefixes after REX cancel the
 earlier REX, and only the effective REX changes AH/CH/DH/BH to SPL/BPL/SIL/DIL.
-Stack-register operations default to 64 bits, with 66 selecting 16 bits. SIB and
+Stack operations default to 64 bits. An effective REX.W takes precedence over
+66; 66 selects 16 bits when REX.W is absent or cancelled by a later legacy prefix. SIB and
 RIP-relative no-base sentinels do not turn into R13 merely because REX.B is set.
 
 `Instruction` retains the exact original bytes, operand/condition identities,
@@ -70,7 +71,11 @@ implied by this crate. The archive is generated through Wave's LLVM bootstrap.
 file offsets and virtual addresses. ET_REL uses the bounded object importer and
 retains symbolic RELA annotations. ET_EXEC uses checked ELF header access and
 executable PT_LOAD file ranges, including files without section tables. Memory-only
-BSS tails are never copied or decoded. Dynamic/PIE images are outside this subset.
+BSS tails and pure-BSS segments are never copied or decoded; zero file sizes
+require no file-backed range. Zero-sized NOTYPE linker boundary markers remain
+non-code metadata when outside their defining section. TLS symbol metadata is
+omitted because TLS offsets are not process virtual addresses. Dynamic/PIE images
+are outside this subset.
 
 `whale reverse inspect file --json` works without the Wave archive. `whale disasm`
 requires the linked Wave core, emits typed facts as JSON or a human listing, and

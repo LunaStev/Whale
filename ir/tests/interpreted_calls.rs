@@ -118,10 +118,10 @@ fn direct_and_indirect_recursion_share_fuel_depth_and_total_frame_budgets() {
 
 #[test]
 fn reachable_unsupported_callees_are_preflighted_before_an_earlier_runtime_trap() {
-    let source = format!("{HEADER} declare @f0 \"entry\": whale () -> void, linkage internal declare @f1 \"bad\": whale () -> void, linkage internal fn @f0 \"entry\"() -> void, entry %b0 {{ %b0 \"entry\": trap reason=\"must not execute\" %b1 \"dead\": call whale void @f1() ret void }} fn @f1 \"bad\"() -> void, entry %b0 {{ %b0 \"entry\": %v0: f32 = const f32 0x00000000 ret void }} }}");
+    let source = format!("{HEADER} declare @f0 \"entry\": whale () -> void, linkage internal declare @f1 \"bad\": whale () -> void, linkage internal fn @f0 \"entry\"() -> void, entry %b0 {{ %b0 \"entry\": trap reason=\"must not execute\" %b1 \"dead\": call whale void @f1() ret void }} fn @f1 \"bad\"() -> void, entry %b0 {{ %b0 \"entry\": %v0: f32 = const f32 0x00000000 %v1: f32 = fadd f32 %v0, %v0 ret void }} }}");
     let m = parse_module(&source).unwrap();
     assert!(
-        matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer constant" }) if site.function == FunctionId(1))
+        matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer arithmetic/comparison" }) if site.function == FunctionId(1))
     );
     let source = source.replace(
         "call whale void @f1()",
@@ -129,7 +129,7 @@ fn reachable_unsupported_callees_are_preflighted_before_an_earlier_runtime_trap(
     );
     let m = parse_module(&source).unwrap();
     assert!(
-        matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer constant" }) if site.function == FunctionId(1))
+        matches!(interpret(&m, FunctionId(0), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer arithmetic/comparison" }) if site.function == FunctionId(1))
     );
 }
 
@@ -283,7 +283,7 @@ fn indirect_preflight_ignores_unrelated_external_and_unsupported_same_signature_
         9,
         &["i32"],
         "i32",
-        "%b0 \"entry\": %v1: f32 = const f32 0x00000000 ret i32 %v0",
+        "%b0 \"entry\": %v1: f32 = const f32 0x00000000 %v2: f32 = fadd f32 %v1, %v1 ret i32 %v0",
     );
     m.declarations.push(FunctionDecl {
         id: FunctionId(10),
@@ -317,7 +317,7 @@ fn indirect_preflight_ignores_unrelated_external_and_unsupported_same_signature_
         (ValueId(4), Type::I32),
     ]);
     assert!(
-        matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer constant" }) if site.function == FunctionId(9))
+        matches!(interpret(&m, FunctionId(8), &[]), Err(InterpreterError::UnsupportedInstruction { site, operation: "non-integer arithmetic/comparison" }) if site.function == FunctionId(9))
     );
 }
 

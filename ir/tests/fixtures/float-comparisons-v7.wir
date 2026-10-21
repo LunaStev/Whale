@@ -1,0 +1,26 @@
+module {
+  format_version 7
+  semantics_version 1
+  target "x86_64-whale-linux"
+  datalayout { ptr=64, endian=little }
+
+  declare @f0 "generic_ne": whale (f64, f64) -> bool, linkage internal
+  declare @f1 "ordered_ne": whale (f64, f64) -> bool, linkage internal
+  declare @f2 "zero_eq": whale (f16, f16) -> bool, linkage internal
+
+  fn @f0 "generic_ne"(%v0 "a": f64, %v1 "b": f64) -> bool, entry %b0 {
+  %b0 "entry":
+    %v2: bool = cmp fne f64 %v0, %v1
+    ret bool %v2
+  }
+  fn @f1 "ordered_ne"(%v0 "a": f64, %v1 "b": f64) -> bool, entry %b0 {
+  %b0 "entry":
+    %v2: bool = fcmp one f64 %v0, %v1
+    ret bool %v2
+  }
+  fn @f2 "zero_eq"(%v0 "a": f16, %v1 "b": f16) -> bool, entry %b0 {
+  %b0 "entry":
+    %v2: bool = cmp feq f16 %v0, %v1
+    ret bool %v2
+  }
+}

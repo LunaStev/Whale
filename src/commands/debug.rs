@@ -1,3 +1,5 @@
+use super::report::{print, println};
+
 pub(super) fn dump_bytes(
     label: &str,
     bytes: &[u8],

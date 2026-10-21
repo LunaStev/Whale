@@ -1,3 +1,5 @@
+use super::report::println;
+
 use object::{ObjectFile, ObjectFormat, ObjectSymbol, SectionKind, SymbolBinding};
 
 use std::process;
@@ -53,10 +55,11 @@ pub fn run(args: Vec<String>) {
                     eprintln!("Error: --max-input requires a decimal byte count");
                     process::exit(1);
                 });
-                max_input = Some(super::input::byte_limit(limit).unwrap_or_else(|e| {
-                    eprintln!("Error: {e}");
-                    process::exit(1);
-                }));
+                max_input =
+                    Some(super::input::byte_limit(limit, "--max-input").unwrap_or_else(|e| {
+                        eprintln!("Error: {e}");
+                        process::exit(1);
+                    }));
                 i += 1;
             },
             "--bytes" => show_bytes = true,

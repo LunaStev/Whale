@@ -241,3 +241,44 @@ fn parser_resource_limits_and_truncated_inputs_never_panic() {
         }
     }
 }
+
+#[test]
+fn verification_locations_respect_function_and_global_namespaces() {
+    fn assert_location(source: &str, prefix: &str) -> ParseError {
+        let error = parse_module(source).unwrap_err();
+        let offset = source.find(prefix).unwrap() + prefix.find('"').unwrap();
+        assert_eq!(error.location.byte_offset, offset, "{error}");
+        assert_eq!(
+            error.location.line,
+            source[..offset].bytes().filter(|&b| b == b'\n').count() + 1
+        );
+        error
+    }
+    let header = HEADER.replace("format_version 3", "format_version 7");
+    let storage =
+        "storage @g0 \"shared\": i32 = value i32 0, align 4, access readwrite, linkage internal\n";
+    let declaration = "declare @f0 \"shared\": whale () -> i32, linkage internal\n";
+    let body =
+        "fn @f0 \"shared\"() -> i32, entry %b0 {\n%b0 \"entry\":\n%v0: i32 = const i32 42\n}\n";
+    for before in [format!("{storage}{declaration}"), format!("{declaration}{storage}")] {
+        let text = format!("{header}{before}{body}}}\n");
+        let error = assert_location(&text, "fn @f0 \"shared\"");
+        assert!(
+            matches!(error.kind, ParseErrorKind::Verification(e) if matches!(*e, VerifyError::UnterminatedBlock { .. }))
+        );
+        let good = text.replace("const i32 42\n", "const i32 42\nret i32 %v0\n");
+        parse_module(&good).unwrap();
+        let bad_global = good.replace("align 4, access", "align 3, access");
+        let error = assert_location(&bad_global, "storage @g0 \"shared\"");
+        assert!(
+            matches!(error.kind, ParseErrorKind::Verification(e) if matches!(*e, VerifyError::GlobalStorage { .. }))
+        );
+    }
+    // Constant-expression errors carry a global identity, independent of their
+    // textual "module" scope and any function with that name.
+    let text = format!("{header}declare @f0 \"module\": whale () -> void, linkage internal\nfn @f0 \"module\"() -> void, entry %b0 {{ %b0 \"entry\": ret void }}\nglobal @g9 \"module\": i32 = const i32 0, align 4, init_expr i32 1\n}}\n");
+    let error = assert_location(&text, "global @g9 \"module\"");
+    assert!(
+        matches!(error.kind, ParseErrorKind::Verification(e) if matches!(*e, VerifyError::InvalidConstExpression { .. }))
+    );
+}

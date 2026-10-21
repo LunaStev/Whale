@@ -1,3 +1,5 @@
+use crate::commands::report::println;
+
 use std::env;
 
 use crate::commands;

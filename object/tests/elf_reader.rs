@@ -431,3 +431,52 @@ fn sparse_nobits_alignment_may_put_conceptual_file_offset_beyond_eof() {
         assert!(imported.sections[0].data.is_empty());
     }
 }
+
+#[test]
+fn inactive_headers_ignore_undefined_fields_but_keep_raw_resource_charges() {
+    let original = sample();
+    let mut bytes = original.write().unwrap();
+    let (_, before) = ObjectFile::read_with_usage(&bytes, ObjectReadLimits::default()).unwrap();
+    let inactive = before.sections;
+    // Writer places the section-header table at EOF. Only sh_type has meaning
+    // for an inactive header; deliberately make all other fields nonsensical.
+    bytes.extend_from_slice(&[0xff; 64]);
+    let inactive_at = bytes.len() - 64;
+    put32(&mut bytes, inactive_at + 4, 0);
+    put16(&mut bytes, 60, (inactive + 1) as u16);
+    let (imported, after) =
+        ObjectFile::read_with_usage(&bytes, ObjectReadLimits::default()).unwrap();
+    assert_semantics(&original, &imported);
+    assert_eq!(after.sections, before.sections + 1);
+    assert_eq!(after.work, before.work + 1);
+    assert_eq!(after.string_bytes, before.string_bytes);
+    assert_eq!(after.payload_bytes, before.payload_bytes);
+    for limits in [
+        ObjectReadLimits { max_sections: after.sections - 1, ..ObjectReadLimits::default() },
+        ObjectReadLimits { max_work: after.work - 1, ..ObjectReadLimits::default() },
+    ] {
+        let error = ObjectFile::read_with_limits(&bytes, limits).err().expect("resource limit");
+        assert_eq!(error.kind, ObjectErrorKind::ResourceLimit);
+    }
+    // Symbols and relocations may not use the inactive header as payload.
+    let view = ElfView::parse(&bytes, ObjectReadLimits::default()).unwrap();
+    let table = (1..view.header.section_count)
+        .find_map(|index| {
+            let header = view.section(index).unwrap();
+            (header.kind == 2).then_some(header)
+        })
+        .unwrap();
+    let mut bad_symbol = bytes.clone();
+    put16(&mut bad_symbol, table.offset as usize + 24 + 6, inactive as u16);
+    assert!(ObjectFile::read(&bad_symbol).is_err());
+    let relocation = (1..view.header.section_count)
+        .find(|&index| view.section(index).unwrap().kind == 4)
+        .unwrap();
+    let mut bad_relocation = bytes.clone();
+    put32(
+        &mut bad_relocation,
+        view.header.section_offset as usize + relocation * 64 + 44,
+        inactive as u32,
+    );
+    assert_eq!(rejected(&bad_relocation).kind, ObjectErrorKind::InvalidRelocation);
+}

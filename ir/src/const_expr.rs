@@ -412,15 +412,17 @@ fn const_cmp(
         let (ConstValue::F(a), ConstValue::F(b)) = (l, r) else {
             return Err(ConstEvalError::UnsupportedOperation);
         };
-        let (a, b) = (a.to_f64(), b.to_f64());
-        return Ok(match op {
-            ConstCompareOp::Eq => a == b,
-            ConstCompareOp::Ne => a != b,
-            ConstCompareOp::Lt => a < b,
-            ConstCompareOp::Le => a <= b,
-            ConstCompareOp::Gt => a > b,
-            ConstCompareOp::Ge => a >= b,
-        });
+        let generic = match op {
+            ConstCompareOp::Eq => crate::CmpOp::FEq,
+            ConstCompareOp::Ne => crate::CmpOp::FNe,
+            ConstCompareOp::Lt => crate::CmpOp::FLt,
+            ConstCompareOp::Le => crate::CmpOp::FLe,
+            ConstCompareOp::Gt => crate::CmpOp::FGt,
+            ConstCompareOp::Ge => crate::CmpOp::FGe,
+        };
+        return a
+            .compare(*b, &generic.float_predicate().unwrap())
+            .ok_or(ConstEvalError::TypeMismatch);
     }
 
     // bool은 eq/ne만

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
-//! A bounded oracle for verified scalar integer/control-flow IR.
+//! A bounded oracle for verified scalar/control-flow IR.
 //! Tracked stack memory and bounded direct/indirect Whale calls are supported.
 
 mod integer;
+
+mod scalar;
 
 mod memory;
 
@@ -224,7 +226,7 @@ impl fmt::Display for InterpreterError {
             Self::GlobalMemory { global, reason } => write!(f, "global storage @g{}: {reason}", global.0),
             Self::GlobalMemoryLimit { global, resource, limit } => write!(f, "global storage @g{} memory {resource:?} limit {limit}", global.0),
             Self::UnknownFunction(id) => write!(f, "no body for function @f{}", id.0),
-            Self::UnsupportedSignature(id) => write!(f, "unsupported interpreter signature for @f{} (requires Whale convention and supported integer/bool/pointer parameters and scalar/pointer or void return)", id.0),
+            Self::UnsupportedSignature(id) => write!(f, "unsupported interpreter signature for @f{} (requires Whale convention and supported integer/bool/float/pointer parameters and scalar/pointer or void return)", id.0),
             Self::ArgumentCount { expected, got } => write!(f, "expected {expected} arguments, got {got}"),
             Self::ArgumentType { index, expected } => write!(f, "argument {index} must be a valid {expected} runtime value"),
             Self::UnsupportedInstruction { site, operation } => write!(f, "unsupported interpreter operation {operation} at {site}"),
@@ -450,7 +452,7 @@ impl Value {
 }
 
 fn scalar_type(ty: &Type) -> bool {
-    *ty == Type::Bool || integer::shape(ty).is_some()
+    *ty == Type::Bool || integer::shape(ty).is_some() || scalar::float_type(ty)
 }
 
 fn value_type(ty: &Type) -> bool {
@@ -496,19 +498,28 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
 fn supported(inst: &Instruction) -> Result<(), &'static str> {
     use Instruction::*;
     let unsupported = match inst {
-        ConstDecl { value, .. } if !matches!(value, ConstValue::F(_)) => return Ok(()),
+        ConstDecl { .. } => return Ok(()),
         Const { ty, .. } if scalar_type(ty) => return Ok(()),
         Mov { ty, .. } | Phi { ty, .. } | Select { ty, .. } if value_type(ty) => return Ok(()),
         Bin { ty, .. } | Not { ty, .. } | Checked { ty, .. } if integer::shape(ty).is_some() => {
             return Ok(())
         },
-        Cmp { ty, .. } | ICmp { ty, .. } if scalar_type(ty) || matches!(ty, Type::Ptr(_)) => {
+        Cmp { ty, .. } | ICmp { ty, .. }
+            if *ty == Type::Bool || integer::shape(ty).is_some() || matches!(ty, Type::Ptr(_)) =>
+        {
             return Ok(())
         },
+        Cmp { ty, .. } | FCmp { ty, .. } if scalar::float_type(ty) => return Ok(()),
         Cast { op, src_ty, dst_ty, .. }
-            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc | CastOp::Bitcast)
-                && scalar_type(src_ty)
+            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc)
+                && (*src_ty == Type::Bool || integer::shape(src_ty).is_some())
                 && integer::shape(dst_ty).is_some() =>
+        {
+            return Ok(())
+        },
+        Cast { op: CastOp::Bitcast, src_ty, dst_ty, .. }
+            if (integer::shape(src_ty).is_some() || scalar::float_type(src_ty))
+                && (integer::shape(dst_ty).is_some() || scalar::float_type(dst_ty)) =>
         {
             return Ok(())
         },
@@ -525,7 +536,7 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         | Memcpy { .. }
         | Memset { .. } => return Ok(()),
         Undef { .. } => "undef",
-        ConstDecl { .. } | Const { .. } => "non-integer constant",
+        Const { .. } => "non-scalar constant",
         Mov { .. } | Phi { .. } | Select { .. } | Extract { .. } => "non-scalar value",
         Bin { .. } | Not { .. } | Checked { .. } | Cmp { .. } | ICmp { .. } | FCmp { .. } => {
             "non-integer arithmetic/comparison"
@@ -1406,7 +1417,13 @@ fn run_inner<'module>(
                         !integer::raw(scalar(src), integer::shape(ty).unwrap().0),
                     )),
                     Instruction::Cmp { op, ty, lhs, rhs, .. } => {
-                        let result = if matches!(ty, Type::Ptr(_)) {
+                        let result = if scalar::float_type(ty) {
+                            scalar::compare(
+                                &op.float_predicate().unwrap(),
+                                scalar(lhs),
+                                scalar(rhs),
+                            )
+                        } else if matches!(ty, Type::Ptr(_)) {
                             pointer_compare(
                                 &memory,
                                 &cmp_pred(*op),
@@ -1428,6 +1445,9 @@ fn run_inner<'module>(
                         };
                         Value::Scalar(ConstValue::Bool(result))
                     },
+                    Instruction::FCmp { pred, lhs, rhs, .. } => Value::Scalar(ConstValue::Bool(
+                        scalar::compare(pred, scalar(lhs), scalar(rhs)),
+                    )),
                     Instruction::Select { cond, on_true, on_false, .. } => {
                         get(if get(cond).boolean() { on_true } else { on_false }).clone()
                     },
@@ -1442,6 +1462,9 @@ fn run_inner<'module>(
                             u128::from(get(src).pointer().address),
                         )),
                         CastOp::Bitcast if matches!(src_ty, Type::Ptr(_)) => get(src).clone(),
+                        CastOp::Bitcast => {
+                            Value::Scalar(scalar::pack(dst_ty, scalar::raw(src_ty, scalar(src))))
+                        },
                         _ => Value::Scalar(integer::cast(op, src_ty, dst_ty, scalar(src))),
                     },
                     Instruction::Alloca { align, .. } => {

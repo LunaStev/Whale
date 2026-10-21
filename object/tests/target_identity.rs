@@ -46,3 +46,33 @@ fn multi_isa_writer_preserves_machine_and_abi_without_enabling_amd64_linking() {
         assert!(ObjectFile::read(&bytes).is_err(), "AMD64 reader must reject another ISA");
     }
 }
+
+#[test]
+fn invalid_encoding_diagnostics_describe_serialization_and_consumer_contracts() {
+    for machine in [Machine::X86_64, Machine::AArch64, Machine::RiscV64, Machine::LoongArch64] {
+        let valid = ObjectTarget::elf64(machine);
+        assert!(valid.validate().is_ok());
+        for invalid in [
+            ObjectTarget { endian: Endian::Big, ..valid },
+            ObjectTarget { address_bits: 32, ..valid },
+        ] {
+            let message = invalid.validate().unwrap_err().to_string();
+            for expected in [
+                "ELF64",
+                "little endian",
+                "64-bit addresses",
+                "X86_64",
+                "AArch64",
+                "RiscV64",
+                "LoongArch64",
+            ] {
+                assert!(message.contains(expected), "missing {expected}: {message}");
+            }
+        }
+        if machine != Machine::X86_64 {
+            let message = valid.validate_amd64().unwrap_err().to_string();
+            assert!(message.contains("this operation requires"));
+            assert!(message.contains("AMD64"));
+        }
+    }
+}

@@ -151,3 +151,150 @@ fn ordinary_ir_stdout_failure_is_a_diagnostic() {
     assert!(diagnostic.contains("failed to write stdout"), "{diagnostic}");
     assert!(!diagnostic.contains("panicked"));
 }
+
+#[cfg(unix)]
+fn closed_stdout(command: &mut Command) -> std::process::Output {
+    use std::{os::fd::OwnedFd, os::unix::net::UnixStream};
+    let (reader, writer) = UnixStream::pair().unwrap();
+    drop(reader);
+    command.stdout(Stdio::from(OwnedFd::from(writer))).output().unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_artifact_stdout_preserves_completed_output_without_panicking() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input");
+    let object = directory.path().join("out.o");
+    let executable = directory.path().join("app");
+    fs::write(&input, "section .text\nglobal _start\n_start: ret\n").unwrap();
+    for mode in ["asm", "object"] {
+        for debug in [false, true] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_whale"));
+            command.arg(mode);
+            if mode == "asm" {
+                command.arg("--amd64");
+            }
+            command.arg(&input).arg("-o").arg(&object);
+            if debug {
+                command.args([
+                    "--debug-whale",
+                    "--bytes",
+                    "--dump-hex",
+                    "--dump-bin",
+                    "--dump-json",
+                    "--stats",
+                    "--trace",
+                ]);
+                if mode == "asm" {
+                    command.arg("--ast");
+                }
+            }
+            let result = closed_stdout(&mut command);
+            assert!(result.status.success(), "{mode} debug={debug}: {result:?}");
+            assert!(result.stderr.is_empty(), "{result:?}");
+            assert!(fs::read(&object).unwrap().starts_with(b"\x7fELF"));
+        }
+    }
+    // Reassemble the entry after the raw-object cases before testing linking.
+    assert!(Command::new(env!("CARGO_BIN_EXE_whale"))
+        .args(["asm", "--amd64"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&object)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let result = closed_stdout(
+        Command::new(env!("CARGO_BIN_EXE_whale"))
+            .arg("link")
+            .arg(&object)
+            .arg("-o")
+            .arg(&executable),
+    );
+    assert!(result.status.success(), "{result:?}");
+    assert!(result.stderr.is_empty(), "{result:?}");
+    assert!(fs::read(executable).unwrap().starts_with(b"\x7fELF"));
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_help_stdout_and_real_command_failures_keep_their_exit_policy() {
+    for arguments in [
+        vec!["--help"],
+        vec!["--version"],
+        vec!["asm", "--help"],
+        vec!["object", "--help"],
+        vec!["link", "--help"],
+    ] {
+        let result = closed_stdout(Command::new(env!("CARGO_BIN_EXE_whale")).args(&arguments));
+        assert!(result.status.success(), "{arguments:?}: {result:?}");
+        assert!(result.stderr.is_empty(), "{result:?}");
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("invalid");
+    let output = directory.path().join("existing.o");
+    fs::write(&input, "not_an_instruction\n").unwrap();
+    fs::write(&output, b"previous").unwrap();
+    for arguments in [vec!["asm", "--amd64", "--trace"], vec!["link"], vec!["unknown"]] {
+        let result = closed_stdout(
+            Command::new(env!("CARGO_BIN_EXE_whale"))
+                .args(&arguments)
+                .arg(&input)
+                .arg("-o")
+                .arg(&output),
+        );
+        assert!(!result.status.success(), "{arguments:?}: {result:?}");
+        let diagnostic = String::from_utf8_lossy(&result.stderr);
+        assert!(!diagnostic.contains("panicked"), "{diagnostic}");
+        assert!(!diagnostic.contains("Broken pipe"), "{diagnostic}");
+        assert_eq!(fs::read(&output).unwrap(), b"previous");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn ordinary_artifact_stdout_failures_are_diagnostics() {
+    for command in ["asm", "object", "link"] {
+        let full = fs::OpenOptions::new().write(true).open("/dev/full").unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_whale"))
+            .args([command, "--help"])
+            .stdout(full)
+            .output()
+            .unwrap();
+        assert_eq!(result.status.code(), Some(1));
+        let diagnostic = String::from_utf8_lossy(&result.stderr);
+        assert!(diagnostic.contains("failed to write stdout"), "{diagnostic}");
+        assert!(!diagnostic.contains("panicked"), "{diagnostic}");
+    }
+}
+
+#[test]
+fn assembly_and_object_limit_errors_still_name_max_input() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("previous.o");
+    fs::write(&output, b"previous").unwrap();
+    for mode in ["asm", "object"] {
+        for (value, message) in [
+            ("nope", "--max-input requires a decimal byte count"),
+            ("18446744073709551615", "--max-input byte count exceeds host capacity"),
+        ] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_whale"));
+            command.arg(mode);
+            if mode == "asm" {
+                command.arg("--amd64");
+            }
+            let result = command
+                .arg("missing")
+                .arg("-o")
+                .arg(&output)
+                .args(["--max-input", value])
+                .output()
+                .unwrap();
+            assert_eq!(result.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&result.stderr).contains(message), "{result:?}");
+            assert_eq!(fs::read(&output).unwrap(), b"previous");
+        }
+    }
+}

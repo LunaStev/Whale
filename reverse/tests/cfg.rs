@@ -46,6 +46,14 @@ mod native {
     }
 
     #[test]
+    fn rex_w_push_immediate_bytes_do_not_become_fake_return_boundaries() {
+        let g = graph(&[0x66, 0x48, 0x68, 0x34, 0x12, 0xc3, 0x56, 0xc3], &[0]);
+        assert_eq!(offsets(&g), [0, 7]);
+        assert_eq!(g.blocks.iter().map(|b| (b.offset, b.end)).collect::<Vec<_>>(), [(0, 8)]);
+        assert!(g.stops.is_empty());
+    }
+
+    #[test]
     fn diamond_and_late_backward_leaders_split_existing_blocks_in_wave() {
         let g = graph(&[0x75, 3, 0x90, 0xeb, 1, 0x90, 0xc3], &[0]);
         assert_eq!(offsets(&g), [0, 2, 3, 5, 6]);

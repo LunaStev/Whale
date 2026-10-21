@@ -174,7 +174,13 @@ impl<'a> Image<'a> {
                 .virtual_address
                 .checked_add(p.memory_size)
                 .ok_or("PT_LOAD virtual address overflow")?;
-            let bytes = view.range(p.offset, p.file_size).map_err(|e| e.to_string())?;
+            // A pure BSS segment has only a conceptual file offset. It must
+            // participate in virtual validation without requiring file bytes.
+            let bytes = if p.file_size == 0 {
+                &[]
+            } else {
+                view.range(p.offset, p.file_size).map_err(|e| e.to_string())?
+            };
             charge(&mut work, mappings.len())?;
             if mappings.iter().any(|&(start, stop)| p.virtual_address < stop && start < end) {
                 return Err("overlapping PT_LOAD virtual ranges are unsupported".into());
@@ -293,6 +299,12 @@ impl<'a> Image<'a> {
                 if section as usize >= view.header.section_count && section < 0xff00 {
                     return Err("symbol section index outside table".into());
                 }
+                let symbol_kind = view.range(at + 4, 1).map_err(|e| e.to_string())?[0] & 15;
+                // STT_TLS values are offsets within a TLS block, not process
+                // addresses. TLS metadata is outside this static code model.
+                if symbol_kind == 6 {
+                    continue;
+                }
                 let value = view.u64(at + 8).map_err(|e| e.to_string())?;
                 let size = view.u64(at + 16).map_err(|e| e.to_string())?;
                 let symbol_end = value.checked_add(size).ok_or("symbol address range overflow")?;
@@ -307,10 +319,18 @@ impl<'a> Image<'a> {
                         .address
                         .checked_add(owner.size)
                         .ok_or("symbol defining section overflow")?;
-                    if value < owner.address || symbol_end > owner_end {
+                    let outside_owner = value < owner.address || symbol_end > owner_end;
+                    // Linkers emit zero-sized NOTYPE boundary markers beyond
+                    // their nominal owner. Retain their addresses as metadata
+                    // without assigning an unrelated executable region.
+                    if outside_owner && !(symbol_kind == 0 && size == 0) {
                         return Err("symbol range exceeds its defining section".into());
                     }
-                    if owner.kind == 1 && owner.flags & 4 != 0 && value < owner_end {
+                    if !outside_owner
+                        && owner.kind == 1
+                        && owner.flags & 4 != 0
+                        && value < owner_end
+                    {
                         charge(&mut work, image.regions.len())?;
                         let found = image.regions.iter().find(|r| {
                             value >= r.address

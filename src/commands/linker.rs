@@ -1,3 +1,5 @@
+use super::report::println;
+
 use linker::{core::linker::OutputFormat, Linker};
 
 use std::{path::Path, process};
@@ -40,18 +42,12 @@ fn execute(args: Vec<String>) -> Result<(), String> {
                         }
                     },
                     "--max-input" => {
-                        if input_limit
-                            .replace(super::input::byte_limit(&value).map_err(str::to_owned)?)
-                            .is_some()
-                        {
+                        if input_limit.replace(super::input::byte_limit(&value, flag)?).is_some() {
                             return Err("duplicate --max-input".into());
                         }
                     },
                     _ => {
-                        if output_limit
-                            .replace(super::input::byte_limit(&value).map_err(str::to_owned)?)
-                            .is_some()
-                        {
+                        if output_limit.replace(super::input::byte_limit(&value, flag)?).is_some() {
                             return Err("duplicate --max-output".into());
                         }
                     },

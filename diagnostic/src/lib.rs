@@ -66,16 +66,36 @@ impl ToDiagnostic for Diagnostic {
     }
 }
 
+// Keep ordinary Unicode paths readable while preventing names from creating
+// new terminal lines or control sequences. Structured contexts stay lossless.
+struct ContextName<'a>(&'a str);
+
+impl fmt::Display for ContextName<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use fmt::Write;
+        for character in self.0.chars() {
+            if character.is_control() {
+                write!(f, "{}", character.escape_debug())?;
+            } else {
+                f.write_char(character)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.code, self.message)?;
         for context in &self.contexts {
             match context {
-                Context::Source(s) => write!(f, " at {}:{}:{}", s.source, s.line, s.column)?,
+                Context::Source(s) => {
+                    write!(f, " at {}:{}:{}", ContextName(&s.source), s.line, s.column)?
+                },
                 Context::Object { name, member } => {
-                    write!(f, " in {name}")?;
+                    write!(f, " in {}", ContextName(name))?;
                     if let Some(m) = member {
-                        write!(f, "({m})")?;
+                        write!(f, "({})", ContextName(m))?;
                     }
                 },
                 Context::Input(i) => write!(f, " input {i}")?,
@@ -116,5 +136,42 @@ mod tests {
         );
         assert_eq!(d.diagnostic(), d);
         assert_eq!(d.code, "invalid-index");
+    }
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+
+    #[test]
+    fn context_names_escape_controls_without_changing_structured_fields() {
+        for control in ['\n', '\r', '\t', '\x1b'] {
+            let name = format!("경로/{control}file");
+            let d = Diagnostic::new("audit", "read", "audit.invalid", "invalid")
+                .with_context(Context::Source(SourceLocation {
+                    source: name.clone(),
+                    line: 2,
+                    column: 3,
+                    ..Default::default()
+                }))
+                .with_context(Context::Object { name: name.clone(), member: Some(name.clone()) });
+            let original = d.clone();
+            let rendered = d.to_string();
+            assert!(!rendered.contains(control), "{rendered:?}");
+            assert!(rendered.contains("경로/"));
+            assert!(rendered.contains(":2:3"));
+            assert!(rendered.contains(&control.escape_debug().to_string()));
+            assert_eq!(d, original);
+            assert_eq!(d.diagnostic(), original);
+        }
+        let d = Diagnostic::new("audit", "read", "audit.invalid", "invalid").with_context(
+            Context::Source(SourceLocation {
+                source: "경로/café.s".into(),
+                line: 4,
+                column: 5,
+                ..Default::default()
+            }),
+        );
+        assert_eq!(d.to_string(), "audit.invalid: invalid at 경로/café.s:4:5");
     }
 }
