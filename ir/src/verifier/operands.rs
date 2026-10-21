@@ -156,22 +156,11 @@ fn verify_gep(
             Type::Array(element, _) => element,
             Type::Struct(fields) | Type::Tuple(fields) => {
                 let ordinal = f
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.instructions)
-                    .find_map(|ins| {
-                        if let Instruction::Const { dst, value: constant, .. }
-                        | Instruction::ConstDecl { dst, value: constant, .. } = ins
-                        {
-                            if dst == value {
-                                return match constant {
-                                    ConstValue::I(n) => usize::try_from(*n).ok(),
-                                    ConstValue::U(n) => usize::try_from(*n).ok(),
-                                    _ => None,
-                                };
-                            }
-                        }
-                        None
+                    .constant(*value)
+                    .and_then(|constant| match constant {
+                        ConstValue::I(n) => usize::try_from(*n).ok(),
+                        ConstValue::U(n) => usize::try_from(*n).ok(),
+                        _ => None,
                     })
                     .ok_or_else(|| {
                         invalid(

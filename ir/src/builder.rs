@@ -44,8 +44,25 @@ pub struct ModuleBuilder {
     next_global: u32,
     #[cfg(feature = "socket")]
     source_work: usize,
+    #[cfg(feature = "socket")]
+    lower_storage_budget: crate::limits::Budget,
     source_shifts: std::collections::HashMap<crate::FunctionId, (usize, usize)>,
     source_mapped_functions: std::collections::HashSet<crate::FunctionId>,
+}
+
+#[cfg(feature = "socket")]
+impl FunctionBuilder<'_> {
+    pub(crate) fn charge_lower_type(&mut self, ty: &Type) -> Result<(), crate::LowerError> {
+        // Bound repeated aggregate-type cloning and emitted storage annotations.
+        // This is shared across all functions in one lowering invocation.
+        for _ in 0..16 {
+            self.mb
+                .lower_storage_budget
+                .ty(ty)
+                .map_err(|_| crate::LowerError::ResourceLimit(crate::AstLimitError::Expansion))?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -189,6 +206,9 @@ impl ModuleBuilder {
             next_global: 0,
             #[cfg(feature = "socket")]
             source_work: crate::IrLimits::default().max_analysis_work,
+            #[cfg(feature = "socket")]
+            lower_storage_budget: crate::limits::Budget::new(crate::IrLimits::default())
+                .expect("valid defaults"),
             source_shifts: std::collections::HashMap::new(),
             source_mapped_functions: std::collections::HashSet::new(),
         }
@@ -1149,6 +1169,16 @@ impl<'a> FunctionBuilder<'a> {
         let dst = self.define_value(Type::Ptr(Box::new(ty.clone())));
         self.cur_block_mut().instructions.push(Instruction::Alloca { dst, ty, align });
         dst
+    }
+
+    pub fn gep(&mut self, base_ptr: ValueId, indices: Vec<ValueId>, dst_ty: Type) -> ValueId {
+        let dst = self.define_value(dst_ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Gep { dst, dst_ty, base_ptr, indices });
+        dst
+    }
+
+    pub fn memcpy(&mut self, dst: ValueId, src: ValueId, n: ValueId, align: u32) {
+        self.cur_block_mut().instructions.push(Instruction::Memcpy { dst, src, n, align });
     }
 
     pub fn load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {

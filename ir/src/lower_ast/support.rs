@@ -17,7 +17,23 @@ pub(crate) fn socket_type_to_whale(t: &frontend::TypeRef) -> Result<Type, LowerE
         S::FnPtr(sig) => Type::FnPtr(Box::new(signature_to_whale(sig)?)),
         S::Ptr(inner) => Type::Ptr(Box::new(socket_type_to_whale(inner)?)),
         S::Array { elem, len } => Type::Array(Box::new(socket_type_to_whale(elem)?), *len),
-
+        S::Struct { fields } => {
+            let mut names = std::collections::HashSet::new();
+            let mut types = Vec::new();
+            for f in fields {
+                if f.name.is_empty() || !names.insert(&f.name) {
+                    return Err(LowerError::Aggregate("duplicate or empty struct field".into()));
+                }
+                let ty = socket_type_to_whale(&f.ty)?;
+                if !scalar_storage(&ty) {
+                    return Err(LowerError::Aggregate(
+                        "initial structs require scalar fields".into(),
+                    ));
+                }
+                types.push(ty);
+            }
+            Type::Struct(types)
+        },
         S::Opaque(name) => {
             return Err(LowerError::UnsupportedType(format!("opaque {name}")));
         },
@@ -168,4 +184,12 @@ pub(crate) fn signature_to_whale(
     };
     crate::function::validate_signature(&sig).map_err(LowerError::Call)?;
     Ok(sig)
+}
+
+pub(super) fn scalar_storage(ty: &Type) -> bool {
+    is_int_like(ty)
+        || matches!(
+            ty,
+            Type::Bool | Type::F16 | Type::F32 | Type::F64 | Type::Ptr(_) | Type::FnPtr(_)
+        )
 }

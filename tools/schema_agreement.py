@@ -25,6 +25,21 @@ def cases(version):
     neg = copy.deepcopy(base)
     neg["program"]["functions"][0]["body"] = [{"Return": {"Neg": literal}}]
     yield "unary-negation", neg, version >= 5, version >= 5
+    aggregate = copy.deepcopy(base)
+    record = {"Struct": {"fields": [{"name": "first", "ty": integer}, {"name": "second", "ty": integer}]}}
+    array_type = {"Array": {"elem": integer, "len": 2}}
+    index = {"Index": {"base": {"Var": "a"}, "index": literal}}
+    zero = {"Lit": {"Int": {"bits": 8, "signed": False, "value": "0"}}}
+    index["Index"]["index"] = zero
+    selected = {"Field": {"base": {"Var": "s"}, "layout": record, "name": "first"}}
+    aggregate["program"]["functions"][0]["body"] = [
+        {"VarDecl": {"name": "s", "ty": record, "init": {"Struct": {"ty": record, "fields": [{"name": "first", "value": literal}, {"name": "second", "value": literal}]}}}},
+        {"VarDecl": {"name": "a", "ty": array_type, "init": {"Array": {"ty": array_type, "elements": [literal, literal]}}}},
+        {"Store": {"place": selected, "value": literal}},
+        {"Store": {"place": index, "value": selected}},
+        {"Return": {"Deref": {"PointerOffset": {"base": {"AddressOf": index}, "index": zero}}}},
+    ]
+    yield "aggregate-pointer-storage", aggregate, version >= 5, version >= 5
     yield "ordinary-null-link-name", base, True, True
     missing = copy.deepcopy(base); del missing["program"]["functions"][0]["link_name"]
     yield "missing-optional-link-name", missing, True, True

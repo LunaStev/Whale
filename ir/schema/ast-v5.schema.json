@@ -177,6 +177,30 @@
             "FnPtr"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Struct": {
+              "type": "object",
+              "properties": {
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/StructField"
+                  }
+                }
+              },
+              "required": [
+                "fields"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Struct"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -533,6 +557,165 @@
             "Neg"
           ],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Struct": {
+              "type": "object",
+              "properties": {
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/FieldInit"
+                  }
+                }
+              },
+              "required": [
+                "ty",
+                "fields"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Struct"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Array": {
+              "type": "object",
+              "properties": {
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "elements": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Expr"
+                  }
+                }
+              },
+              "required": [
+                "ty",
+                "elements"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Array"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Field": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "layout": {
+                  "$ref": "#/$defs/Type"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "base",
+                "layout",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Field"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Index": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "index": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "base",
+                "index"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Index"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PointerOffset": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "index": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "base",
+                "index"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "PointerOffset"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "AddressOf": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "AddressOf"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Deref": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "Deref"
+          ],
+          "additionalProperties": false
         }
       ]
     },
@@ -773,6 +956,31 @@
           },
           "required": [
             "Located"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Store": {
+              "type": "object",
+              "properties": {
+                "place": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "place",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Store"
           ],
           "additionalProperties": false
         }
@@ -1085,6 +1293,38 @@
       },
       "required": [
         "id"
+      ],
+      "additionalProperties": false
+    },
+    "StructField": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "additionalProperties": false
+    },
+    "FieldInit": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Expr"
+        }
+      },
+      "required": [
+        "name",
+        "value"
       ],
       "additionalProperties": false
     }

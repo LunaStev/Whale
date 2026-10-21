@@ -63,7 +63,7 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
         return Err("source annotations require AST format 4".into());
     }
     if envelope.format_version < 5 && extended & 4 != 0 {
-        return Err("new numeric expressions require AST format 5".into());
+        return Err("new frontend expressions require AST format 5".into());
     }
     Ok(envelope.program)
 }

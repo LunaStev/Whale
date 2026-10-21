@@ -14,6 +14,8 @@ use super::{
     LowerError,
 };
 
+mod storage;
+
 #[derive(Clone, Copy, Debug)]
 struct LoopCtx {
     cond_bb: BlockId,
@@ -63,6 +65,7 @@ pub fn lower_o0_with_limits(
 
     for d in &program.declarations {
         let signature = super::support::signature_to_whale(&d.signature)?;
+        storage::scalar_signature(&signature)?;
         mb.declare_function(d.name.clone(), signature, d.linkage, d.link_name.clone())
             .map_err(LowerError::Call)?;
     }
@@ -77,6 +80,7 @@ pub fn lower_o0_with_limits(
             convention: f.convention,
             variadic: false,
         };
+        storage::scalar_signature(&signature)?;
         mb.declare_function(f.name.clone(), signature, f.linkage, f.link_name.clone())
             .map_err(LowerError::Call)?;
     }
@@ -192,6 +196,14 @@ fn lower_stmt_o0(
             fb.annotate_source(annotation, checkpoint)?;
             Ok(())
         },
+        frontend::Stmt::Store { place, value } => {
+            let (ptr, ty) = storage::place(fb, env, global_consts, place, target)?;
+            let (v, vty) = lower_expr_o0(fb, env, global_consts, value, target)?;
+            if ty != vty {
+                return Err(LowerError::TypeMismatch { expected: ty, got: vty });
+            }
+            storage::write(fb, ptr, v, &ty, target)
+        },
         frontend::Stmt::Return(opt) => {
             if *func_ret_ty == Type::Void {
                 if opt.is_some() {
@@ -253,7 +265,7 @@ fn lower_stmt_o0(
                         .at_expression(init_expr));
                 }
                 let slot = fb.alloca_in_entry(decl_ty.clone(), align);
-                fb.store(decl_ty.clone(), v, slot, align);
+                storage::write(fb, slot, v, &decl_ty, target)?;
                 env.insert(name.clone(), Binding::Addr { ptr: slot, ty: decl_ty });
                 return Ok(());
             }
@@ -278,8 +290,7 @@ fn lower_stmt_o0(
                         return Err(LowerError::TypeMismatch { expected: ty, got: vty }
                             .at_expression(value));
                     }
-                    let align = crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
-                    fb.store(ty, v, ptr, align);
+                    storage::write(fb, ptr, v, &ty, target)?;
                     Ok(())
                 },
             }
@@ -303,6 +314,7 @@ fn lower_stmt_o0(
 
             // then
             fb.set_insert_point(then_bb);
+            storage::charge_env(fb, env)?;
             let mut then_env = env.clone();
             for s in then_body {
                 lower_stmt_o0(
@@ -321,6 +333,7 @@ fn lower_stmt_o0(
 
             // else
             fb.set_insert_point(else_bb);
+            storage::charge_env(fb, env)?;
             let mut else_env = env.clone();
             for s in else_body {
                 lower_stmt_o0(
@@ -363,6 +376,7 @@ fn lower_stmt_o0(
 
             loop_stack.push(LoopCtx { cond_bb, exit_bb });
 
+            storage::charge_env(fb, env)?;
             let mut body_env = env.clone();
             for s in body {
                 lower_stmt_o0(
@@ -436,6 +450,27 @@ fn lower_expr_o0(
             fb.annotate_source(annotation, checkpoint)?;
             Ok(result)
         },
+        frontend::Expr::Struct { .. } | frontend::Expr::Array { .. } => {
+            storage::literal(fb, env, global_consts, expr, target)
+        },
+        frontend::Expr::Field { .. } | frontend::Expr::Index { .. } | frontend::Expr::Deref(_) => {
+            let (ptr, ty) = storage::place(fb, env, global_consts, expr, target)?;
+            storage::read(fb, ptr, ty, target)
+        },
+        frontend::Expr::AddressOf(value) => {
+            let (ptr, ty) = storage::place(fb, env, global_consts, value, target)?;
+            Ok((ptr, Type::ptr_to(ty)))
+        },
+        frontend::Expr::PointerOffset { base, index } => {
+            let (ptr, ty) = lower_expr_o0(fb, env, global_consts, base, target)?;
+            let Type::Ptr(pointee) = &ty else { return Err(LowerError::UnsupportedExpr) };
+            crate::layout_of(pointee, target).map_err(LowerError::Layout)?;
+            let (index, ity) = lower_expr_o0(fb, env, global_consts, index, target)?;
+            if !super::support::is_int_like(&ity) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            Ok((fb.gep(ptr, vec![index], ty.clone()), ty))
+        },
         frontend::Expr::NullFunction(sig) => {
             let signature = super::support::signature_to_whale(sig)?;
             let value = fb.null_function(signature.clone()).map_err(LowerError::Call)?;
@@ -453,14 +488,12 @@ fn lower_expr_o0(
             Ok((value.ok_or(LowerError::VoidCallUsedAsValue)?, ty))
         },
         frontend::Expr::Var(name) => {
+            if let Some(Binding::Addr { ty, .. }) = env.get(name) {
+                fb.charge_lower_type(ty)?;
+            }
             if let Some(b) = env.get(name).cloned() {
                 return match b {
-                    Binding::Addr { ptr, ty } => {
-                        let align =
-                            crate::allocation_align(&ty, target).map_err(LowerError::Layout)?;
-                        let v = fb.load(ty.clone(), ptr, align);
-                        Ok((v, ty))
-                    },
+                    Binding::Addr { ptr, ty } => storage::read(fb, ptr, ty, target),
                     Binding::Const { id, ty, .. } => Ok((id, ty)),
                 };
             }
@@ -668,7 +701,14 @@ fn preserve_const_expr(
         frontend::Expr::Located { annotation, expression } => {
             preserve_const_expr(expression, ctx).map_err(|e| e.at(annotation))
         },
-        frontend::Expr::Cast { .. }
+        frontend::Expr::Struct { .. }
+        | frontend::Expr::Array { .. }
+        | frontend::Expr::Field { .. }
+        | frontend::Expr::Index { .. }
+        | frontend::Expr::AddressOf(_)
+        | frontend::Expr::Deref(_)
+        | frontend::Expr::PointerOffset { .. }
+        | frontend::Expr::Cast { .. }
         | frontend::Expr::NullFunction(_)
         | frontend::Expr::Call { .. }
         | frontend::Expr::FunctionRef(_) => Err(LowerError::NonConstExpr),

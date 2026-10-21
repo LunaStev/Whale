@@ -50,6 +50,7 @@ pub enum TypeRef {
     Ptr(Box<TypeRef>),
     FnPtr(Box<SignatureRef>),
     Array { elem: Box<TypeRef>, len: u64 },
+    Struct { fields: Vec<StructField> },
     Opaque(String),
 }
 
@@ -62,6 +63,10 @@ pub enum Stmt {
         statement: Box<Stmt>,
     },
     Return(Option<Expr>),
+    Store {
+        place: Expr,
+        value: Expr,
+    },
 
     ConstDecl {
         name: String,
@@ -97,6 +102,13 @@ pub enum Stmt {
 #[derive(Clone, Debug)]
 pub enum Expr {
     Located { annotation: crate::SourceAnnotation, expression: Box<Expr> },
+    Struct { ty: TypeRef, fields: Vec<FieldInit> },
+    Array { ty: TypeRef, elements: Vec<Expr> },
+    Field { base: Box<Expr>, layout: TypeRef, name: String },
+    Index { base: Box<Expr>, index: Box<Expr> },
+    AddressOf(Box<Expr>),
+    Deref(Box<Expr>),
+    PointerOffset { base: Box<Expr>, index: Box<Expr> },
     BitNot(Box<Expr>),
     Neg(Box<Expr>),
     Cast { value: Box<Expr>, ty: TypeRef, kind: IntegerCast },
@@ -183,4 +195,20 @@ pub enum CalleeRef {
 pub enum IntegerCast {
     Numeric,
     Checked,
+}
+
+#[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
+#[derive(Clone, Debug)]
+pub struct StructField {
+    pub name: String,
+    pub ty: TypeRef,
+}
+
+#[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "socket", serde(deny_unknown_fields))]
+#[derive(Clone, Debug)]
+pub struct FieldInit {
+    pub name: String,
+    pub value: Expr,
 }
