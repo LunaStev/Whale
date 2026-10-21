@@ -23,3 +23,10 @@ pub(super) fn pack(ty: &Type, bits: u128) -> ConstValue {
     };
     ConstValue::F(float)
 }
+
+pub(super) fn compare(predicate: &crate::FCmpPred, lhs: &ConstValue, rhs: &ConstValue) -> bool {
+    let (ConstValue::F(lhs), ConstValue::F(rhs)) = (lhs, rhs) else {
+        unreachable!("verified floating operands")
+    };
+    lhs.compare(*rhs, predicate).expect("verified matching floating widths")
+}

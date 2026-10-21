@@ -24,6 +24,8 @@ pub enum ICmpPred {
     Sge,
 }
 
+/// IEEE scalar predicates. `O*` require ordered operands; `U*` also accept
+/// unordered operands (at least one NaN). Comparisons never modify storage bits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FCmpPred {
     Oeq,
@@ -335,11 +337,28 @@ pub enum CmpOp {
     UGt,
     UGe,
 
-    // float ordering
+    // Floating comparisons use `float_predicate`, including unordered FNe.
     FEq,
     FNe,
     FLt,
     FLe,
     FGt,
     FGe,
+}
+
+impl CmpOp {
+    /// The generic scalar floating contract: equality/order are ordered, while
+    /// inequality is unordered-or-not-equal, exactly the negation of equality.
+    /// Integer and pointer operators have no floating predicate.
+    pub fn float_predicate(self) -> Option<FCmpPred> {
+        Some(match self {
+            Self::FEq => FCmpPred::Oeq,
+            Self::FNe => FCmpPred::Une,
+            Self::FLt => FCmpPred::Olt,
+            Self::FLe => FCmpPred::Ole,
+            Self::FGt => FCmpPred::Ogt,
+            Self::FGe => FCmpPred::Oge,
+            _ => return None,
+        })
+    }
 }

@@ -509,6 +509,7 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         {
             return Ok(())
         },
+        Cmp { ty, .. } | FCmp { ty, .. } if scalar::float_type(ty) => return Ok(()),
         Cast { op, src_ty, dst_ty, .. }
             if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc)
                 && (*src_ty == Type::Bool || integer::shape(src_ty).is_some())
@@ -1416,7 +1417,13 @@ fn run_inner<'module>(
                         !integer::raw(scalar(src), integer::shape(ty).unwrap().0),
                     )),
                     Instruction::Cmp { op, ty, lhs, rhs, .. } => {
-                        let result = if matches!(ty, Type::Ptr(_)) {
+                        let result = if scalar::float_type(ty) {
+                            scalar::compare(
+                                &op.float_predicate().unwrap(),
+                                scalar(lhs),
+                                scalar(rhs),
+                            )
+                        } else if matches!(ty, Type::Ptr(_)) {
                             pointer_compare(
                                 &memory,
                                 &cmp_pred(*op),
@@ -1438,6 +1445,9 @@ fn run_inner<'module>(
                         };
                         Value::Scalar(ConstValue::Bool(result))
                     },
+                    Instruction::FCmp { pred, lhs, rhs, .. } => Value::Scalar(ConstValue::Bool(
+                        scalar::compare(pred, scalar(lhs), scalar(rhs)),
+                    )),
                     Instruction::Select { cond, on_true, on_false, .. } => {
                         get(if get(cond).boolean() { on_true } else { on_false }).clone()
                     },

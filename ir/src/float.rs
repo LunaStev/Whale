@@ -25,6 +25,60 @@ impl FloatBits {
         }
     }
 
+    /// Compare equal-width IEEE values using an explicit ordered/unordered
+    /// predicate. Returns `None` for mismatched widths. Integer bit ordering
+    /// avoids host floating exceptions/conversions and treats both zeros equal;
+    /// any quiet or signaling NaN makes the operands unordered.
+    pub fn compare(self, rhs: Self, predicate: &crate::FCmpPred) -> Option<bool> {
+        use crate::FCmpPred::*;
+        use std::cmp::Ordering;
+        if self.width() != rhs.width() {
+            return None;
+        }
+        let (exponent, fraction) = match self {
+            Self::F16(_) => (0x7c00, 0x03ff),
+            Self::F32(_) => (0x7f800000, 0x007fffff),
+            Self::F64(_) => (0x7ff0000000000000, 0x000fffffffffffff),
+        };
+        let (a, b) = (self.bits(), rhs.bits());
+        let nan = |bits| bits & exponent == exponent && bits & fraction != 0;
+        let ordered = !nan(a) && !nan(b);
+        let sign = 1u64 << (self.width() - 1);
+        let magnitude = sign - 1;
+        let order = if a & magnitude == 0 && b & magnitude == 0 {
+            Ordering::Equal
+        } else if (a ^ b) & sign != 0 {
+            if a & sign != 0 {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        } else if a & sign != 0 {
+            b.cmp(&a)
+        } else {
+            a.cmp(&b)
+        };
+        let equal = order.is_eq();
+        let less = order.is_lt();
+        let greater = order.is_gt();
+        Some(match predicate {
+            Oeq => ordered && equal,
+            One => ordered && !equal,
+            Olt => ordered && less,
+            Ole => ordered && !greater,
+            Ogt => ordered && greater,
+            Oge => ordered && !less,
+            Ord => ordered,
+            Uno => !ordered,
+            Ueq => !ordered || equal,
+            Une => !ordered || !equal,
+            Ult => !ordered || less,
+            Ule => !ordered || !greater,
+            Ugt => !ordered || greater,
+            Uge => !ordered || !less,
+        })
+    }
+
     /// Exact-width hexadecimal storage, not a decimal floating-point number.
     pub fn parse(width: u16, text: &str) -> Result<Self, String> {
         let digits = match width {

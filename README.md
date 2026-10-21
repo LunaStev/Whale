@@ -206,7 +206,7 @@ It executes direct and signature-checked indirect Whale calls with integer/Bool/
 data-pointer and function-pointer arguments/results, using one shared fuel and
 memory arena. Function pointers retain their full signature and calling convention
 through mov/phi/select, storage and complete or split byte copies. It rejects
-floating arithmetic/comparisons/numerical conversions, external/SysV execution and general aggregate values in every
+floating arithmetic/numerical conversions, external/SysV execution and general aggregate values in every
 block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
@@ -232,6 +232,42 @@ budgets as integer storage. A typed field load checks its value bytes without
 requiring surrounding aggregate padding to be initialized. Plain storage and
 copies never canonicalize a NaN; arithmetic and width-changing conversions have
 separate semantics.
+
+### Compare floating values
+
+Generic floating comparisons have the following scalar contract in both
+constant evaluation and interpreted IR. Every result has type `bool`.
+
+| Generic operator | Explicit `fcmp` predicate | Result if either operand is NaN |
+| --- | --- | --- |
+| `cmp feq` | `oeq` | false |
+| `cmp fne` | `une` | true |
+| `cmp flt` | `olt` | false |
+| `cmp fle` | `ole` | false |
+| `cmp fgt` | `ogt` | false |
+| `cmp fge` | `oge` | false |
+
+Thus generic `!=` is always the logical negation of generic `==`, including
+NaN on either side. `+0` and `-0` compare equal; infinities follow numerical
+ordering. All NaNs, including signaling NaNs and every sign/payload, make the
+operands unordered. Comparisons do not change their original storage bits or
+raise floating-point traps.
+
+Explicit `fcmp` supports `oeq`, `one`, `olt`, `ole`, `ogt`, `oge`, `ord`, `uno`,
+`ueq`, `une`, `ult`, `ule`, `ugt` and `uge`. Ordered relational predicates
+require neither operand to be NaN; unordered relational predicates also return
+true if either operand is NaN. `ord` tests that neither is NaN, and `uno` tests
+that at least one is NaN. In particular, explicit `one` returns false for NaN,
+while generic `fne` maps to `une` and returns true. `CmpOp::float_predicate`
+exposes this mapping and `FloatBits::compare` evaluates equal-width predicates.
+Runtime execution preserves instruction/trap order, including unused comparisons.
+
+```sh
+cargo run --locked -- ir run ir/tests/fixtures/float-comparisons-v7.wir --function @f0 --arg 0x7ff0000000000001 --arg 0x3ff0000000000000
+cargo run --locked -- ir run ir/tests/fixtures/float-comparisons-v7.wir --function @f1 --arg 0x7ff0000000000001 --arg 0x3ff0000000000000
+```
+
+These print `bool true` (generic inequality) and `bool false` (ordered inequality).
 
 ### Execute tracked stack memory
 
