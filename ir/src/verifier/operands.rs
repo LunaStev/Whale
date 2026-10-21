@@ -238,8 +238,8 @@ pub(super) fn verify_instruction(
         Instruction::Bin { op, ty, lhs, rhs, .. } => {
             let valid = match op {
                 BinOp::FAdd | BinOp::FSub | BinOp::FMul | BinOp::FDiv | BinOp::FRem => is_float(ty),
-                BinOp::SDiv | BinOp::SRem => is_signed(ty) || matches!(ty, Type::Ptr(_)),
-                BinOp::UDiv | BinOp::URem => is_unsigned(ty) || matches!(ty, Type::Ptr(_)),
+                BinOp::SDiv | BinOp::SRem => is_signed(ty),
+                BinOp::UDiv | BinOp::URem => is_unsigned(ty),
                 _ => is_integer(ty),
             };
             verify_type_category(f, "binary operation", ty, valid)?;

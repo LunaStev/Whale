@@ -293,7 +293,9 @@ impl ModuleBuilder {
             };
         }
         if let Some(link) = &candidate.link_name {
-            if self.module.declarations.iter().any(|d| d.link_name.as_ref() == Some(link)) {
+            if self.module.declarations.iter().any(|d| d.link_name.as_ref() == Some(link))
+                || self.module.global_storage.iter().any(|g| g.link_name.as_ref() == Some(link))
+            {
                 return Err(crate::CallError::LinkNameCollision(link.clone()));
             }
         }

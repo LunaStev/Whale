@@ -12,7 +12,10 @@ pub(super) struct Parser<'a> {
     pub limits: IrLimits,
     nodes: usize,
     pub(super) format_version: u32,
-    locations: std::collections::HashMap<String, super::SourceLocation>,
+    function_locations: std::collections::HashMap<String, super::SourceLocation>,
+    declaration_locations: std::collections::HashMap<String, super::SourceLocation>,
+    global_locations: std::collections::HashMap<String, super::SourceLocation>,
+    global_constant_locations: std::collections::HashMap<GlobalId, super::SourceLocation>,
 }
 
 impl<'a> Parser<'a> {
@@ -23,13 +26,22 @@ impl<'a> Parser<'a> {
             limits,
             nodes: 0,
             format_version: 0,
-            locations: std::collections::HashMap::new(),
+            function_locations: std::collections::HashMap::new(),
+            declaration_locations: std::collections::HashMap::new(),
+            global_locations: std::collections::HashMap::new(),
+            global_constant_locations: std::collections::HashMap::new(),
         }
     }
 
     pub fn verification_location(&self, e: &VerifyError) -> super::SourceLocation {
         use VerifyError::*;
-        let name = match e {
+        let function = |name: &String| {
+            self.function_locations.get(name).or_else(|| self.declaration_locations.get(name))
+        };
+        let location = match e {
+            InvalidMemoryLayout { func, operation: "global storage", .. } => {
+                self.global_locations.get(func)
+            },
             ForbiddenUndef { func, .. }
             | InvalidMemoryLayout { func, .. }
             | InvalidCast { func, .. }
@@ -56,16 +68,21 @@ impl<'a> Parser<'a> {
             | VoidParameter { func, .. }
             | UnterminatedBlock { func, .. }
             | RetTypeMismatch { func, .. }
-            | UseOfUndefinedValue { func, .. } => Some(func),
-            DuplicateFunction { name }
-            | DuplicateGlobal { name }
+            | UseOfUndefinedValue { func, .. } => function(func),
+            DuplicateFunction { name } => function(name),
+            DuplicateGlobal { name }
             | InvalidGlobalInitializer { name, .. }
             | InvalidGlobalAlignment { name, .. }
-            | GlobalStorage { name, .. } => Some(name),
-            InvalidConstExpression { scope, .. } => Some(scope),
+            | GlobalStorage { name, .. } => self.global_locations.get(name),
+            InvalidConstExpression { declaration: ConstRef::Global(id), .. } => {
+                self.global_constant_locations.get(id)
+            },
+            InvalidConstExpression { scope, declaration: ConstRef::Local(_), .. } => {
+                function(scope)
+            },
             _ => None,
         };
-        name.and_then(|n| self.locations.get(n)).copied().unwrap_or(self.tokens[0].location)
+        location.copied().unwrap_or(self.tokens[0].location)
     }
 
     pub fn error(&self, s: &str) -> ParseError {
@@ -517,7 +534,8 @@ impl<'a> Parser<'a> {
                     let id = GlobalId(self.id("@g")?);
                     let location = self.tokens[self.at].location;
                     let name = self.string()?;
-                    self.locations.entry(name.clone()).or_insert(location);
+                    self.global_locations.entry(name.clone()).or_insert(location);
+                    self.global_constant_locations.entry(id).or_insert(location);
                     self.expect(":")?;
                     let ty = self.ty(0)?;
                     self.expect("=")?;
@@ -540,7 +558,7 @@ impl<'a> Parser<'a> {
                     let id = GlobalId(self.id("@g")?);
                     let location = self.location();
                     let name = self.string()?;
-                    self.locations.entry(name.clone()).or_insert(location);
+                    self.global_locations.entry(name.clone()).or_insert(location);
                     self.expect(":")?;
                     let ty = self.ty(0)?;
                     self.expect("=")?;
@@ -592,7 +610,7 @@ impl<'a> Parser<'a> {
                     let id = FunctionId(self.id("@f")?);
                     let location = self.tokens[self.at].location;
                     let name = self.string()?;
-                    self.locations.entry(name.clone()).or_insert(location);
+                    self.declaration_locations.entry(name.clone()).or_insert(location);
                     self.expect(":")?;
                     let signature = self.signature(0)?;
                     self.comma()?;
@@ -627,7 +645,7 @@ impl<'a> Parser<'a> {
         let id = FunctionId(self.id("@f")?);
         let location = self.tokens[self.at].location;
         let name = self.string()?;
-        self.locations.entry(name.clone()).or_insert(location);
+        self.function_locations.entry(name.clone()).or_insert(location);
         self.expect("(")?;
         let mut params = Vec::new();
         let mut value_types = Vec::new();
