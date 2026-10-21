@@ -45,7 +45,7 @@ change an unrelated remote silently. Start new work from the latest upstream
 | [assembler/](assembler/) | Shared assembly APIs, diagnostics, symbols, and relocations |
 | [assembler/amd64/](assembler/amd64/) | AMD64 parser, encoder, and tests |
 | [assembler/aarch64/](assembler/aarch64/), [riscv64/](assembler/riscv64/), [loongarch64/](assembler/loongarch64/) | Independent fixed-width integer encoders |
-| [assembler-object/](assembler-object/) | Shared assembler-to-ELF bridge with target/relocation checks |
+| [assembler/asmobj/](assembler/asmobj/) | Shared assembler-to-object bridge with target/relocation checks |
 | [backend-api/](backend-api/) | IR backend support checks and artifact emission |
 | [toolchain/](toolchain/) | Target, assembler, and backend registration |
 | [object/](object/) | Object model and ELF serialization |

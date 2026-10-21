@@ -35,9 +35,9 @@ native compilation pipeline are still being developed.
 
 | Component | Available today | Status |
 | --- | --- | --- |
-| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols and ELF64 relocations | Available; new ISAs are initial subsets |
+| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols, ELF64 and initial AMD64/AArch64 COFF output | Available; new ISAs are initial subsets |
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
-| Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
+| Object library | Object model, bounded ELF64 reading and ELF64/COFF relocatable serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Reverse | ELF inspection plus opt-in Wave AMD64 disassembly and CFG/xrefs | Experimental |
 | Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
@@ -62,6 +62,12 @@ The [object input API](object/README.md) reads the supported bounded AMD64 ELF64
 relocatable subset and preserves section, symbol and relocation semantics.
 [Shared diagnostic conversions](diagnostic/README.md) retain machine-readable
 phase/category and available source/object context alongside typed component errors.
+
+[COFF object output](assembler/README.md#coff-leaf-objects) supports AMD64 and
+AArch64 with `whale asm --arch ID --format coff source.s -o leaf.obj`.
+The bridge is the `asmobj` crate under `assembler/asmobj`. Output has a checked
+256 MiB default file budget, sparse BSS and explicit format-specific relocations;
+Windows native CI gates cross-object calls/data references using the system linker.
 
 ELF64 object output supports AMD64, AArch64, RV64I and LoongArch64 little-endian
 identities. The bounded reader, static linker and reverse tools retain their AMD64

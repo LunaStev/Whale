@@ -27,10 +27,11 @@ and machine instruction encoding. Parser and displacement-boundary unit tests
 live beside their implementations. Root integration tests cover registration,
 CLI behavior and the assembly-to-object boundary.
 
-`Assembler::object_target()` identifies native output. The separate
-`assembler-object` crate converts assembly metadata into checked ELF64 objects;
-it validates relocation namespaces against that identity. The CLI composes these
-pieces through `toolchain::Registry` in `src/builtins.rs`.
+`Assembler::object_target()` identifies native output. The
+[`asmobj`](asmobj/) crate under this directory converts assembly metadata into
+checked ELF64 objects and validates relocation namespaces against that identity.
+`asmobj::to_object` builds the object model; `asmobj::write` serializes it. The CLI
+composes these pieces through `toolchain::Registry` in `src/builtins.rs`.
 
 ```sh
 cargo run -- asm --aarch64 examples/isa/aarch64.s -o /tmp/aarch64.o
@@ -47,7 +48,7 @@ atomic output publication work for all four native assemblers.
 
 ## Initial 64-bit instruction subsets
 
-All new outputs are little-endian ELF64 ET_REL. These are explicitly bounded
+The default outputs are little-endian ELF64 ET_REL. These are explicitly bounded
 integer subsets. ARM32, RV32, floating point, SIMD, macros and runtime IR backend
 generation are outside these assembler implementations. Unsupported syntax is a
 source-located error; it never becomes a guessed encoding.
@@ -145,3 +146,30 @@ Reference contracts: [Arm A64 ISA](https://developer.arm.com/documentation/ddi06
 [RISC-V RV64I](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
 [LoongArch architecture](https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.pdf)
 and [LoongArch ABI](https://github.com/loongson/la-abi-specs).
+
+## COFF leaf objects
+
+`asmobj` is the assembler-to-object bridge under `assembler/asmobj`; its package
+and Rust crate name are both `asmobj`. `asmobj::to_object` validates metadata and
+`asmobj::write` serializes the selected identity. Select `ObjectTarget::coff`
+with AMD64 or AArch64, or use `whale asm --arch aarch64 --format coff source.s
+-o leaf.obj`. ELF remains the default for all four assemblers.
+
+COFF supports text/data/read-only/BSS sections, local/global symbols, long names,
+absolute32/absolute64 and AMD64 PC32/call relocations. AArch64 supports B/BL,
+conditional B/CBZ/CBNZ and ADR relocations with checked embedded addends. ELF
+machine relocation IDs are translated explicitly at the bridge; direct ELF-only
+relocations in a COFF model are rejected. Weak/hidden symbols, COMDAT, BigObj,
+relocation-overflow records, GOT and signed ELF absolute32 have no initial COFF
+mapping. Sized global function symbols retain a function-definition auxiliary;
+COFF has no general object-symbol size field. BSS stays sparse, within COFF's
+32-bit section extent. Standard section indices, alignments, output limits and
+relocation overlaps are checked before publication. The reader/static linker
+retain their ELF AMD64 contract; the COFF writer emits no PE executable.
+
+The format follows the [Microsoft PE/COFF specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format).
+Ordinary tests inspect independent field fixtures without external tools. Optional
+`tools/check_object_oracle.py --binary target/debug/whale --format coff --readobj
+/path/to/llvm-readobj --linker /path/to/lld-link` checks generated objects with
+LLVM and cross-links both CPU identities. Windows native CI runs the same
+cross-object call/data fixture using MSVC and requires exit 42 on x64 and ARM64.

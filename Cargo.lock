@@ -19,19 +19,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "asmobj"
+version = "0.1.0"
+dependencies = [
+ "assembler",
+ "object",
+]
+
+[[package]]
 name = "assembler"
 version = "0.1.0"
 dependencies = [
  "diagnostic",
  "target-spec",
-]
-
-[[package]]
-name = "assembler-object"
-version = "0.1.0"
-dependencies = [
- "assembler",
- "object",
 ]
 
 [[package]]
@@ -320,8 +320,8 @@ version = "0.1.0"
 dependencies = [
  "aarch64",
  "amd64",
+ "asmobj",
  "assembler",
- "assembler-object",
  "ir",
  "linker",
  "loongarch64",
