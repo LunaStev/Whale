@@ -398,14 +398,11 @@ fn global_addresses_keep_identity_through_indirect_calls_and_returns() {
 }
 
 #[test]
-fn floating_storage_representation_remains_bit_exact_but_execution_is_explicitly_unsupported() {
+fn floating_storage_instantiates_without_losing_payload_bits() {
     let m=with_storage("storage @g0 \"bits\": f32 = value f32 0xffc01234, align 4, access readonly, linkage internal", "void", "ret void");
     canonical(&m);
     assert!(print_module(&m).contains("0xffc01234"));
-    assert!(matches!(
-        interpret(&m, FunctionId(0), &[]),
-        Err(InterpreterError::UnsupportedGlobal(GlobalId(0)))
-    ));
+    assert_eq!(interpret(&m, FunctionId(0), &[]).unwrap().value, None);
 }
 
 // Existing semantic assertions intentionally inspect the preserved leaf cause.

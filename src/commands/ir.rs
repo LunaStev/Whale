@@ -184,7 +184,7 @@ fn print_help() {
         "  verify <input.wir>             Read and verify format 3/4/5/6/7 typed IR", "\n",
         "  print <input.wir> [-o <path>]   Verify and write canonical typed IR", "\n",
         "  run <input.wir> --function @fN [--arg <literal> ...] [--max-steps <u64>] [--max-memory <u64>]", "\n",
-        "    Execute integer/bool, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.", "\n",
+        "    Execute integer/bool/float values, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.", "\n",
         "  lower <socket.json> [-o <path>] Lower AST JSON (requires socket-cli)", "\n",
         "  lower options: --target x86_64-whale-linux, --no-verify", "\n",
         "  AST envelope: reads format_version 2/3/4, writes 4; semantics_version: 1, features: [], program: AST", "\n",
@@ -212,7 +212,7 @@ fn execute(
     }
     let arguments: Vec<_> = fun.params.iter().zip(literals).enumerate().map(|(index, (param, literal))| {
         scalar_argument(&param.ty, literal).unwrap_or_else(|| {
-            fail(format!("{input}: argument {index} must be an exact decimal {} literal (bool uses true/false)", param.ty))
+            fail(format!("{input}: argument {index} must be an exact {} literal (integers use decimal, bool true/false, floats exact-width 0x bits)", param.ty))
         })
     }).collect();
     let mut options = ir::InterpreterOptions::default();
@@ -229,13 +229,16 @@ fn execute(
         Some(ir::ConstValue::U(v)) => stdout(format!("{} {v}\n", fun.ret_ty)),
         Some(ir::ConstValue::Bool(v)) => stdout(format!("bool {v}\n")),
         None => stdout("void\n"),
-        Some(ir::ConstValue::F(_)) => unreachable!("interpreter scalar subset"),
+        Some(ir::ConstValue::F(v)) => stdout(format!("{} {v}\n", fun.ret_ty)),
     }
 }
 
 fn scalar_argument(ty: &ir::Type, literal: &str) -> Option<ir::ConstValue> {
     let decimal = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     match ty {
+        ir::Type::F16 => ir::FloatBits::parse(16, literal).ok().map(ir::ConstValue::F),
+        ir::Type::F32 => ir::FloatBits::parse(32, literal).ok().map(ir::ConstValue::F),
+        ir::Type::F64 => ir::FloatBits::parse(64, literal).ok().map(ir::ConstValue::F),
         ir::Type::Bool => match literal {
             "true" => Some(ir::ConstValue::Bool(true)),
             "false" => Some(ir::ConstValue::Bool(false)),

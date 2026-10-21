@@ -191,23 +191,47 @@ cargo run --locked -- ir run answer.wir --function @f7
 ```
 
 The output is `i32 42`. The default build verifies the whole module and runs
-one explicit Whale-convention function with integer/bool parameters and scalar
-or void return. Use repeated `--arg` decimal literals (`true`/`false` for Bool)
+one explicit Whale-convention function with integer/bool/float parameters and scalar
+or void return. Use repeated `--arg` decimal integer literals (`true`/`false` for Bool,
+exact-width hexadecimal storage bits for floats)
 and `--max-steps` to set the instruction/terminator budget (default 1,000,000).
 Zero division/remainder and explicit traps return structured errors; unused
 executed operations still trap. Loops evaluate phi inputs simultaneously.
 
 This oracle supports integer constants, arithmetic, comparisons, bit casts,
-checked pairs, select and control flow. It also supports tracked stack allocations, integer/Bool/data-pointer storage,
+checked pairs, select and control flow. It also supports bit-exact f16/f32/f64 constants, mov/phi/select and tracked
+stack allocations, integer/Bool/float/data-pointer storage,
 typed GEP, byte copies and fills, with initialization and capability checks.
-It executes direct and signature-checked indirect Whale calls with integer/Bool,
+It executes direct and signature-checked indirect Whale calls with integer/Bool/float,
 data-pointer and function-pointer arguments/results, using one shared fuel and
 memory arena. Function pointers retain their full signature and calling convention
 through mov/phi/select, storage and complete or split byte copies. It rejects
-floating point, external/SysV execution and general aggregate values in every
+floating arithmetic/comparisons/numerical conversions, external/SysV execution and general aggregate values in every
 block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
+
+### Execute exact floating storage and bitcasts
+
+`f16`, `f32` and `f64` use exactly 4, 8 and 16 hexadecimal storage digits.
+Constants, arguments/returns, mov/phi/select, stack/global loads and stores, and
+byte copies preserve every bit, including signaling/quiet NaN payloads and
+signed zero. These operations perform no host floating-point conversion.
+Equal-width integer/float `bitcast` reinterprets those bits; `fext`, `ftrunc` and
+numeric integer/float conversions remain unsupported during execution. Bitcasts
+cannot recover pointer or function-pointer authority from numerical bits.
+
+```sh
+cargo run --locked -- ir run ir/tests/fixtures/float-storage-v7.wir --function @f0 --arg 0x7c01
+cargo run --locked -- ir run ir/tests/fixtures/float-storage-v7.wir --function @f3
+```
+
+These print `f16 0x7c01` and `u64 9218868437227405603`. Floating storage obeys
+the same bounds, explicit alignment, permissions, initialization masks and work
+budgets as integer storage. A typed field load checks its value bytes without
+requiring surrounding aggregate padding to be initialized. Plain storage and
+copies never canonicalize a NaN; arithmetic and width-changing conversions have
+separate semantics.
 
 ### Execute tracked stack memory
 
@@ -271,9 +295,8 @@ with existing compile-time `Global` declarations, while functions have their own
 source-name namespace. `ConstRef` still refers only to compile-time declarations;
 it never becomes a runtime address. Initialized storage accepts exact scalar
 literal values; pointer/function-pointer cells can start explicitly uninitialized.
-Read-only uninitialized declarations and aggregate storage are rejected. Floating
-storage literals round-trip, but the current integer interpreter rejects their
-instantiation. Integer/Bool initializers initialize their value bytes; physical
+Read-only uninitialized declarations and aggregate storage are rejected. Integer/Bool/float
+initializers initialize their value bytes; physical
 zero-fill of uninitialized storage does not initialize a value.
 
 External storage definitions require an explicit nonempty `link_name`; internal

@@ -1,0 +1,35 @@
+module {
+  format_version 7
+  semantics_version 1
+  target "x86_64-whale-linux"
+  datalayout { ptr=64, endian=little }
+
+  storage @g0 "payload": f64 = value f64 0x7ff0000000000123, align 8, access readonly, linkage internal
+  declare @f0 "identity_f16": whale (f16) -> f16, linkage internal
+  declare @f1 "identity_f32": whale (f32) -> f32, linkage internal
+  declare @f2 "identity_f64": whale (f64) -> f64, linkage internal
+  declare @f3 "stored_payload": whale () -> u64, linkage internal
+
+  fn @f0 "identity_f16"(%v0 "bits": f16) -> f16, entry %b0 {
+  %b0 "entry":
+    ret f16 %v0
+  }
+  fn @f1 "identity_f32"(%v0 "bits": f32) -> f32, entry %b0 {
+  %b0 "entry":
+    ret f32 %v0
+  }
+  fn @f2 "identity_f64"(%v0 "bits": f64) -> f64, entry %b0 {
+  %b0 "entry":
+    ret f64 %v0
+  }
+  fn @f3 "stored_payload"() -> u64, entry %b0 {
+  %b0 "entry":
+    %v0: ptr<f64> = global_addr @g0
+    %v1: f64 = load f64, ptr<f64> %v0, align 8
+    %v2: ptr<f64> = alloca f64, align 8
+    store f64 %v1, ptr<f64> %v2, align 8
+    %v3: f64 = load f64, ptr<f64> %v2, align 8
+    %v4: u64 = bitcast f64 %v3 to u64
+    ret u64 %v4
+  }
+}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Synthetic 64-bit addresses, byte initialization and separately copied capabilities.
-use super::{integer, FunctionPointer, FunctionTarget, Value};
+use super::{scalar, FunctionPointer, FunctionTarget, Value};
 
 use crate::{ConstValue, Target, Type, TypeLayout};
 
@@ -620,7 +620,7 @@ impl Memory {
         }
         let mut bits = [0u8; 16];
         bits[..n].copy_from_slice(bytes);
-        Ok(Value::Scalar(integer::pack(ty, u128::from_le_bytes(bits))))
+        Ok(Value::Scalar(scalar::pack(ty, u128::from_le_bytes(bits))))
     }
 
     pub fn store(&mut self, pointer: Pointer, ty: &Type, value: &Value, align: u32) -> Result<()> {
@@ -682,9 +682,7 @@ impl Memory {
                 }
                 u128::from(p.bits()).to_le_bytes()
             },
-            Value::Scalar(v) => {
-                integer::raw(v, integer::shape(ty).map_or(1, |s| s.0)).to_le_bytes()
-            },
+            Value::Scalar(v) => scalar::raw(ty, v).to_le_bytes(),
             _ => unreachable!("verified scalar or checked storage"),
         };
         bytes.extend(data[..n].iter().enumerate().map(|(i, b)| (start + i, *b)));
@@ -713,6 +711,23 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_binary16_pattern_survives_typed_storage_and_copy() {
+        let mut memory = Memory::new(MemoryLimits::default());
+        let source = memory.allocate(2, 2, 2).unwrap();
+        let dest = memory.allocate(2, 2, 2).unwrap();
+        for bits in 0..=u16::MAX {
+            let value = Value::Scalar(ConstValue::F(crate::FloatBits::F16(bits)));
+            memory.store(source, &Type::F16, &value, 2).unwrap();
+            memory.copy(dest, source, 2, 2).unwrap();
+            assert_eq!(memory.load(dest, &Type::F16, 2).unwrap().scalar(), value.scalar());
+            assert_eq!(
+                memory.load(dest, &Type::U16, 2).unwrap().scalar(),
+                &ConstValue::U(bits.into())
+            );
+        }
+    }
 
     fn trapped<T>(result: Result<T>, expected: MemoryTrap) {
         assert!(matches!(result, Err(Fault::Trap(t)) if t == expected));

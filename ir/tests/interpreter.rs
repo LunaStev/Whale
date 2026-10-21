@@ -357,8 +357,11 @@ fn invalid_arguments_modules_and_unsupported_dead_instructions_fail_before_execu
         Err(InterpreterError::Verification(_))
     ));
     for (body, operation) in [
-        ("%v8: ptr<f32> = alloca f32, align 4", "alloca"),
-        ("%v8: f32 = const f32 0x00000000", "non-integer constant"),
+        (
+            "%v8: f32 = const f32 0x00000000 %v9: f32 = fadd f32 %v8, %v8",
+            "non-integer arithmetic/comparison",
+        ),
+        ("%v8: f32 = const f32 0x00000000 %v9: f64 = fext f32 %v8 to f64", "unsupported cast"),
     ] {
         let m = program(
             &[],
@@ -372,7 +375,7 @@ fn invalid_arguments_modules_and_unsupported_dead_instructions_fail_before_execu
     let m = program(&["f32"], "f32", "%b11 \"entry\": ret f32 %v0");
     assert!(matches!(
         interpret(&m, FunctionId(7), &[ConstValue::F(FloatBits::F32(0))]),
-        Err(InterpreterError::UnsupportedSignature(_))
+        Ok(InterpreterResult { value: Some(ConstValue::F(FloatBits::F32(0))), .. })
     ));
     let m = parse_module(include_str!("fixtures/calls-v3.wir")).unwrap();
     assert!(matches!(
@@ -401,7 +404,11 @@ fn published_integer_fixture_returns_values_and_explicit_overflow_trap() {
 #[test]
 fn verification_checks_other_functions_but_execution_restricts_only_the_selected_body() {
     let mut m = program(&[], "void", "%b11 \"entry\": ret void");
-    let other = program(&[], "void", "%b11 \"entry\": %v8: f32 = const f32 0x00000000 ret void");
+    let other = program(
+        &[],
+        "void",
+        "%b11 \"entry\": %v8: f32 = const f32 0x00000000 %v9: f32 = fadd f32 %v8, %v8 ret void",
+    );
     let mut function = other.functions[0].clone();
     function.id = FunctionId(8);
     function.name = "other".into();
@@ -413,7 +420,10 @@ fn verification_checks_other_functions_but_execution_restricts_only_the_selected
     assert_eq!(interpret(&m, FunctionId(7), &[]).unwrap().value, None);
     assert!(matches!(
         interpret(&m, FunctionId(8), &[]),
-        Err(InterpreterError::UnsupportedInstruction { operation: "non-integer constant", .. })
+        Err(InterpreterError::UnsupportedInstruction {
+            operation: "non-integer arithmetic/comparison",
+            ..
+        })
     ));
     m.functions[1].blocks[0].terminator = None;
     assert!(matches!(interpret(&m, FunctionId(7), &[]), Err(InterpreterError::Verification(_))));
