@@ -46,12 +46,16 @@ fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
     assert!(result.status.success(), "{result:?}");
     let result = run(&["ir", "print", input]);
     assert!(result.status.success(), "{result:?}");
-    assert_eq!(result.stdout, good.replace("format_version 3", "format_version 7").as_bytes());
+    assert_eq!(
+        result.stdout,
+        good.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
+            .as_bytes()
+    );
     let result = run(&["ir", "print", input, "-o", output]);
     assert!(result.status.success(), "{result:?}");
     assert_eq!(
         fs::read_to_string(output).unwrap(),
-        good.replace("format_version 3", "format_version 7")
+        good.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
     );
     for (source, args) in [
         (good.to_string(), vec!["ir", "print", input, "-o", input]),

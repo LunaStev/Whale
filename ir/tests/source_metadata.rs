@@ -80,10 +80,10 @@ fn malformed_metadata_and_old_version_metadata_are_rejected() {
         assert!(parse_module(&print_module(&m)).is_err());
     }
     for version in 3..7 {
-        assert!(parse_module(
-            &print_module(&module())
-                .replace("format_version 7", &format!("format_version {version}"))
-        )
+        assert!(parse_module(&print_module(&module()).replace(
+            &format!("format_version {}", IR_FORMAT_VERSION),
+            &format!("format_version {version}")
+        ))
         .is_err());
     }
 }
@@ -219,11 +219,11 @@ mod frontend {
     fn annotated_ast_is_versioned_bounded_and_rejects_duplicate_identities() {
         let p = program(vec![stmt(1, ast::Stmt::Return(Some(expr(2, lit(5)))))]);
         let json = interchange::encode(p.clone()).unwrap();
-        assert!(json.contains("\"format_version\": 4"));
+        assert!(json.contains("\"format_version\": 5"));
         lower(&interchange::decode(&json).unwrap()).unwrap();
         for old in [2, 3] {
             assert!(interchange::decode(
-                &json.replace("\"format_version\": 4", &format!("\"format_version\": {old}"))
+                &json.replace("\"format_version\": 5", &format!("\"format_version\": {old}"))
             )
             .unwrap_err()
             .contains("require AST format 4"));

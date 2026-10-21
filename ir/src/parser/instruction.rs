@@ -201,13 +201,19 @@ impl Parser<'_> {
                 Instruction::Select { dst, ty, cond, on_true, on_false }
             },
             "zext" | "sext" | "trunc" | "fext" | "ftrunc" | "itof_s" | "itof_u" | "ftoi_s"
-            | "ftoi_u" | "bitcast" | "ptrtoint" | "inttoptr" => {
+            | "ftoi_u" | "checked_int" | "bitcast" | "ptrtoint" | "inttoptr" => {
                 let dst = required()?;
                 let src_ty = self.ty(0)?;
                 let src = self.value()?;
                 self.expect("to")?;
                 let dst_ty = self.ty(0)?;
                 let op = match op {
+                    "checked_int" => {
+                        if self.format_version < 8 {
+                            return Err(self.error("checked_int requires typed IR format 8"));
+                        }
+                        CastOp::CheckedInt
+                    },
                     "zext" => CastOp::ZExt,
                     "sext" => CastOp::SExt,
                     "trunc" => CastOp::Trunc,

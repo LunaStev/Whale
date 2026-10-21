@@ -194,7 +194,8 @@ fn ast_version_two_calls_fixture_roundtrips_and_prints_current_ir_and_reads_vers
     verify_module(&m).unwrap();
     assert_eq!(
         print_module(&m),
-        include_str!("fixtures/calls-v3.wir").replace("format_version 3", "format_version 7")
+        include_str!("fixtures/calls-v3.wir")
+            .replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
     );
     for (from, to) in [
         ("\"Whale\"", "\"UnknownConvention\""),

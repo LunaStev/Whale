@@ -27,7 +27,8 @@ fn exact_numeric_fixtures_round_trip_and_lower() {
     }
     let printed = ir::print_module(&lower(INTEGER).unwrap());
     assert!(printed.contains(&u128::MAX.to_string()));
-    assert!(printed.contains("format_version 7\n  semantics_version 1"));
+    assert!(printed
+        .contains(&format!("format_version {}\n  semantics_version 1", ir::IR_FORMAT_VERSION)));
     assert!(ir::print_module(&lower(FLOAT).unwrap()).contains("0xffc01234"));
     let signed =
         INTEGER.replace("false", "true").replace(&u128::MAX.to_string(), &i128::MIN.to_string());

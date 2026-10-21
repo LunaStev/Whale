@@ -62,6 +62,9 @@ pub fn decode_with_limit(source: &str, max_bytes: usize) -> Result<Program, Stri
     if envelope.format_version < 4 && extended & 2 != 0 {
         return Err("source annotations require AST format 4".into());
     }
+    if envelope.format_version < 5 && extended & 4 != 0 {
+        return Err("integer casts require AST format 5".into());
+    }
     Ok(envelope.program)
 }
 

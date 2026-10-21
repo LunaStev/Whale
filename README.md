@@ -429,22 +429,22 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is documented in [AST JSON Schema](ir/schema/ast-v4.schema.json) and
+schema is documented in [AST JSON Schema](ir/schema/ast-v5.schema.json) and
 [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-The envelope requires `format_version: 4` (legacy formats 2 and 3 are also accepted), `semantics_version: 1`, and
+The envelope requires `format_version: 5` (legacy formats 2, 3 and 4 are also accepted), `semantics_version: 1`, and
 `features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
 JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
 entry point is `ir::lower_ast::interchange::decode`; its default input limit is
 8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
 f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
 For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
-Migrate format 1 inputs by setting `format_version` to 4, adding a `declarations`
+Migrate format 1 inputs by setting `format_version` to 5, adding a `declarations`
 array to `program`, and adding `convention` and `linkage` to every definition.
 Internal functions use `"Whale"` and `"Internal"`; external functions must supply
 a nonempty `link_name`. Missing versions and format 1 inputs are rejected.
 Integers and floats retain their exact string encoding. AST and printed typed IR have independent format versions and a shared
-semantics version; printed IR includes both version fields. Typed text IR formats 3, 4, 5, 6 and 7
+semantics version; printed IR includes both version fields. Typed text IR formats 3, 4, 5, 6, 7 and 8
 can be read and verified with `ir::parse_module`.
 
 The AST supports scalar literals, variables/constants, arithmetic, comparisons,
@@ -473,7 +473,7 @@ For a complete invalid input, save the following as `invalid.json`:
 cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
 ```
 
-This exits nonzero with `unsupported AST format_version 99; expected 4`. It does
+This exits nonzero with `unsupported AST format_version 99; expected 5`. It does
 not create `rejected.wir`; an existing output is preserved. Lowering/type errors
 likewise fail before output publication.
 
@@ -515,8 +515,8 @@ preserve locations for stores, traps, terminators and unused constants. AST 4
 IR identities. Runtime errors expose the underlying cause through `root_cause()`
 and structured source/trace details through `diagnostic()`.
 
-The printer emits typed IR format 7 with semantics version 1. AST JSON writes
-format 4. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
+The printer emits typed IR format 8 with semantics version 1. AST JSON writes
+format 5. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry
 block. Name/string fields escape quotes, backslashes, control characters and
 Unicode line separators. See the [identity fixture](ir/tests/fixtures/text-identities-v3.wir)
@@ -536,13 +536,13 @@ cargo run --locked -- ir verify ir/tests/fixtures/calls-v3.wir
 cargo run --locked -- ir print ir/tests/fixtures/calls-v3.wir -o canonical.wir
 ```
 
-`ir::parse_module` reads **and verifies** formats 3, 4, 5, 6 and 7. Print-parse-print
+`ir::parse_module` reads **and verifies** formats 3, 4, 5, 6, 7 and 8. Print-parse-print
 preserves explicit scoped IDs, quoted names, entry and block order, types,
 exact integer/float payloads, constant-expression trees, alignment, signatures
 and external link names. Whitespace and `//` comments are canonicalized. It
 accepts current printer instruction forms; format 4 adds `uninit`, and format 5 adds preserved constant bitwise,
 division/remainder, shift and lazy logical operators. Formats 3/4 without `undef`
-remain readable and canonicalize to format 7. Extended constant syntax requires
+remain readable and canonicalize to format 8. Extended constant syntax requires
 format 5. Format 6 adds explicit storage, global addresses, lifetime_end and same-allocation
 pointer ordering/differences; extended frontend operators require AST format 3. Regenerate old
 `undef` lowering from its AST rather than replacing unspecified values with zero. Unknown versions, fields,
@@ -867,3 +867,5 @@ Wave checkout; ordinary Cargo never downloads or bootstraps a compiler. See the
 module guide for byte, encoding, unsupported-instruction and build contracts.
 The supported decoding scope is integer/scalar-SSE AMD64 long mode, not complete
 x86 coverage or recovery of original source code.
+
+Numeric cast legality, rounding and trap rules: [IR casts](ir/CASTS.md).

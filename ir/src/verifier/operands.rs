@@ -47,6 +47,7 @@ fn valid_cast(op: &crate::CastOp, source: &Type, destination: &Type) -> bool {
         // Bool has a numerical 0/1 conversion, not signed i1's sign bit.
         ZExt if *source == Type::Bool => is_integer(destination) && *destination != Type::I1,
         ZExt | SExt => integer_pair.is_some_and(|(s, d)| s < d),
+        CheckedInt => integer_pair.is_some(),
         Trunc => integer_pair.is_some_and(|(s, d)| s > d),
         FExt => float_pair.is_some_and(|(s, d)| s < d),
         FTrunc => float_pair.is_some_and(|(s, d)| s > d),

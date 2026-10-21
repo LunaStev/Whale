@@ -425,6 +425,7 @@ fn fmt_fcmp(p: &crate::FCmpPred) -> &'static str {
 fn fmt_cast(op: &crate::CastOp) -> &'static str {
     use crate::CastOp::*;
     match op {
+        CheckedInt => "checked_int",
         ZExt => "zext",
         SExt => "sext",
         Trunc => "trunc",

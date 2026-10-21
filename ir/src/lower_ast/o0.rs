@@ -473,6 +473,26 @@ fn lower_expr_o0(
             Err(LowerError::UnknownVariable(name.clone()))
         },
 
+        frontend::Expr::Cast { value, ty, kind } => {
+            let dst_ty = super::support::socket_type_to_whale(ty)?;
+            // Validate categories before lowering the value or emitting its cast.
+            if !super::support::is_int_like(&dst_ty) {
+                return Err(LowerError::UnsupportedExpr);
+            }
+            let (src, src_ty) = lower_expr_o0(fb, env, global_consts, value, target)?;
+            let (sb, signed) =
+                crate::interpreter::integer::shape(&src_ty).ok_or(LowerError::UnsupportedExpr)?;
+            let (db, _) = crate::interpreter::integer::shape(&dst_ty).unwrap();
+            let op = match kind {
+                frontend::IntegerCast::Checked => crate::CastOp::CheckedInt,
+                frontend::IntegerCast::Numeric if sb > db => crate::CastOp::Trunc,
+                frontend::IntegerCast::Numeric if sb == db => crate::CastOp::Bitcast,
+                frontend::IntegerCast::Numeric if signed => crate::CastOp::SExt,
+                frontend::IntegerCast::Numeric => crate::CastOp::ZExt,
+            };
+            let dst = fb.cast(op, src_ty, dst_ty.clone(), src);
+            Ok((dst, dst_ty))
+        },
         frontend::Expr::Lit(lit) => lower_lit_o0(fb, lit),
 
         frontend::Expr::BitNot(value) => {
@@ -639,7 +659,8 @@ fn preserve_const_expr(
         frontend::Expr::Located { annotation, expression } => {
             preserve_const_expr(expression, ctx).map_err(|e| e.at(annotation))
         },
-        frontend::Expr::NullFunction(_)
+        frontend::Expr::Cast { .. }
+        | frontend::Expr::NullFunction(_)
         | frontend::Expr::Call { .. }
         | frontend::Expr::FunctionRef(_) => Err(LowerError::NonConstExpr),
         frontend::Expr::Lit(literal) => {

@@ -98,6 +98,7 @@ pub enum Stmt {
 pub enum Expr {
     Located { annotation: crate::SourceAnnotation, expression: Box<Expr> },
     BitNot(Box<Expr>),
+    Cast { value: Box<Expr>, ty: TypeRef, kind: IntegerCast },
     FunctionRef(String),
     NullFunction(SignatureRef),
     Call { callee: CalleeRef, args: Vec<Expr> },
@@ -172,4 +173,13 @@ pub struct FunctionDeclaration {
 pub enum CalleeRef {
     Direct(String),
     Indirect(Box<Expr>),
+}
+
+/// Numeric selects source-signed extension, truncation, or same-width bitcast.
+/// Checked requires mathematical value preservation, including signedness.
+#[cfg_attr(feature = "socket", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Copy, Debug)]
+pub enum IntegerCast {
+    Numeric,
+    Checked,
 }

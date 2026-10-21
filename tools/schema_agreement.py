@@ -19,6 +19,9 @@ def cases(version):
         "parameters": [], "return_type": integer, "body": [{"Return": literal}],
     }]}
     base = {"format_version": version, "semantics_version": 1, "features": [], "program": program}
+    cast = copy.deepcopy(base)
+    cast["program"]["functions"][0]["body"] = [{"Return": {"Cast": {"value": literal, "ty": integer, "kind": "Checked"}}}]
+    yield "integer-cast", cast, version >= 5, version >= 5
     yield "ordinary-null-link-name", base, True, True
     missing = copy.deepcopy(base); del missing["program"]["functions"][0]["link_name"]
     yield "missing-optional-link-name", missing, True, True

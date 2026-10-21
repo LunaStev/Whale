@@ -47,6 +47,8 @@ pub enum FCmpPred {
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum CastOp {
+    /// Preserve the mathematical integer value or trap at this operation.
+    CheckedInt,
     ZExt,
     SExt,
     Trunc,

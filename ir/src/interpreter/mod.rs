@@ -2,7 +2,7 @@
 //! A bounded oracle for verified scalar/control-flow IR.
 //! Tracked stack memory and bounded direct/indirect Whale calls are supported.
 
-mod integer;
+pub(crate) mod integer;
 
 mod scalar;
 
@@ -128,6 +128,7 @@ impl fmt::Display for RuntimeDiagnostic {
 pub enum TrapReason {
     DivisionByZero,
     RemainderByZero,
+    InvalidConversion,
     Explicit(String),
     Memory(MemoryTrap),
     NullFunction,
@@ -139,6 +140,7 @@ impl fmt::Display for TrapReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DivisionByZero => f.write_str("division by zero"),
+            Self::InvalidConversion => f.write_str("numeric conversion is out of range"),
             Self::RemainderByZero => f.write_str("remainder by zero"),
             Self::Explicit(reason) => write!(f, "{reason:?}"),
             Self::Memory(reason) => reason.fmt(f),
@@ -511,7 +513,7 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         },
         Cmp { ty, .. } | FCmp { ty, .. } if scalar::float_type(ty) => return Ok(()),
         Cast { op, src_ty, dst_ty, .. }
-            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc)
+            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc | CastOp::CheckedInt)
                 && (*src_ty == Type::Bool || integer::shape(src_ty).is_some())
                 && integer::shape(dst_ty).is_some() =>
         {
@@ -1452,6 +1454,17 @@ fn run_inner<'module>(
                         get(if get(cond).boolean() { on_true } else { on_false }).clone()
                     },
                     Instruction::Cast { op, src_ty, dst_ty, src, .. } => match op {
+                        CastOp::CheckedInt => Value::Scalar(
+                            integer::checked_cast(src_ty, dst_ty, scalar(src)).map_err(
+                                |reason| {
+                                    InterpreterError::Trap(InterpreterTrap {
+                                        site: at,
+                                        reason,
+                                        steps,
+                                    })
+                                },
+                            )?,
+                        ),
                         CastOp::IntToPtr => {
                             Value::Pointer(memory::Pointer::raw(
                                 integer::raw(scalar(src), 64) as u64

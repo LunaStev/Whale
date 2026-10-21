@@ -187,8 +187,8 @@ fn print_help() {
         "    Execute integer/bool/float values, control flow and tracked stack memory; default 1000000 steps, 64 MiB storage.", "\n",
         "  lower <socket.json> [-o <path>] Lower AST JSON (requires socket-cli)", "\n",
         "  lower options: --target x86_64-whale-linux, --no-verify", "\n",
-        "  AST envelope: reads format_version 2/3/4, writes 4; semantics_version: 1, features: [], program: AST", "\n",
-        "  Typed IR reads format_version 3/4/5/6/7, writes 7; semantics_version 1. Legacy undef is invalid.", "\n",
+        "  AST envelope: reads format_version 2/3/4/5, writes 5; semantics_version: 1, features: [], program: AST", "\n",
+        "  Typed IR reads format_version 3/4/5/6/7/8, writes 8; semantics_version 1. Legacy undef is invalid.", "\n",
         "  Integer literals are decimal; floats use exact-width 0x storage bits.", "\n",
         "  Unknown fields, versions, instructions and trailing input are rejected.", "\n",
     ));

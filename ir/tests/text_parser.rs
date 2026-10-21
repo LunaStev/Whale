@@ -29,7 +29,7 @@ fn canonical_fixtures_preserve_scoped_sparse_ids_block_order_and_wave_output() {
     ] {
         assert_eq!(
             print_module(&roundtrip(text)),
-            text.replace("format_version 3", "format_version 7")
+            text.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
         );
     }
     let m = parse_module(include_str!("fixtures/text-identities-v3.wir")).unwrap();
@@ -254,7 +254,8 @@ fn verification_locations_respect_function_and_global_namespaces() {
         );
         error
     }
-    let header = HEADER.replace("format_version 3", "format_version 7");
+    let header =
+        HEADER.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION));
     let storage =
         "storage @g0 \"shared\": i32 = value i32 0, align 4, access readwrite, linkage internal\n";
     let declaration = "declare @f0 \"shared\": whale () -> i32, linkage internal\n";

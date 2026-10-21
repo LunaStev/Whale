@@ -210,6 +210,11 @@ fn inspect_program_details(
                     i.source(annotation)?;
                     i.push(Node::Expr(expression), next)?;
                 },
+                Expr::Cast { value, ty, .. } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(value), next)?;
+                    i.push(Node::Type(ty), next)?;
+                },
                 Expr::BitNot(value) => {
                     i.extended_ops |= 1;
                     i.push(Node::Expr(value), next)?;
@@ -371,6 +376,10 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
             Owned::Expr(e) => match e {
                 Expr::Located { expression, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*expression)))
+                },
+                Expr::Cast { value, ty, .. } => {
+                    pending.push(Disposal::One(Owned::Expr(*value)));
+                    pending.push(Disposal::One(Owned::Type(ty)));
                 },
                 Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),

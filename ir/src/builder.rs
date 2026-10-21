@@ -574,7 +574,7 @@ impl ModuleBuilder {
                     pending.push(right);
                     pending.push(left);
                 },
-                Expr::BitNot(value) => pending.push(value),
+                Expr::BitNot(value) | Expr::Cast { value, .. } => pending.push(value),
                 _ => {},
             }
         }
@@ -946,6 +946,12 @@ impl<'a> FunctionBuilder<'a> {
     pub fn cmp(&mut self, op: CmpOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst = self.define_value(Type::Bool);
         self.cur_block_mut().instructions.push(Instruction::Cmp { dst, op, ty, lhs, rhs });
+        dst
+    }
+
+    pub fn cast(&mut self, op: crate::CastOp, src_ty: Type, dst_ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(dst_ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Cast { dst, op, dst_ty, src_ty, src });
         dst
     }
 
