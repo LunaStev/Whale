@@ -27,10 +27,11 @@ and machine instruction encoding. Parser and displacement-boundary unit tests
 live beside their implementations. Root integration tests cover registration,
 CLI behavior and the assembly-to-object boundary.
 
-`Assembler::object_target()` identifies native output. The separate
-`assembler-object` crate converts assembly metadata into checked ELF64 objects;
-it validates relocation namespaces against that identity. The CLI composes these
-pieces through `toolchain::Registry` in `src/builtins.rs`.
+`Assembler::object_target()` identifies native output. The
+[`asmobj`](asmobj/) crate under this directory converts assembly metadata into
+checked ELF64 objects and validates relocation namespaces against that identity.
+`asmobj::to_object` builds the object model; `asmobj::write` serializes it. The CLI
+composes these pieces through `toolchain::Registry` in `src/builtins.rs`.
 
 ```sh
 cargo run -- asm --aarch64 examples/isa/aarch64.s -o /tmp/aarch64.o
@@ -47,7 +48,7 @@ atomic output publication work for all four native assemblers.
 
 ## Initial 64-bit instruction subsets
 
-All new outputs are little-endian ELF64 ET_REL. These are explicitly bounded
+The default outputs are little-endian ELF64 ET_REL. These are explicitly bounded
 integer subsets. ARM32, RV32, floating point, SIMD, macros and runtime IR backend
 generation are outside these assembler implementations. Unsupported syntax is a
 source-located error; it never becomes a guessed encoding.
@@ -145,3 +146,71 @@ Reference contracts: [Arm A64 ISA](https://developer.arm.com/documentation/ddi06
 [RISC-V RV64I](https://docs.riscv.org/reference/isa/unpriv/rv64.html),
 [LoongArch architecture](https://loongson.github.io/LoongArch-Documentation/LoongArch-Vol1-EN.pdf)
 and [LoongArch ABI](https://github.com/loongson/la-abi-specs).
+
+## COFF leaf objects
+
+`asmobj` is the assembler-to-object bridge under `assembler/asmobj`; its package
+and Rust crate name are both `asmobj`. `asmobj::to_object` validates metadata and
+`asmobj::write` serializes the selected identity. Select `ObjectTarget::coff`
+with AMD64 or AArch64, or use `whale asm --arch aarch64 --format coff source.s
+-o leaf.obj`. ELF remains the default for all four assemblers.
+
+COFF supports text/data/read-only/BSS sections, local/global symbols, long names,
+absolute32/absolute64 and AMD64 PC32/call relocations. AArch64 supports B/BL,
+conditional B/CBZ/CBNZ and ADR relocations with checked embedded addends. ELF
+machine relocation IDs are translated explicitly at the bridge; direct ELF-only
+relocations in a COFF model are rejected. Weak/hidden symbols, COMDAT, BigObj,
+relocation-overflow records, GOT and signed ELF absolute32 have no initial COFF
+mapping. Sized global function symbols retain a function-definition auxiliary;
+COFF has no general object-symbol size field. BSS stays sparse, within COFF's
+32-bit section extent. Standard section indices, alignments, output limits and
+relocation overlaps are checked before publication. The reader/static linker
+retain their ELF AMD64 contract; the COFF writer emits no PE executable.
+
+The format follows the [Microsoft PE/COFF specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format).
+Ordinary tests inspect independent field fixtures without external tools. Optional
+`tools/check_object_oracle.py --binary target/debug/whale --format coff --readobj
+/path/to/llvm-readobj --linker /path/to/lld-link` checks generated objects with
+LLVM and cross-links both CPU identities. Windows native CI runs the same
+cross-object call/data fixture using MSVC and requires exit 42 on x64 and ARM64.
+
+## Mach-O leaf objects
+
+`ObjectTarget::macho64(Machine::X86_64)` and `Machine::AArch64` select bounded
+little-endian MH_OBJECT serialization. CLI spelling is `--format macho`, with
+`--arch amd64|aarch64` and `.o` output. There are no implicit target aliases,
+Mach-O executables, new reader formats or static-linker target changes.
+
+Headers/load commands, sections, symbols and relocations have separate modules.
+The writer emits LC_SEGMENT_64, LC_SYMTAB, LC_DYSYMTAB and LC_BUILD_VERSION
+(macOS 11 minimum). `.text/.rodata/.data/.bss` map to
+`__TEXT,__text / __TEXT,__const / __DATA,__data / __DATA,__bss`.
+Custom section names retain a leading `__` or replace their optional leading dot
+with `__`; the resulting name must fit 16 bytes. Mapped collisions fail. BSS
+uses virtual size without payload allocation. At most 255 sections, 24-bit symbol
+indices, signed32 relocation offsets and a checked output ceiling are supported.
+
+Local, defined-global and undefined-global symbol partitions have explicit
+indices; names are preserved exactly. **No underscore is inserted automatically**:
+Darwin C `entry` requires assembly `_entry`. nlist has no general size/function
+kind field; these model attributes remain validated but have no such output field.
+Weak/hidden symbols, scattered/subtractor/GOT/TLV/page-pair relocations, absolute32
+and unsupported machines fail explicitly. No metadata is silently inferred from
+an ELF or COFF numeric relocation code.
+
+AMD64 supports unsigned absolute64, signed PC32 and branch32. PC-relative model
+addends use S+A-P; the in-place Mach-O addend adds four for next-IP semantics.
+ARM64 supports unsigned absolute64 and explicit MachSpecific BRANCH26 on aligned
+B/BL instructions with zero branch addend. Assembler B/BL symbolic references map
+through their machine namespace to this relocation. ADR, conditional branches,
+page pairs and nonzero branch addends remain explicit unsupported forms.
+Absolute pointer addends, including the cross-object `payload+4` fixture, are
+written in-place; original object bytes are preserved on success/failure.
+
+The binary layout and numeric IDs follow the primary
+[LLVM Mach-O definitions](https://github.com/llvm/llvm-project/blob/llvmorg-21.1.0/llvm/include/llvm/BinaryFormat/MachO.h).
+Optional interoperability uses `tools/check_object_oracle.py --format macho` with
+LLVM inspection/ld64.lld cross-linking. Native macOS Intel/ARM64 CI system-links a
+C driver and two Whale objects, executes the cross-object call and dereferences
+the relocated data pointer; both must produce 42. Normal Cargo tests use
+independent field expectations and require no external assembler or linker.

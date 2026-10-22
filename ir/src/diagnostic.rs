@@ -168,6 +168,7 @@ impl ToDiagnostic for crate::lower_ast::LowerError {
             Self::UnknownVariable(..) => "ir.lower.unknown-variable",
             Self::TypeMismatch { .. } => "ir.lower.type-mismatch",
             Self::MissingInit(..) => "ir.lower.missing-init",
+            Self::Aggregate(_) => "ir.lower.aggregate",
             Self::UnsupportedStmt => "ir.lower.unsupported-stmt",
             Self::UnsupportedExpr => "ir.lower.unsupported-expr",
             Self::BreakOutsideLoop => "ir.lower.break-outside-loop",

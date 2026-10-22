@@ -1,6 +1,7 @@
 //! Bytes follow the architectural opcode/prefix/ModRM tables, independent of
 //! an external assembler or Whale's instruction tables.
 use amd64::AMD64;
+
 use assembler::{assemble, RelocKind};
 
 fn bytes(src: &str) -> Vec<u8> {

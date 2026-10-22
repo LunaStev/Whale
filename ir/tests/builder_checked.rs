@@ -90,6 +90,7 @@ fn function_and_storage_link_collisions_fail_atomically_in_both_orders() {
         g.link_name = Some(link.into());
         g
     }
+
     fn declare(
         m: &mut ModuleBuilder,
         name: &str,

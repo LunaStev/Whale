@@ -2,6 +2,7 @@ use ir::{
     allocation_align_for_target, layout_for_target, verify_module_for_target, DataLayout, Endian,
     IrLimits, Module, Type,
 };
+
 use target_spec::{MemoryModel, OutputKind, StorageLayout, TargetSpec};
 
 fn target() -> TargetSpec {
@@ -17,6 +18,7 @@ fn target() -> TargetSpec {
         memory: MemoryModel::Tracked,
     }
 }
+
 #[test]
 fn external_layout_controls_offsets_pointer_width_and_array_placement() {
     let t = target();
@@ -36,6 +38,7 @@ fn external_layout_controls_offsets_pointer_width_and_array_placement() {
         "built-in lookup must not silently accept unknown targets"
     );
 }
+
 #[test]
 fn invalid_or_mismatched_target_contracts_fail_before_layout() {
     let mut t = target();

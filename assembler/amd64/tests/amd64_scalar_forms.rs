@@ -1,6 +1,7 @@
 //! Golden bytes come from the AMD64 opcode/ModRM tables, independently of the
 //! implementation. Tests use the public assembler and need no external assembler.
 use amd64::AMD64;
+
 use assembler::{assemble, RelocKind};
 
 fn bytes(src: &str) -> Vec<u8> {

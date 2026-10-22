@@ -19,6 +19,39 @@ def cases(version):
         "parameters": [], "return_type": integer, "body": [{"Return": literal}],
     }]}
     base = {"format_version": version, "semantics_version": 1, "features": [], "program": program}
+    cast = copy.deepcopy(base)
+    cast["program"]["functions"][0]["body"] = [{"Return": {"Cast": {"value": literal, "ty": integer, "kind": "Checked"}}}]
+    yield "integer-cast", cast, version >= 5, version >= 5
+    for kind in ("Numeric", "Checked"):
+        tagged_cast = copy.deepcopy(cast)
+        tagged_cast["program"]["functions"][0]["body"][0]["Return"]["Cast"]["kind"] = {kind: None}
+        yield "integer-cast-unit-object-" + kind, tagged_cast, version >= 5, version >= 5
+    neg = copy.deepcopy(base)
+    neg["program"]["functions"][0]["body"] = [{"Return": {"Neg": literal}}]
+    yield "unary-negation", neg, version >= 5, version >= 5
+    aggregate = copy.deepcopy(base)
+    record = {"Struct": {"fields": [{"name": "first", "ty": integer}, {"name": "second", "ty": integer}]}}
+    array_type = {"Array": {"elem": integer, "len": 2}}
+    index = {"Index": {"base": {"Var": "a"}, "index": literal}}
+    zero = {"Lit": {"Int": {"bits": 8, "signed": False, "value": "0"}}}
+    index["Index"]["index"] = zero
+    selected = {"Field": {"base": {"Var": "s"}, "layout": record, "name": "first"}}
+    aggregate["program"]["functions"][0]["body"] = [
+        {"VarDecl": {"name": "s", "ty": record, "init": {"Struct": {"ty": record, "fields": [{"name": "first", "value": literal}, {"name": "second", "value": literal}]}}}},
+        {"VarDecl": {"name": "a", "ty": array_type, "init": {"Array": {"ty": array_type, "elements": [literal, literal]}}}},
+        {"Store": {"place": selected, "value": literal}},
+        {"Store": {"place": index, "value": selected}},
+        {"Return": {"Deref": {"PointerOffset": {"base": {"AddressOf": index}, "index": zero}}}},
+    ]
+    yield "aggregate-pointer-storage", aggregate, version >= 5, version >= 5
+    volatile = copy.deepcopy(base)
+    address = {"AddressOf": {"Var": "x"}}
+    volatile["program"]["functions"][0]["body"] = [
+        {"VarDecl": {"name": "x", "ty": integer, "init": None}},
+        {"VolatileStore": {"pointer": address, "value": literal}},
+        {"Return": {"VolatileLoad": address}},
+    ]
+    yield "volatile-scalar-storage", volatile, version >= 5, version >= 5
     yield "ordinary-null-link-name", base, True, True
     missing = copy.deepcopy(base); del missing["program"]["functions"][0]["link_name"]
     yield "missing-optional-link-name", missing, True, True

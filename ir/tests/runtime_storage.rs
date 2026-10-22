@@ -311,9 +311,10 @@ fn new_operations_have_exact_result_operands_and_are_gated_from_all_prior_format
     let m = fixture();
     let text = print_module(&m);
     for version in [3, 4, 5] {
-        assert!(parse_module(
-            &text.replace("format_version 7", &format!("format_version {version}"))
-        )
+        assert!(parse_module(&text.replace(
+            &format!("format_version {}", IR_FORMAT_VERSION),
+            &format!("format_version {version}")
+        ))
         .unwrap_err()
         .to_string()
         .contains("requires typed IR format 6"));
@@ -323,9 +324,10 @@ fn new_operations_have_exact_result_operands_and_are_gated_from_all_prior_format
             "%v0: ptr<u32> = alloca u32, align 4 %v1: bool = icmp ult ptr<u32> %v0, %v0 ret void",
         ] {
             let text = print_module(&module("void", body));
-            assert!(parse_module(
-                &text.replace("format_version 7", &format!("format_version {version}"))
-            )
+            assert!(parse_module(&text.replace(
+                &format!("format_version {}", IR_FORMAT_VERSION),
+                &format!("format_version {version}")
+            ))
             .is_err());
         }
     }

@@ -7,6 +7,7 @@ use std::{cell::Cell, collections::HashMap, ops::Deref};
 pub(super) struct IndexedFunction<'a> {
     function: &'a Function,
     types: HashMap<ValueId, &'a Type>,
+    constants: HashMap<ValueId, &'a crate::ConstValue>,
     pub(super) queries: Cell<usize>,
 }
 
@@ -16,7 +17,19 @@ impl<'a> IndexedFunction<'a> {
         for (value, ty) in &function.value_types {
             types.entry(*value).or_insert(ty);
         }
-        Self { function, types, queries: Cell::new(0) }
+        let mut constants = HashMap::new();
+        for ins in function.blocks.iter().flat_map(|b| &b.instructions) {
+            if let crate::Instruction::Const { dst, value, .. }
+            | crate::Instruction::ConstDecl { dst, value, .. } = ins
+            {
+                constants.entry(*dst).or_insert(value);
+            }
+        }
+        Self { function, types, constants, queries: Cell::new(0) }
+    }
+
+    pub(super) fn constant(&self, value: ValueId) -> Option<&'a crate::ConstValue> {
+        self.constants.get(&value).copied()
     }
 
     pub(super) fn value_type(&self, value: ValueId) -> Option<&'a Type> {

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Statically linked, out-of-tree code generation. This is a Rust API, not a dylib ABI.
 use diagnostic::{Context, Diagnostic, ToDiagnostic};
+
 use std::collections::{BTreeMap, BTreeSet};
+
 use target_spec::TargetSpec;
 
 pub enum Requirement<'a> {
@@ -41,9 +43,11 @@ impl CheckedModule<'_> {
     pub fn module(&self) -> &ir::Module {
         self.module
     }
+
     pub fn target(&self) -> &TargetSpec {
         self.target
     }
+
     pub fn runtimes(&self) -> &BTreeSet<String> {
         &self.runtimes
     }
@@ -51,15 +55,19 @@ impl CheckedModule<'_> {
 
 pub trait Backend: Send + Sync {
     fn target_id(&self) -> &str;
+
     fn supports_versions(&self, format: u32, semantics: u32) -> bool {
         format == ir::IR_FORMAT_VERSION && semantics == ir::SEMANTICS_VERSION
     }
+
     /// Must classify every requirement, including signatures and memory effects.
     fn support(&self, requirement: Requirement<'_>, target: &TargetSpec) -> Support;
+
     /// May return extra legalization or runtime-availability diagnostics.
     fn validate(&self, _module: &CheckedModule<'_>) -> Result<(), Vec<Diagnostic>> {
         Ok(())
     }
+
     fn emit(&self, module: &CheckedModule<'_>) -> Result<Vec<Artifact>, Vec<Diagnostic>>;
 }
 
@@ -222,6 +230,7 @@ fn artifact_error(message: &str) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct Probe {
@@ -230,16 +239,20 @@ mod tests {
         names: Vec<String>,
         emitted: AtomicBool,
     }
+
     impl Backend for Probe {
         fn target_id(&self) -> &str {
             "x86_64-whale-linux"
         }
+
         fn supports_versions(&self, _: u32, _: u32) -> bool {
             self.version_ok
         }
+
         fn support(&self, _: Requirement<'_>, _: &TargetSpec) -> Support {
             self.mode.clone()
         }
+
         fn emit(&self, _: &CheckedModule<'_>) -> Result<Vec<Artifact>, Vec<Diagnostic>> {
             self.emitted.store(true, Ordering::SeqCst);
             Ok(self
@@ -249,6 +262,7 @@ mod tests {
                 .collect())
         }
     }
+
     fn probe(mode: Support) -> Probe {
         Probe {
             version_ok: true,
@@ -257,6 +271,7 @@ mod tests {
             emitted: AtomicBool::new(false),
         }
     }
+
     fn module() -> ir::Module {
         let t = ir::Target::X86_64WhaleLinux;
         let mut builder = ir::ModuleBuilder::new(t.name(), t.data_layout());
@@ -266,6 +281,7 @@ mod tests {
         f.finish();
         builder.finish()
     }
+
     #[test]
     fn unsupported_and_version_mismatch_never_reach_emission() {
         let m = module();
@@ -279,6 +295,7 @@ mod tests {
         assert_eq!(errors[0].code, "backend.contract");
         assert!(!p.emitted.load(Ordering::SeqCst));
     }
+
     #[test]
     fn runtime_requirements_are_deduplicated_and_invalid_ids_fail() {
         let m = module();
@@ -290,6 +307,7 @@ mod tests {
         let p = probe(Support::Runtime(String::new()));
         assert!(check(&p, &m, &t, ir::IrLimits::default()).is_err());
     }
+
     #[test]
     fn artifact_names_and_nonempty_output_are_checked() {
         let m = module();
@@ -311,6 +329,7 @@ mod tests {
         let p = probe(Support::Expanded);
         assert_eq!(compile(&p, &m, &t, ir::IrLimits::default()).unwrap()[0].bytes, [42]);
     }
+
     fn compile_names(names: &[&str]) -> Result<Vec<Artifact>, Vec<Diagnostic>> {
         let m = module();
         let t = ir::Target::X86_64WhaleLinux.specification();

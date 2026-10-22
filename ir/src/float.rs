@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+pub mod arithmetic;
+
 /// Exact IEEE storage bits. Equality compares storage, including NaN payloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatBits {
@@ -31,6 +33,7 @@ impl FloatBits {
     /// any quiet or signaling NaN makes the operands unordered.
     pub fn compare(self, rhs: Self, predicate: &crate::FCmpPred) -> Option<bool> {
         use crate::FCmpPred::*;
+
         use std::cmp::Ordering;
         if self.width() != rhs.width() {
             return None;

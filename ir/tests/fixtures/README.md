@@ -16,7 +16,7 @@ calls; the cast case includes signed extension, integer-to-float and float
 truncation with memory loads/stores.
 
 `text_parser.rs` reads every retained output, verifies it and requires canonical
-print-parse-print equality, upgrading the header to format 7. These tests do not require a Wave checkout
+print-parse-print equality, upgrading the header to format 8. These tests do not require a Wave checkout
 or claim native execution. To regenerate with a matching Wave checkout and a
 Whale dependency containing this reader/printer, run from the Wave root:
 
@@ -25,8 +25,8 @@ cargo run -- --whale build /path/to/wave-control.wave --emit=ir
 cargo run -- --whale build /path/to/wave-casts.wave --emit=ir
 ```
 
-Legacy AST JSON formats 2/3 remain readable; canonical AST JSON is format 4.
-Canonical typed text IR is format 7 (the reader also accepts 3/4/5/6). Readers reject
+Legacy AST JSON formats 2/3/4 remain readable; canonical AST JSON is format 5.
+Canonical typed text IR is format 8 (the reader also accepts 3/4/5/6/7). Readers reject
 unsupported versions; fixtures are migrated explicitly when the format changes.
 
 ## Scalar integer execution oracle

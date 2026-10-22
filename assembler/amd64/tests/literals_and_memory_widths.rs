@@ -1,4 +1,5 @@
 use amd64::AMD64;
+
 use assembler::{assemble, RelocKind};
 
 fn bytes(source: &str) -> Vec<u8> {

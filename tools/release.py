@@ -96,6 +96,13 @@ def invoke(binary, args, cwd):
                           capture_output=True, timeout=20, check=False)
 
 
+def check_socket(binary, directory, enabled):
+    result = invoke(binary, ["ir", "lower", directory / "missing-feature-probe.json"], directory)
+    disabled = b"requires feature 'socket-cli'" in result.stderr
+    if result.returncode != (1 if enabled else 2) or disabled == enabled:
+        raise ValueError("manifest socket-cli availability disagrees with binary")
+
+
 def package(binary, output, version, target, source, socket=False, root=ROOT):
     stem = identity(version, target, source)
     cargo_version = tomllib.loads((root / "Cargo.toml").read_text())["package"]["version"]
@@ -108,6 +115,7 @@ def package(binary, output, version, target, source, socket=False, root=ROOT):
         result = invoke(binary, ["--version"], Path(directory))
         if result.returncode or result.stdout.strip() != f"whale {version}".encode():
             raise ValueError("binary version does not match requested version")
+        check_socket(binary, Path(directory), socket)
     manifest = {"format_version": 1, "version": version, "target": target,
                 "source_commit": source, "socket_cli": socket,
                 "binary": binary_name(target), "binary_sha256": digest(payload)}
@@ -215,10 +223,7 @@ def validate(archive, version, target, source, execute=True):
         result = invoke(binary, ["asm", "--amd64", assembly, "-o", obj], outside)
         if not result.returncode or obj.read_bytes() != before:
             raise ValueError("extracted CLI malformed-input preservation failed")
-        result = invoke(binary, ["ir", "lower", outside / "missing.json"], outside)
-        disabled = b"requires feature 'socket-cli'" in result.stderr
-        if not result.returncode or disabled == manifest["socket_cli"]:
-            raise ValueError("manifest socket-cli availability disagrees with binary")
+        check_socket(binary, outside, manifest["socket_cli"])
         return manifest
 
 

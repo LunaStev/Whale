@@ -26,6 +26,8 @@ impl DataLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ObjectFormat {
     ELF64,
+    COFF,
+    MachO64,
 }
 
 /// Machine identity is not a promise that an encoder exists for that machine.
@@ -50,9 +52,21 @@ impl ObjectTarget {
         Self { format: ObjectFormat::ELF64, machine, endian: Endian::Little, address_bits: 64 }
     }
 
+    pub const fn coff(machine: Machine) -> Self {
+        Self { format: ObjectFormat::COFF, machine, endian: Endian::Little, address_bits: 64 }
+    }
+
+    pub const fn macho64(machine: Machine) -> Self {
+        Self { format: ObjectFormat::MachO64, machine, endian: Endian::Little, address_bits: 64 }
+    }
+
     /// Serialization support is independent of static linker/reader support.
     pub fn validate(self) -> Result<(), TargetError> {
-        if self.endian == Endian::Little && self.address_bits == 64 {
+        if self.endian == Endian::Little
+            && self.address_bits == 64
+            && (self.format == ObjectFormat::ELF64
+                || matches!(self.machine, Machine::X86_64 | Machine::AArch64))
+        {
             Ok(())
         } else {
             Err(TargetError::UnsupportedObjectTarget(self))
@@ -71,6 +85,9 @@ impl ObjectTarget {
     /// Return an ELF machine code only for a supported ELF encoding contract.
     pub fn elf_machine(self) -> Result<u16, TargetError> {
         self.validate()?;
+        if self.format != ObjectFormat::ELF64 {
+            return Err(TargetError::UnsupportedObjectTarget(self));
+        }
         match self.machine {
             Machine::X86_64 => Ok(62), // EM_X86_64
             Machine::AArch64 => Ok(183),
@@ -167,7 +184,7 @@ impl fmt::Display for TargetError {
             ),
             Self::UnsupportedObjectTarget(target) => write!(
                 f,
-                "unsupported object target {target:?}; supported serialization contract: ELF64, little endian, 64-bit addresses; machines: X86_64, AArch64, RiscV64, LoongArch64"
+                "unsupported object target {target:?}; supported serialization contract: ELF64, little endian, 64-bit addresses; machines: X86_64, AArch64, RiscV64, LoongArch64; COFF/Mach-O: little-endian 64-bit X86_64/AArch64"
             ),
             Self::UnsupportedAmd64ObjectTarget(target) => write!(
                 f,

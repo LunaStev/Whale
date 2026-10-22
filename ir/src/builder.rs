@@ -44,8 +44,25 @@ pub struct ModuleBuilder {
     next_global: u32,
     #[cfg(feature = "socket")]
     source_work: usize,
+    #[cfg(feature = "socket")]
+    lower_storage_budget: crate::limits::Budget,
     source_shifts: std::collections::HashMap<crate::FunctionId, (usize, usize)>,
     source_mapped_functions: std::collections::HashSet<crate::FunctionId>,
+}
+
+#[cfg(feature = "socket")]
+impl FunctionBuilder<'_> {
+    pub(crate) fn charge_lower_type(&mut self, ty: &Type) -> Result<(), crate::LowerError> {
+        // Bound repeated aggregate-type cloning and emitted storage annotations.
+        // This is shared across all functions in one lowering invocation.
+        for _ in 0..16 {
+            self.mb
+                .lower_storage_budget
+                .ty(ty)
+                .map_err(|_| crate::LowerError::ResourceLimit(crate::AstLimitError::Expansion))?;
+        }
+        Ok(())
+    }
 }
 
 impl<'a> FunctionBuilder<'a> {
@@ -95,6 +112,12 @@ impl<'a> FunctionBuilder<'a> {
         self.ensure_insertable()?;
         self.ensure_values(&[src])?;
         Ok(self.not(ty, src))
+    }
+
+    pub fn neg(&mut self, ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Neg { dst, ty, src });
+        dst
     }
 
     pub fn not(&mut self, ty: Type, src: ValueId) -> ValueId {
@@ -183,6 +206,9 @@ impl ModuleBuilder {
             next_global: 0,
             #[cfg(feature = "socket")]
             source_work: crate::IrLimits::default().max_analysis_work,
+            #[cfg(feature = "socket")]
+            lower_storage_budget: crate::limits::Budget::new(crate::IrLimits::default())
+                .expect("valid defaults"),
             source_shifts: std::collections::HashMap::new(),
             source_mapped_functions: std::collections::HashSet::new(),
         }
@@ -574,7 +600,9 @@ impl ModuleBuilder {
                     pending.push(right);
                     pending.push(left);
                 },
-                Expr::BitNot(value) => pending.push(value),
+                Expr::Neg(value) | Expr::BitNot(value) | Expr::Cast { value, .. } => {
+                    pending.push(value)
+                },
                 _ => {},
             }
         }
@@ -949,6 +977,12 @@ impl<'a> FunctionBuilder<'a> {
         dst
     }
 
+    pub fn cast(&mut self, op: crate::CastOp, src_ty: Type, dst_ty: Type, src: ValueId) -> ValueId {
+        let dst = self.define_value(dst_ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Cast { dst, op, dst_ty, src_ty, src });
+        dst
+    }
+
     pub fn checked(&mut self, op: CheckedOp, ty: Type, lhs: ValueId, rhs: ValueId) -> ValueId {
         let dst_ty = Type::Tuple(vec![ty.clone(), Type::Bool]);
         let dst = self.define_value(dst_ty);
@@ -1135,6 +1169,31 @@ impl<'a> FunctionBuilder<'a> {
         let dst = self.define_value(Type::Ptr(Box::new(ty.clone())));
         self.cur_block_mut().instructions.push(Instruction::Alloca { dst, ty, align });
         dst
+    }
+
+    pub fn gep(&mut self, base_ptr: ValueId, indices: Vec<ValueId>, dst_ty: Type) -> ValueId {
+        let dst = self.define_value(dst_ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::Gep { dst, dst_ty, base_ptr, indices });
+        dst
+    }
+
+    pub fn memcpy(&mut self, dst: ValueId, src: ValueId, n: ValueId, align: u32) {
+        self.cur_block_mut().instructions.push(Instruction::Memcpy { dst, src, n, align });
+    }
+
+    pub fn volatile_load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {
+        let dst = self.define_value(ty.clone());
+        self.cur_block_mut().instructions.push(Instruction::VolatileLoad { dst, ty, ptr, align });
+        dst
+    }
+
+    pub fn volatile_store(&mut self, ty: Type, value: ValueId, ptr: ValueId, align: u32) {
+        self.cur_block_mut().instructions.push(Instruction::VolatileStore {
+            ty,
+            value,
+            ptr,
+            align,
+        });
     }
 
     pub fn load(&mut self, ty: Type, ptr: ValueId, align: u32) -> ValueId {

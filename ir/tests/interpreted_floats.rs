@@ -208,7 +208,7 @@ fn direct_and_indirect_float_calls_share_storage_without_rounding() {
 }
 
 #[test]
-fn invalid_bitcasts_and_float_numeric_operations_remain_rejected() {
+fn invalid_bitcasts_remain_rejected_and_float_arithmetic_executes() {
     for (src, dst, value) in [
         ("f16", "u32", "0x7e01"),
         ("bool", "f16", "true"),
@@ -219,8 +219,8 @@ fn invalid_bitcasts_and_float_numeric_operations_remain_rejected() {
     }
     let module =
         program(&["f32"], "f32", "%b0 \"entry\": %v1: f32 = fadd f32 %v0, %v0 ret f32 %v1");
-    assert!(matches!(
-        interpret(&module, FunctionId(0), &[ConstValue::F(FloatBits::F32(0))]),
-        Err(InterpreterError::UnsupportedInstruction { .. })
-    ));
+    assert_eq!(
+        interpret(&module, FunctionId(0), &[ConstValue::F(FloatBits::F32(0))]).unwrap().value,
+        Some(ConstValue::F(FloatBits::F32(0)))
+    );
 }

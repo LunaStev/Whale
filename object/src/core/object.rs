@@ -222,18 +222,18 @@ impl ObjectFile {
         &self,
         max_output_size: u64,
     ) -> Result<Vec<u8>, crate::ObjectError> {
-        crate::formats::elf::write_elf_checked(self, max_output_size)
+        match self.target.format {
+            ObjectFormat::ELF64 => crate::formats::elf::write_elf_checked(self, max_output_size),
+            ObjectFormat::MachO64 => crate::formats::macho::write(self, max_output_size),
+            ObjectFormat::COFF => crate::formats::coff::write(self, max_output_size),
+        }
     }
 
     pub fn write_with_limit(&self, max_output_size: u64) -> Result<Vec<u8>, String> {
-        match self.target.format {
-            ObjectFormat::ELF64 => crate::formats::elf::write_elf_with_limit(self, max_output_size),
-        }
+        self.write_diagnostic_with_limit(max_output_size).map_err(|e| e.to_string())
     }
 
     pub fn write(&self) -> Result<Vec<u8>, String> {
-        match self.target.format {
-            ObjectFormat::ELF64 => crate::formats::elf::write_elf(self),
-        }
+        self.write_with_limit(crate::formats::elf::DEFAULT_MAX_OUTPUT_SIZE)
     }
 }

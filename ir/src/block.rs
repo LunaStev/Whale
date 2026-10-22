@@ -2,7 +2,7 @@
 
 use crate::{BlockId, Instruction, Terminator};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BasicBlock {
     pub id: BlockId,
     pub name: String,

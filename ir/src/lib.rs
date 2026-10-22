@@ -10,6 +10,10 @@ mod constant;
 
 pub mod float;
 
+pub mod effects;
+
+pub mod pass;
+
 pub mod function;
 
 pub mod global_storage;
@@ -56,7 +60,7 @@ pub use function::*;
 pub use global_storage::*;
 
 /// Independently versioned printed typed IR and shared execution semantics.
-pub const IR_FORMAT_VERSION: u32 = 7;
+pub const IR_FORMAT_VERSION: u32 = 8;
 
 pub const SEMANTICS_VERSION: u32 = 1;
 

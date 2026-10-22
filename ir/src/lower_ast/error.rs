@@ -16,6 +16,7 @@ pub enum LowerError {
     UnknownVariable(String),
     TypeMismatch { expected: Type, got: Type },
     MissingInit(String),
+    Aggregate(String),
     UnsupportedStmt,
     UnsupportedExpr,
     BreakOutsideLoop,

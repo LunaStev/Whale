@@ -356,13 +356,11 @@ fn invalid_arguments_modules_and_unsupported_dead_instructions_fail_before_execu
         interpret(&m, FunctionId(7), &[ConstValue::I(0)]),
         Err(InterpreterError::Verification(_))
     ));
-    for (body, operation) in [
-        (
-            "%v8: f32 = const f32 0x00000000 %v9: f32 = fadd f32 %v8, %v8",
-            "non-integer arithmetic/comparison",
-        ),
-        ("%v8: f32 = const f32 0x00000000 %v9: f64 = fext f32 %v8 to f64", "unsupported cast"),
-    ] {
+    {
+        let (body, operation) = (
+            "%v8: ptr<array<u8, 1>> = alloca array<u8, 1>, align 1 %v9: array<u8, 1> = load array<u8, 1>, ptr<array<u8, 1>> %v8, align 1",
+            "load",
+        );
         let m = program(
             &[],
             "void",
@@ -407,7 +405,7 @@ fn verification_checks_other_functions_but_execution_restricts_only_the_selected
     let other = program(
         &[],
         "void",
-        "%b11 \"entry\": %v8: f32 = const f32 0x00000000 %v9: f32 = fadd f32 %v8, %v8 ret void",
+        "%b11 \"entry\": %v8: ptr<array<u8, 1>> = alloca array<u8, 1>, align 1 %v9: array<u8, 1> = load array<u8, 1>, ptr<array<u8, 1>> %v8, align 1 ret void",
     );
     let mut function = other.functions[0].clone();
     function.id = FunctionId(8);
@@ -420,10 +418,7 @@ fn verification_checks_other_functions_but_execution_restricts_only_the_selected
     assert_eq!(interpret(&m, FunctionId(7), &[]).unwrap().value, None);
     assert!(matches!(
         interpret(&m, FunctionId(8), &[]),
-        Err(InterpreterError::UnsupportedInstruction {
-            operation: "non-integer arithmetic/comparison",
-            ..
-        })
+        Err(InterpreterError::UnsupportedInstruction { operation: "load", .. })
     ));
     m.functions[1].blocks[0].terminator = None;
     assert!(matches!(interpret(&m, FunctionId(7), &[]), Err(InterpreterError::Verification(_))));

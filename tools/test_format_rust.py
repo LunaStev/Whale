@@ -1,6 +1,11 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import io
+import contextlib
+import tempfile
+import subprocess
+from unittest.mock import patch
 
 
 MODULE_SPEC = importlib.util.spec_from_file_location(
@@ -51,6 +56,28 @@ class ItemSpacingTests(unittest.TestCase):
             FORMAT_RUST.add_item_spacing(source),
             "struct State {}\n\nfun first() {}\n\nexport(c) fun second() {}\n",
         )
+
+    def test_check_mode_reports_tracked_rust_and_wave_files_without_rewriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixtures = {"fixture.rs": "fn a() {}\nfn b() {}\n", "fixture.wave": "fun a() {}\nfun b() {}\n"}
+            for name, content in fixtures.items():
+                (root / name).write_text(content)
+            inventory = subprocess.CompletedProcess([], 0, b"fixture.rs\0fixture.wave\0")
+            with (patch.object(FORMAT_RUST, "ROOT", root),
+                  patch.object(FORMAT_RUST, "run_rustfmt") as rustfmt,
+                  patch.object(FORMAT_RUST.subprocess, "run", return_value=inventory),
+                  patch.object(FORMAT_RUST.sys, "argv", ["format-rust.py", "--check"]),
+                  contextlib.redirect_stdout(io.StringIO()) as output,
+                  contextlib.redirect_stderr(io.StringIO())):
+                self.assertEqual(FORMAT_RUST.main(), 1)
+                self.assertIn("fixture.rs", output.getvalue())
+                self.assertIn("fixture.wave", output.getvalue())
+                for name, content in fixtures.items():
+                    self.assertEqual((root / name).read_text(), content)
+                    (root / name).write_text(FORMAT_RUST.add_item_spacing(content))
+                self.assertEqual(FORMAT_RUST.main(), 0)
+                rustfmt.assert_called_with(True)
 
     def test_does_not_treat_rust_variables_named_fun_as_items(self):
         source = "fn test() {\nlet fun = value;\nfun.blocks.push(value);\n}\n"

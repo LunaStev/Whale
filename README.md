@@ -35,9 +35,9 @@ native compilation pipeline are still being developed.
 
 | Component | Available today | Status |
 | --- | --- | --- |
-| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols and ELF64 relocations | Available; new ISAs are initial subsets |
+| Assembler | AMD64 plus initial AArch64, RV64I and LoongArch64 integer subsets; sections, symbols, ELF64 and initial AMD64/AArch64 COFF and Mach-O output | Available; new ISAs are initial subsets |
 | IR | Typed IR construction, text parsing/printing, bounded verification, integer/control-flow, tracked stack-memory and bounded Whale-call interpretation, and scalar AST JSON lowering | Experimental |
-| Object library | Object model, bounded ELF64 relocatable object reading and serialization | Available |
+| Object library | Object model, bounded ELF64 reading and ELF64/COFF/Mach-O relocatable serialization | Available |
 | Object CLI | Wrap raw input bytes in an ELF64 object with a `.text` section | Limited |
 | Reverse | ELF inspection plus opt-in Wave AMD64 disassembly and CFG/xrefs | Experimental |
 | Linker | Static Linux AMD64 ELF executables from objects and ordinary archives, checked relocations and explicit entry | Initial subset |
@@ -62,6 +62,12 @@ The [object input API](object/README.md) reads the supported bounded AMD64 ELF64
 relocatable subset and preserves section, symbol and relocation semantics.
 [Shared diagnostic conversions](diagnostic/README.md) retain machine-readable
 phase/category and available source/object context alongside typed component errors.
+
+[COFF object output](assembler/README.md#coff-leaf-objects) supports AMD64 and
+AArch64 with `whale asm --arch ID --format coff source.s -o leaf.obj`.
+The bridge is the `asmobj` crate under `assembler/asmobj`. Output has a checked
+256 MiB default file budget, sparse BSS and explicit format-specific relocations;
+Windows native CI gates cross-object calls/data references using the system linker.
 
 ELF64 object output supports AMD64, AArch64, RV64I and LoongArch64 little-endian
 identities. The bounded reader, static linker and reverse tools retain their AMD64
@@ -206,7 +212,7 @@ It executes direct and signature-checked indirect Whale calls with integer/Bool/
 data-pointer and function-pointer arguments/results, using one shared fuel and
 memory arena. Function pointers retain their full signature and calling convention
 through mov/phi/select, storage and complete or split byte copies. It rejects
-floating arithmetic/numerical conversions, external/SysV execution and general aggregate values in every
+external/SysV execution and general aggregate values in every
 block of the entry and reachable callees, including unreachable blocks. Native
 code generation remains unfinished. Legacy `undef` is a verification error. See the Rust `interpret_with_options` API for
 adjustable verification limits and trap IR identities.
@@ -217,9 +223,9 @@ adjustable verification limits and trap IR identities.
 Constants, arguments/returns, mov/phi/select, stack/global loads and stores, and
 byte copies preserve every bit, including signaling/quiet NaN payloads and
 signed zero. These operations perform no host floating-point conversion.
-Equal-width integer/float `bitcast` reinterprets those bits; `fext`, `ftrunc` and
-numeric integer/float conversions remain unsupported during execution. Bitcasts
-cannot recover pointer or function-pointer authority from numerical bits.
+Equal-width integer/float `bitcast` reinterprets those bits. Numeric `fext`,
+`ftrunc`, signed/unsigned integer-to-float and float-to-integer conversions execute
+with the [defined rounding and range traps](ir/CASTS.md). Bitcasts cannot recover pointer or function-pointer authority from numerical bits.
 
 ```sh
 cargo run --locked -- ir run ir/tests/fixtures/float-storage-v7.wir --function @f0 --arg 0x7c01
@@ -232,6 +238,9 @@ budgets as integer storage. A typed field load checks its value bytes without
 requiring surrounding aggregate padding to be initialized. Plain storage and
 copies never canonicalize a NaN; arithmetic and width-changing conversions have
 separate semantics.
+
+Scalar floating arithmetic and unary negation execute at their declared precision; see
+[the rounding, remainder and NaN contract](ir/FLOATING.md).
 
 ### Compare floating values
 
@@ -423,22 +432,22 @@ cargo run --release --locked --features socket-cli -- ir lower program.json -o p
 
 The command lowers and verifies the module, then writes textual IR to
 `program.wir`. Omit `-o program.wir` to print it to standard output. The input
-schema is documented in [AST JSON Schema](ir/schema/ast-v4.schema.json) and
+schema is documented in [AST JSON Schema](ir/schema/ast-v5.schema.json) and
 [the frontend AST types](ir/src/lower_ast/frontend.rs).
 
-The envelope requires `format_version: 4` (legacy formats 2 and 3 are also accepted), `semantics_version: 1`, and
+The envelope requires `format_version: 5` (legacy formats 2, 3 and 4 are also accepted), `semantics_version: 1`, and
 `features: []`. Unversioned inputs, unknown fields/versions/features, duplicate
 JSON keys, and trailing JSON are rejected even with `--no-verify`. The raw JSON
 entry point is `ir::lower_ast::interchange::decode`; its default input limit is
 8 MiB, configurable with `decode_with_limit`. Integers use decimal strings;
 f16/f32/f64 values use `0x` followed by exactly 4/8/16 hexadecimal storage digits.
 For example, `{"Float":{"bits":32,"value":"0x80000000"}}` preserves negative zero.
-Migrate format 1 inputs by setting `format_version` to 4, adding a `declarations`
+Migrate format 1 inputs by setting `format_version` to 5, adding a `declarations`
 array to `program`, and adding `convention` and `linkage` to every definition.
 Internal functions use `"Whale"` and `"Internal"`; external functions must supply
 a nonempty `link_name`. Missing versions and format 1 inputs are rejected.
 Integers and floats retain their exact string encoding. AST and printed typed IR have independent format versions and a shared
-semantics version; printed IR includes both version fields. Typed text IR formats 3, 4, 5, 6 and 7
+semantics version; printed IR includes both version fields. Typed text IR formats 3, 4, 5, 6, 7 and 8
 can be read and verified with `ir::parse_module`.
 
 The AST supports scalar literals, variables/constants, arithmetic, comparisons,
@@ -467,7 +476,7 @@ For a complete invalid input, save the following as `invalid.json`:
 cargo run --locked --features socket-cli -- ir lower invalid.json -o rejected.wir
 ```
 
-This exits nonzero with `unsupported AST format_version 99; expected 4`. It does
+This exits nonzero with `unsupported AST format_version 99; expected 5`. It does
 not create `rejected.wir`; an existing output is preserved. Lowering/type errors
 likewise fail before output publication.
 
@@ -509,8 +518,8 @@ preserve locations for stores, traps, terminators and unused constants. AST 4
 IR identities. Runtime errors expose the underlying cause through `root_cause()`
 and structured source/trace details through `diagnostic()`.
 
-The printer emits typed IR format 7 with semantics version 1. AST JSON writes
-format 4. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
+The printer emits typed IR format 8 with semantics version 1. AST JSON writes
+format 5. Definitions and references use explicit `@fN`, `@gN`, `%vN` and `%bN`
 identities; names are quoted annotations, and each function records its entry
 block. Name/string fields escape quotes, backslashes, control characters and
 Unicode line separators. See the [identity fixture](ir/tests/fixtures/text-identities-v3.wir)
@@ -530,13 +539,13 @@ cargo run --locked -- ir verify ir/tests/fixtures/calls-v3.wir
 cargo run --locked -- ir print ir/tests/fixtures/calls-v3.wir -o canonical.wir
 ```
 
-`ir::parse_module` reads **and verifies** formats 3, 4, 5, 6 and 7. Print-parse-print
+`ir::parse_module` reads **and verifies** formats 3, 4, 5, 6, 7 and 8. Print-parse-print
 preserves explicit scoped IDs, quoted names, entry and block order, types,
 exact integer/float payloads, constant-expression trees, alignment, signatures
 and external link names. Whitespace and `//` comments are canonicalized. It
 accepts current printer instruction forms; format 4 adds `uninit`, and format 5 adds preserved constant bitwise,
 division/remainder, shift and lazy logical operators. Formats 3/4 without `undef`
-remain readable and canonicalize to format 7. Extended constant syntax requires
+remain readable and canonicalize to format 8. Extended constant syntax requires
 format 5. Format 6 adds explicit storage, global addresses, lifetime_end and same-allocation
 pointer ordering/differences; extended frontend operators require AST format 3. Regenerate old
 `undef` lowering from its AST rather than replacing unspecified values with zero. Unknown versions, fields,
@@ -582,7 +591,7 @@ payloads or names. The default remains 256 MiB; `write_with_limit` overrides it.
 
 [Wave control flow](ir/tests/fixtures/wave-control.wave) and
 [casts](ir/tests/fixtures/wave-casts.wave) have retained format 3 outputs from
-Wave's current typed HIR adapter, tested for canonical print-parse-print equality (format 7 output).
+Wave's current typed HIR adapter, tested for canonical print-parse-print equality (legacy format 7 inputs, canonical format 8 output).
 Text parsing does not provide IR execution or native code generation. Format 2
 printed text requires explicit migration; it is not silently accepted. New
 syntax or semantics requires an appropriate version change, with unknown
@@ -861,3 +870,11 @@ Wave checkout; ordinary Cargo never downloads or bootstraps a compiler. See the
 module guide for byte, encoding, unsupported-instruction and build contracts.
 The supported decoding scope is integer/scalar-SSE AMD64 long mode, not complete
 x86 coverage or recovery of original source code.
+
+Numeric cast legality, rounding and trap rules: [IR casts](ir/CASTS.md).
+
+Typed struct, pointer and fixed-array frontend forms: [storage lowering](ir/FRONTEND-STORAGE.md).
+
+Observable traps, volatile memory and verified pass APIs: [effects and passes](ir/EFFECTS-AND-PASSES.md).
+
+AMD64/AArch64 Mach-O output: [object scope and relocation mappings](assembler/README.md#macho-leaf-objects).

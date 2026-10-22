@@ -4,7 +4,7 @@ use super::TrapReason;
 
 use crate::{BinOp, CastOp, CheckedOp, ConstValue, Type};
 
-pub(super) fn shape(ty: &Type) -> Option<(u32, bool)> {
+pub(crate) fn shape(ty: &Type) -> Option<(u32, bool)> {
     use Type::*;
     Some(match ty {
         I1 => (1, true),
@@ -31,7 +31,7 @@ fn mask(bits: u32) -> u128 {
     }
 }
 
-pub(super) fn raw(value: &ConstValue, bits: u32) -> u128 {
+pub(crate) fn raw(value: &ConstValue, bits: u32) -> u128 {
     (match value {
         ConstValue::I(v) => *v as u128,
         ConstValue::U(v) => *v,
@@ -48,7 +48,7 @@ fn signed(value: u128, bits: u32) -> i128 {
     }
 }
 
-pub(super) fn pack(ty: &Type, value: u128) -> ConstValue {
+pub(crate) fn pack(ty: &Type, value: u128) -> ConstValue {
     let (bits, is_signed) = shape(ty).expect("integer subset checked");
     let value = value & mask(bits);
     if is_signed {
@@ -152,4 +152,22 @@ pub(super) fn compare(
         Sgt => signed(a, bits) > signed(b, bits),
         Sge => signed(a, bits) >= signed(b, bits),
     }
+}
+
+/// Range checks use mathematical sign/magnitude, never an overflowing i128 cast.
+pub(super) fn checked_cast(
+    src: &Type,
+    dst: &Type,
+    value: &ConstValue,
+) -> Result<ConstValue, TrapReason> {
+    let (sb, ss) = shape(src).expect("verified integer source");
+    let (db, ds) = shape(dst).expect("verified integer destination");
+    let raw = raw(value, sb);
+    let negative = ss && signed(raw, sb) < 0;
+    let magnitude = if negative { signed(raw, sb).unsigned_abs() } else { raw };
+    let maximum = if ds { (1u128 << (db - 1)) - u128::from(!negative) } else { mask(db) };
+    if (negative && !ds) || magnitude > maximum {
+        return Err(TrapReason::InvalidConversion);
+    }
+    Ok(pack(dst, if negative { 0u128.wrapping_sub(magnitude) } else { magnitude }))
 }

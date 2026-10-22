@@ -2,7 +2,7 @@
 //! A bounded oracle for verified scalar/control-flow IR.
 //! Tracked stack memory and bounded direct/indirect Whale calls are supported.
 
-mod integer;
+pub(crate) mod integer;
 
 mod scalar;
 
@@ -128,6 +128,7 @@ impl fmt::Display for RuntimeDiagnostic {
 pub enum TrapReason {
     DivisionByZero,
     RemainderByZero,
+    InvalidConversion,
     Explicit(String),
     Memory(MemoryTrap),
     NullFunction,
@@ -139,6 +140,7 @@ impl fmt::Display for TrapReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DivisionByZero => f.write_str("division by zero"),
+            Self::InvalidConversion => f.write_str("numeric conversion is out of range"),
             Self::RemainderByZero => f.write_str("remainder by zero"),
             Self::Explicit(reason) => write!(f, "{reason:?}"),
             Self::Memory(reason) => reason.fmt(f),
@@ -469,6 +471,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | Undef { dst, .. }
         | Mov { dst, .. }
         | Bin { dst, .. }
+        | Neg { dst, .. }
         | Not { dst, .. }
         | Cmp { dst, .. }
         | ICmp { dst, .. }
@@ -479,6 +482,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         | Extract { dst, .. }
         | Checked { dst, .. }
         | Alloca { dst, .. }
+        | VolatileLoad { dst, .. }
         | Load { dst, .. }
         | Gep { dst, .. }
         | NullFunction { dst, .. }
@@ -488,6 +492,7 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
         Call { dst, .. } => *dst,
         LifetimeEnd { .. }
         | Uninit { .. }
+        | VolatileStore { .. }
         | Store { .. }
         | Memcpy { .. }
         | Memset { .. }
@@ -498,6 +503,8 @@ fn destination(inst: &Instruction) -> Option<ValueId> {
 fn supported(inst: &Instruction) -> Result<(), &'static str> {
     use Instruction::*;
     let unsupported = match inst {
+        Neg { ty, .. } if integer::shape(ty).is_some() || scalar::float_type(ty) => return Ok(()),
+        Bin { ty, .. } if scalar::float_type(ty) => return Ok(()),
         ConstDecl { .. } => return Ok(()),
         Const { ty, .. } if scalar_type(ty) => return Ok(()),
         Mov { ty, .. } | Phi { ty, .. } | Select { ty, .. } if value_type(ty) => return Ok(()),
@@ -511,12 +518,22 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         },
         Cmp { ty, .. } | FCmp { ty, .. } if scalar::float_type(ty) => return Ok(()),
         Cast { op, src_ty, dst_ty, .. }
-            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc)
+            if matches!(op, CastOp::ZExt | CastOp::SExt | CastOp::Trunc | CastOp::CheckedInt)
                 && (*src_ty == Type::Bool || integer::shape(src_ty).is_some())
                 && integer::shape(dst_ty).is_some() =>
         {
             return Ok(())
         },
+        Cast {
+            op:
+                CastOp::FExt
+                | CastOp::FTrunc
+                | CastOp::IToF_S
+                | CastOp::IToF_U
+                | CastOp::FToI_S
+                | CastOp::FToI_U,
+            ..
+        } => return Ok(()),
         Cast { op: CastOp::Bitcast, src_ty, dst_ty, .. }
             if (integer::shape(src_ty).is_some() || scalar::float_type(src_ty))
                 && (integer::shape(dst_ty).is_some() || scalar::float_type(dst_ty)) =>
@@ -525,7 +542,11 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         },
         Extract { dst_ty, .. } if scalar_type(dst_ty) => return Ok(()),
         Alloca { ty, .. } | Uninit { ty, .. } if allocation_type(ty) => return Ok(()),
-        Load { ty, .. } | Store { ty, .. } if value_type(ty) => return Ok(()),
+        VolatileLoad { ty, .. } | Load { ty, .. } | VolatileStore { ty, .. } | Store { ty, .. }
+            if value_type(ty) =>
+        {
+            return Ok(())
+        },
         Gep { .. } => return Ok(()),
         Cast { op: CastOp::Bitcast, src_ty: Type::Ptr(_), dst_ty: Type::Ptr(_), .. }
         | Cast { op: CastOp::IntToPtr | CastOp::PtrToInt, .. } => return Ok(()),
@@ -538,13 +559,17 @@ fn supported(inst: &Instruction) -> Result<(), &'static str> {
         Undef { .. } => "undef",
         Const { .. } => "non-scalar constant",
         Mov { .. } | Phi { .. } | Select { .. } | Extract { .. } => "non-scalar value",
-        Bin { .. } | Not { .. } | Checked { .. } | Cmp { .. } | ICmp { .. } | FCmp { .. } => {
-            "non-integer arithmetic/comparison"
-        },
+        Neg { .. }
+        | Bin { .. }
+        | Not { .. }
+        | Checked { .. }
+        | Cmp { .. }
+        | ICmp { .. }
+        | FCmp { .. } => "non-integer arithmetic/comparison",
         Cast { .. } => "unsupported cast",
         Alloca { .. } => "alloca",
-        Load { .. } => "load",
-        Store { .. } => "store",
+        VolatileLoad { .. } | Load { .. } => "load",
+        VolatileStore { .. } | Store { .. } => "store",
         Uninit { .. } => "uninit",
         NullFunction { .. } | FunctionAddr { .. } | Call { .. } => return Ok(()),
     };
@@ -1048,7 +1073,8 @@ fn run_inner<'module>(
                             intern_signature(&mut signatures, signature),
                         );
                     },
-                    Instruction::Load { ty: Type::FnPtr(signature), .. } => {
+                    Instruction::VolatileLoad { ty: Type::FnPtr(signature), .. }
+                    | Instruction::Load { ty: Type::FnPtr(signature), .. } => {
                         instruction_signatures.insert(
                             (block.id, index),
                             intern_signature(&mut signatures, signature),
@@ -1407,6 +1433,26 @@ fn run_inner<'module>(
                         Value::Scalar(value.clone())
                     },
                     Instruction::Mov { src, .. } => get(src).clone(),
+                    Instruction::Bin { op, lhs, rhs, .. }
+                        if matches!(scalar(lhs), ConstValue::F(_)) =>
+                    {
+                        let (ConstValue::F(a), ConstValue::F(b)) = (scalar(lhs), scalar(rhs))
+                        else {
+                            unreachable!()
+                        };
+                        Value::Scalar(ConstValue::F(
+                            crate::float::arithmetic::arithmetic(op, *a, *b).unwrap(),
+                        ))
+                    },
+                    Instruction::Neg { ty, src, .. } => Value::Scalar(match scalar(src) {
+                        ConstValue::F(value) => {
+                            ConstValue::F(crate::float::arithmetic::negate(*value))
+                        },
+                        value => integer::pack(
+                            ty,
+                            0u128.wrapping_sub(integer::raw(value, integer::shape(ty).unwrap().0)),
+                        ),
+                    }),
                     Instruction::Bin { op, ty, lhs, rhs, .. } => Value::Scalar(
                         integer::bin(op, ty, scalar(lhs), scalar(rhs)).map_err(|reason| {
                             InterpreterError::Trap(InterpreterTrap { site: at, reason, steps })
@@ -1452,6 +1498,32 @@ fn run_inner<'module>(
                         get(if get(cond).boolean() { on_true } else { on_false }).clone()
                     },
                     Instruction::Cast { op, src_ty, dst_ty, src, .. } => match op {
+                        CastOp::FExt
+                        | CastOp::FTrunc
+                        | CastOp::IToF_S
+                        | CastOp::IToF_U
+                        | CastOp::FToI_S
+                        | CastOp::FToI_U => Value::Scalar(
+                            crate::float::arithmetic::convert(op, src_ty, dst_ty, scalar(src))
+                                .ok_or({
+                                    InterpreterError::Trap(InterpreterTrap {
+                                        site: at,
+                                        reason: TrapReason::InvalidConversion,
+                                        steps,
+                                    })
+                                })?,
+                        ),
+                        CastOp::CheckedInt => Value::Scalar(
+                            integer::checked_cast(src_ty, dst_ty, scalar(src)).map_err(
+                                |reason| {
+                                    InterpreterError::Trap(InterpreterTrap {
+                                        site: at,
+                                        reason,
+                                        steps,
+                                    })
+                                },
+                            )?,
+                        ),
                         CastOp::IntToPtr => {
                             Value::Pointer(memory::Pointer::raw(
                                 integer::raw(scalar(src), 64) as u64
@@ -1475,7 +1547,8 @@ fn run_inner<'module>(
                                 .map_err(|e| memory_failure(e, at, steps))?,
                         )
                     },
-                    Instruction::Load { ty, ptr, align, .. } => memory
+                    Instruction::VolatileLoad { ty, ptr, align, .. }
+                    | Instruction::Load { ty, ptr, align, .. } => memory
                         .load_with_signature(
                             get(ptr).pointer(),
                             ty,
@@ -1483,7 +1556,8 @@ fn run_inner<'module>(
                             prepared[&function].signatures.get(&(current, index)),
                         )
                         .map_err(|e| memory_failure(e, at, steps))?,
-                    Instruction::Store { ty, value, ptr, align } => {
+                    Instruction::VolatileStore { ty, value, ptr, align }
+                    | Instruction::Store { ty, value, ptr, align } => {
                         memory
                             .store(get(ptr).pointer(), ty, get(value), *align)
                             .map_err(|e| memory_failure(e, at, steps))?;

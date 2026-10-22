@@ -16,11 +16,11 @@ python tools/release.py validate --directory dist --version 0.1.0 --source FULL_
 ```
 
 Use the native `.exe` on Windows. Omit `--socket-cli` for a default-feature
-binary. The manifest's feature declaration is checked against the extracted
-binary. Archives include exactly the binary, LICENSE, README.md and
+binary. The manifest's feature declaration is checked before archive
+publication and again against the extracted binary. Archives include exactly the binary, LICENSE, README.md and
 manifest.json under a versioned root directory. The manifest records version,
 host target, source SHA, feature availability and binary SHA256. Packaging
-checks executable header architecture and actual CLI version; missing binaries,
+checks executable header architecture, actual CLI version and socket-cli availability; missing binaries,
 version/target mismatches and existing output names fail. Identical inputs give
 identical archive bytes with normalized metadata, entry order and timestamps.
 The caller must provide a binary built from the stated commit; the workflow

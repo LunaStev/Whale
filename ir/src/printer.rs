@@ -177,6 +177,7 @@ fn print_instr(i: &Instruction) -> String {
         Bin { dst, op, ty, lhs, rhs } => {
             format!("{dst}: {ty} = {} {ty} {lhs}, {rhs}", fmt_binop(op))
         },
+        Neg { dst, ty, src } => format!("{dst}: {ty} = neg {ty} {src}"),
         Not { dst, ty, src } => format!("{dst}: {ty} = not {ty} {src}"),
 
         Cmp { dst, op, ty, lhs, rhs } => {
@@ -219,6 +220,12 @@ fn print_instr(i: &Instruction) -> String {
 
         Alloca { dst, ty, align } => format!("{dst}: ptr<{ty}> = alloca {ty}, align {align}"),
 
+        VolatileLoad { dst, ty, ptr, align } => {
+            format!("{dst}: {ty} = volatile_load {ty}, ptr<{ty}> {ptr}, align {align}")
+        },
+        VolatileStore { ty, value, ptr, align } => {
+            format!("volatile_store {ty} {value}, ptr<{ty}> {ptr}, align {align}")
+        },
         Load { dst, ty, ptr, align } => {
             format!("{dst}: {ty} = load {ty}, ptr<{ty}> {ptr}, align {align}")
         },
@@ -278,6 +285,7 @@ fn print_instr(i: &Instruction) -> String {
 pub fn print_const_expr(expr: &crate::ConstExpr) -> String {
     use crate::{ConstBinaryOp as B, ConstCompareOp as C, ConstExprKind as K, ConstRef};
     match &expr.kind {
+        K::Neg(value) => format!("neg({})", print_const_expr(value)),
         K::Not(value) => format!("bit_not({})", print_const_expr(value)),
         K::Literal(value) => format!("{} {}", expr.ty, fmt_const(value)),
         K::Reference(reference) => match reference {
@@ -425,6 +433,7 @@ fn fmt_fcmp(p: &crate::FCmpPred) -> &'static str {
 fn fmt_cast(op: &crate::CastOp) -> &'static str {
     use crate::CastOp::*;
     match op {
+        CheckedInt => "checked_int",
         ZExt => "zext",
         SExt => "sext",
         Trunc => "trunc",

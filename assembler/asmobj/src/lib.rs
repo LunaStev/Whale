@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MPL-2.0
-//! Bridge from common assembler output to checked, target-identified ELF objects.
+//! Bridge from common assembler output to checked, target-identified ELF/COFF/Mach-O objects.
 use assembler::AssemblerOutput;
 
 use std::collections::{HashMap, HashSet};
@@ -78,7 +78,35 @@ pub fn to_object(out: &AssemblerOutput, target: ObjectTarget) -> Result<ObjectFi
                     if machine != target.machine {
                         return Err("relocation namespace does not match object target".into());
                     }
-                    ObjectRelocKind::TargetSpecific { machine, code }
+                    match target.format {
+                        object::ObjectFormat::ELF64 => {
+                            ObjectRelocKind::TargetSpecific { machine, code }
+                        },
+                        object::ObjectFormat::MachO64
+                            if machine == object::Machine::AArch64 && matches!(code, 282 | 283) =>
+                        {
+                            ObjectRelocKind::MachSpecific { machine, code: 2 }
+                        },
+                        object::ObjectFormat::COFF if machine == object::Machine::AArch64 => {
+                            let code = match code {
+                                274 => 5,
+                                280 => 15,
+                                282 | 283 => 3,
+                                _ => {
+                                    return Err(
+                                        "unsupported AArch64 COFF instruction relocation".into()
+                                    )
+                                },
+                            };
+                            ObjectRelocKind::CoffSpecific { machine, code }
+                        },
+                        _ => {
+                            return Err(
+                                "assembler relocation namespace does not support this format"
+                                    .into(),
+                            )
+                        },
+                    }
                 },
                 assembler::assembler::RelocKind::Absolute64 => ObjectRelocKind::Absolute64,
                 assembler::assembler::RelocKind::Absolute32 => ObjectRelocKind::Absolute32,
@@ -86,6 +114,11 @@ pub fn to_object(out: &AssemblerOutput, target: ObjectTarget) -> Result<ObjectFi
                     ObjectRelocKind::SignedAbsolute32
                 },
                 assembler::assembler::RelocKind::Relative32 => ObjectRelocKind::Relative32,
+                assembler::assembler::RelocKind::Branch32
+                    if target.format == object::ObjectFormat::MachO64 =>
+                {
+                    ObjectRelocKind::MachSpecific { machine: target.machine, code: 2 }
+                },
                 assembler::assembler::RelocKind::Branch32 => {
                     if is_undefined_symbol {
                         ObjectRelocKind::PLT32

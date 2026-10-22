@@ -35,6 +35,7 @@ impl Default for AstLimits {
 pub enum AstLimitError {
     Source,
     SourceWork,
+    Expansion,
     Depth,
     Nodes,
     Strings,
@@ -45,6 +46,7 @@ impl std::fmt::Display for AstLimitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Source => "invalid source annotation or duplicate original node identity",
+            Self::Expansion => "AST storage expansion limit exceeded",
             Self::SourceWork => "AST source mapping work limit exceeded",
             Self::Depth => "AST nesting limit exceeded",
             Self::Nodes => "AST node limit exceeded",
@@ -202,13 +204,61 @@ fn inspect_program_details(
                 TypeRef::Float { bits } => i.wire_numbers &= matches!(bits, 16 | 32 | 64),
                 TypeRef::Ptr(t) | TypeRef::Array { elem: t, .. } => i.push(Node::Type(t), next)?,
                 TypeRef::FnPtr(s) => i.push(Node::Signature(s), next)?,
+                TypeRef::Struct { fields } => {
+                    i.extended_ops |= 4;
+                    for f in fields {
+                        i.count()?;
+                        i.string(&f.name)?;
+                        i.push(Node::Type(&f.ty), next)?;
+                    }
+                },
                 TypeRef::Opaque(s) => i.string(s)?,
                 _ => {},
             },
             Node::Expr(e) => match e {
+                Expr::Struct { ty, fields } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Type(ty), next)?;
+                    for f in fields {
+                        i.count()?;
+                        i.string(&f.name)?;
+                        i.push(Node::Expr(&f.value), next)?;
+                    }
+                },
+                Expr::Array { ty, elements } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Type(ty), next)?;
+                    for e in elements {
+                        i.push(Node::Expr(e), next)?;
+                    }
+                },
+                Expr::Field { base, layout, name } => {
+                    i.extended_ops |= 4;
+                    i.string(name)?;
+                    i.push(Node::Expr(base), next)?;
+                    i.push(Node::Type(layout), next)?;
+                },
+                Expr::Index { base, index } | Expr::PointerOffset { base, index } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(base), next)?;
+                    i.push(Node::Expr(index), next)?;
+                },
+                Expr::VolatileLoad(value) | Expr::Deref(value) | Expr::AddressOf(value) => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(value), next)?;
+                },
                 Expr::Located { annotation, expression } => {
                     i.source(annotation)?;
                     i.push(Node::Expr(expression), next)?;
+                },
+                Expr::Neg(value) => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(value), next)?;
+                },
+                Expr::Cast { value, ty, .. } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(value), next)?;
+                    i.push(Node::Type(ty), next)?;
                 },
                 Expr::BitNot(value) => {
                     i.extended_ops |= 1;
@@ -256,6 +306,11 @@ fn inspect_program_details(
                 Stmt::Located { annotation, statement } => {
                     i.source(annotation)?;
                     i.push(Node::Stmt(statement), next)?;
+                },
+                Stmt::VolatileStore { pointer: place, value } | Stmt::Store { place, value } => {
+                    i.extended_ops |= 4;
+                    i.push(Node::Expr(place), next)?;
+                    i.push(Node::Expr(value), next)?;
                 },
                 Stmt::Return(e) => {
                     if let Some(e) = e {
@@ -308,6 +363,8 @@ enum Owned {
 enum Disposal {
     One(Owned),
     Types(std::vec::IntoIter<TypeRef>),
+    Fields(std::vec::IntoIter<StructField>),
+    Initializers(std::vec::IntoIter<FieldInit>),
     Exprs(std::vec::IntoIter<Expr>),
     Stmts(std::vec::IntoIter<Stmt>),
 }
@@ -339,6 +396,16 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
     pending.push(Disposal::One(root));
     while let Some(work) = pending.pop() {
         let node = match work {
+            Disposal::Fields(mut iter) => {
+                let Some(f) = iter.next() else { continue };
+                pending.push(Disposal::Fields(iter));
+                Owned::Type(f.ty)
+            },
+            Disposal::Initializers(mut iter) => {
+                let Some(f) = iter.next() else { continue };
+                pending.push(Disposal::Initializers(iter));
+                Owned::Expr(f.value)
+            },
             Disposal::One(node) => node,
             Disposal::Types(mut iter) => {
                 let Some(node) = iter.next() else { continue };
@@ -361,6 +428,7 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 TypeRef::Ptr(t) | TypeRef::Array { elem: t, .. } => {
                     pending.push(Disposal::One(Owned::Type(*t)))
                 },
+                TypeRef::Struct { fields } => pending.push(Disposal::Fields(fields.into_iter())),
                 TypeRef::FnPtr(s) => pending.push(Disposal::One(Owned::Signature(*s))),
                 _ => {},
             },
@@ -369,10 +437,35 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
                 pending.push(Disposal::Types(s.params.into_iter()));
             },
             Owned::Expr(e) => match e {
+                Expr::Struct { ty, fields } => {
+                    pending.push(Disposal::One(Owned::Type(ty)));
+                    pending.push(Disposal::Initializers(fields.into_iter()));
+                },
+                Expr::Array { ty, elements } => {
+                    pending.push(Disposal::One(Owned::Type(ty)));
+                    pending.push(Disposal::Exprs(elements.into_iter()));
+                },
+                Expr::Field { base, layout, .. } => {
+                    pending.push(Disposal::One(Owned::Type(layout)));
+                    pending.push(Disposal::One(Owned::Expr(*base)));
+                },
+                Expr::Index { base, index } | Expr::PointerOffset { base, index } => {
+                    pending.push(Disposal::One(Owned::Expr(*base)));
+                    pending.push(Disposal::One(Owned::Expr(*index)));
+                },
+                Expr::VolatileLoad(value) | Expr::Deref(value) | Expr::AddressOf(value) => {
+                    pending.push(Disposal::One(Owned::Expr(*value)))
+                },
                 Expr::Located { expression, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*expression)))
                 },
-                Expr::BitNot(value) => pending.push(Disposal::One(Owned::Expr(*value))),
+                Expr::Cast { value, ty, .. } => {
+                    pending.push(Disposal::One(Owned::Expr(*value)));
+                    pending.push(Disposal::One(Owned::Type(ty)));
+                },
+                Expr::Neg(value) | Expr::BitNot(value) => {
+                    pending.push(Disposal::One(Owned::Expr(*value)))
+                },
                 Expr::NullFunction(s) => pending.push(Disposal::One(Owned::Signature(s))),
                 Expr::Binary { left, right, .. } | Expr::Cmp { left, right, .. } => {
                     pending.push(Disposal::One(Owned::Expr(*right)));
@@ -389,6 +482,10 @@ fn discard(root: Owned, pending: &mut Vec<Disposal>) {
             Owned::Stmt(s) => match s {
                 Stmt::Located { statement, .. } => {
                     pending.push(Disposal::One(Owned::Stmt(*statement)))
+                },
+                Stmt::VolatileStore { pointer: place, value } | Stmt::Store { place, value } => {
+                    pending.push(Disposal::One(Owned::Expr(place)));
+                    pending.push(Disposal::One(Owned::Expr(value)));
                 },
                 Stmt::Return(e) => {
                     if let Some(e) = e {

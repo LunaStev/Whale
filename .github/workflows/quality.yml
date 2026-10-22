@@ -33,7 +33,7 @@ jobs:
           python-version: '3.13'
       - run: rustup toolchain install stable --profile minimal --component rustfmt
       - run: python tools/ci.py run --name toolchain -- rustc -vV
-      - run: python tools/ci.py run --name format -- cargo fmt --all -- --check
+      - run: python tools/ci.py run --name format -- python tools/format-rust.py --check
       - name: Retain command logs and reproduction evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

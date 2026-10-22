@@ -47,6 +47,7 @@ fn valid_cast(op: &crate::CastOp, source: &Type, destination: &Type) -> bool {
         // Bool has a numerical 0/1 conversion, not signed i1's sign bit.
         ZExt if *source == Type::Bool => is_integer(destination) && *destination != Type::I1,
         ZExt | SExt => integer_pair.is_some_and(|(s, d)| s < d),
+        CheckedInt => integer_pair.is_some(),
         Trunc => integer_pair.is_some_and(|(s, d)| s > d),
         FExt => float_pair.is_some_and(|(s, d)| s < d),
         FTrunc => float_pair.is_some_and(|(s, d)| s > d),
@@ -155,22 +156,11 @@ fn verify_gep(
             Type::Array(element, _) => element,
             Type::Struct(fields) | Type::Tuple(fields) => {
                 let ordinal = f
-                    .blocks
-                    .iter()
-                    .flat_map(|b| &b.instructions)
-                    .find_map(|ins| {
-                        if let Instruction::Const { dst, value: constant, .. }
-                        | Instruction::ConstDecl { dst, value: constant, .. } = ins
-                        {
-                            if dst == value {
-                                return match constant {
-                                    ConstValue::I(n) => usize::try_from(*n).ok(),
-                                    ConstValue::U(n) => usize::try_from(*n).ok(),
-                                    _ => None,
-                                };
-                            }
-                        }
-                        None
+                    .constant(*value)
+                    .and_then(|constant| match constant {
+                        ConstValue::I(n) => usize::try_from(*n).ok(),
+                        ConstValue::U(n) => usize::try_from(*n).ok(),
+                        _ => None,
                     })
                     .ok_or_else(|| {
                         invalid(
@@ -210,6 +200,10 @@ pub(super) fn verify_instruction(
     ins: &Instruction,
 ) -> Result<(), VerifyError> {
     match ins {
+        Instruction::Neg { ty, src, .. } => {
+            verify_type_category(f, "neg", ty, is_integer(ty) || is_float(ty))?;
+            verify_operand(f, *src, ty)?;
+        },
         Instruction::Cast { dst, op, src_ty, src, dst_ty } => {
             verify_operand(f, *src, src_ty)?;
             if !valid_cast(op, src_ty, dst_ty) {
@@ -322,6 +316,29 @@ pub(super) fn verify_instruction(
         Instruction::Alloca { ty, align, .. } => {
             verify_alignment(f, *align)?;
             verify_type_category(f, "alloca", ty, is_storable(ty))?;
+        },
+        Instruction::VolatileLoad { ty, ptr, align, .. } => {
+            verify_alignment(f, *align)?;
+            verify_type_category(
+                f,
+                "volatile load",
+                ty,
+                is_storable(ty)
+                    && !matches!(ty, Type::Array(..) | Type::Struct(_) | Type::Tuple(_)),
+            )?;
+            verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
+        },
+        Instruction::VolatileStore { ty, ptr, value, align } => {
+            verify_alignment(f, *align)?;
+            verify_type_category(
+                f,
+                "volatile store",
+                ty,
+                is_storable(ty)
+                    && !matches!(ty, Type::Array(..) | Type::Struct(_) | Type::Tuple(_)),
+            )?;
+            verify_operand(f, *ptr, &Type::ptr_to(ty.clone()))?;
+            verify_operand(f, *value, ty)?;
         },
         Instruction::Load { ty, ptr, align, .. } => {
             verify_alignment(f, *align)?;

@@ -9,7 +9,7 @@ pub enum GlobalStorageInit {
     Uninitialized,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GlobalStorage {
     pub id: GlobalId,
     pub name: String,

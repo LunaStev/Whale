@@ -1,0 +1,1397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Whale AST format 5, semantics 1",
+  "$comment": "Duplicate raw keys must be rejected before JSON Schema validation. Declared integer ranges and expression/type compatibility are checked by lowering; not all represented types can be used by every scalar operation.",
+  "type": "object",
+  "properties": {
+    "format_version": {
+      "const": 5
+    },
+    "semantics_version": {
+      "const": 1
+    },
+    "features": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "program": {
+      "$ref": "#/$defs/Program"
+    }
+  },
+  "required": [
+    "format_version",
+    "semantics_version",
+    "features",
+    "program"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Type": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Int": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    1,
+                    8,
+                    16,
+                    32,
+                    64,
+                    128
+                  ]
+                },
+                "signed": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "bits",
+                "signed"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Int"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Float": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    16,
+                    32,
+                    64
+                  ]
+                }
+              },
+              "required": [
+                "bits"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Float"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Ptr": {
+              "$ref": "#/$defs/Type"
+            }
+          },
+          "required": [
+            "Ptr"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Array": {
+              "type": "object",
+              "properties": {
+                "elem": {
+                  "$ref": "#/$defs/Type"
+                },
+                "len": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18446744073709551615
+                }
+              },
+              "required": [
+                "elem",
+                "len"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Array"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Opaque": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Opaque"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "enum": [
+            "Void",
+            "Bool"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Void": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Void"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Bool": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Bool"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "FnPtr": {
+              "$ref": "#/$defs/Signature"
+            }
+          },
+          "required": [
+            "FnPtr"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Struct": {
+              "type": "object",
+              "properties": {
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/StructField"
+                  }
+                }
+              },
+              "required": [
+                "fields"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Struct"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Literal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "Bool"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Int": {
+              "type": "object",
+              "properties": {
+                "bits": {
+                  "enum": [
+                    1,
+                    8,
+                    16,
+                    32,
+                    64,
+                    128
+                  ]
+                },
+                "signed": {
+                  "type": "boolean"
+                },
+                "value": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+$"
+                }
+              },
+              "required": [
+                "bits",
+                "signed",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Int"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Float": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 16
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{4}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 32
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{8}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "bits": {
+                      "const": 64
+                    },
+                    "value": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{16}$"
+                    }
+                  },
+                  "required": [
+                    "bits",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "Float"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Expr": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Var": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Var"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Lit": {
+              "$ref": "#/$defs/Literal"
+            }
+          },
+          "required": [
+            "Lit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Binary": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "op": {
+                  "enum": [
+                    "Add",
+                    "Sub",
+                    "Mul",
+                    "BitAnd",
+                    "BitOr",
+                    "BitXor",
+                    "Div",
+                    "Rem",
+                    "ShiftLeft",
+                    "ShiftRight",
+                    "LogicalAnd",
+                    "LogicalOr"
+                  ]
+                },
+                "right": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Binary"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Cmp": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "op": {
+                  "enum": [
+                    "Eq",
+                    "Ne",
+                    "Lt",
+                    "Le",
+                    "Gt",
+                    "Ge"
+                  ]
+                },
+                "right": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "left",
+                "op",
+                "right"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Cmp"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "FunctionRef": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "FunctionRef"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Call": {
+              "type": "object",
+              "properties": {
+                "callee": {
+                  "$ref": "#/$defs/Callee"
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Expr"
+                  }
+                }
+              },
+              "required": [
+                "callee",
+                "args"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Call"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "NullFunction": {
+              "$ref": "#/$defs/Signature"
+            }
+          },
+          "required": [
+            "NullFunction"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "BitNot": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "BitNot"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Located": {
+              "type": "object",
+              "properties": {
+                "annotation": {
+                  "$ref": "#/$defs/SourceAnnotation"
+                },
+                "expression": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "annotation",
+                "expression"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Located"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Cast": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "kind": {
+                  "oneOf": [
+                    {
+                      "enum": [
+                        "Numeric",
+                        "Checked"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Numeric": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "Numeric"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "Checked": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "Checked"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "ty",
+                "kind"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Cast"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Neg": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "Neg"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Struct": {
+              "type": "object",
+              "properties": {
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/FieldInit"
+                  }
+                }
+              },
+              "required": [
+                "ty",
+                "fields"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Struct"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Array": {
+              "type": "object",
+              "properties": {
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "elements": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Expr"
+                  }
+                }
+              },
+              "required": [
+                "ty",
+                "elements"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Array"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Field": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "layout": {
+                  "$ref": "#/$defs/Type"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "base",
+                "layout",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Field"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Index": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "index": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "base",
+                "index"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Index"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "PointerOffset": {
+              "type": "object",
+              "properties": {
+                "base": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "index": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "base",
+                "index"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "PointerOffset"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "AddressOf": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "AddressOf"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Deref": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "Deref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VolatileLoad": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "VolatileLoad"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Stmt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Return": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/Expr"
+                }
+              ]
+            }
+          },
+          "required": [
+            "Return"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ConstDecl": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "init": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "name",
+                "ty",
+                "init"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "ConstDecl"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VarDecl": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ty": {
+                  "$ref": "#/$defs/Type"
+                },
+                "init": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/$defs/Expr"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "ty"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "VarDecl"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Assign": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "name",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Assign"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ExprStmt": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "ExprStmt"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "If": {
+              "type": "object",
+              "properties": {
+                "cond": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "then_body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                },
+                "else_body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                }
+              },
+              "required": [
+                "cond",
+                "then_body",
+                "else_body"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "If"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "While": {
+              "type": "object",
+              "properties": {
+                "cond": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "body": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Stmt"
+                  }
+                }
+              },
+              "required": [
+                "cond",
+                "body"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "While"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "enum": [
+            "Break",
+            "Continue"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Break": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Break"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Continue": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Continue"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Located": {
+              "type": "object",
+              "properties": {
+                "annotation": {
+                  "$ref": "#/$defs/SourceAnnotation"
+                },
+                "statement": {
+                  "$ref": "#/$defs/Stmt"
+                }
+              },
+              "required": [
+                "annotation",
+                "statement"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Located"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Store": {
+              "type": "object",
+              "properties": {
+                "place": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "place",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "Store"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "VolatileStore": {
+              "type": "object",
+              "properties": {
+                "pointer": {
+                  "$ref": "#/$defs/Expr"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "pointer",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "VolatileStore"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Program": {
+      "type": "object",
+      "properties": {
+        "globals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "ty": {
+                "$ref": "#/$defs/Type"
+              },
+              "init": {
+                "$ref": "#/$defs/Expr"
+              }
+            },
+            "required": [
+              "name",
+              "ty",
+              "init"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "ty": {
+                      "$ref": "#/$defs/Type"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "ty"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "return_type": {
+                "$ref": "#/$defs/Type"
+              },
+              "body": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Stmt"
+                }
+              },
+              "convention": {
+                "$ref": "#/$defs/Convention"
+              },
+              "linkage": {
+                "$ref": "#/$defs/Linkage"
+              },
+              "link_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "parameters",
+              "return_type",
+              "body",
+              "convention",
+              "linkage"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "declarations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FunctionDeclaration"
+          }
+        }
+      },
+      "required": [
+        "globals",
+        "functions",
+        "declarations"
+      ],
+      "additionalProperties": false
+    },
+    "Convention": {
+      "oneOf": [
+        {
+          "enum": [
+            "Whale",
+            "SysV64"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Whale": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Whale"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "SysV64": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "SysV64"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Linkage": {
+      "oneOf": [
+        {
+          "enum": [
+            "Internal",
+            "External"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Internal": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "Internal"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "External": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "External"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Signature": {
+      "type": "object",
+      "properties": {
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Type"
+          }
+        },
+        "ret": {
+          "$ref": "#/$defs/Type"
+        },
+        "convention": {
+          "$ref": "#/$defs/Convention"
+        },
+        "variadic": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "params",
+        "ret",
+        "convention",
+        "variadic"
+      ],
+      "additionalProperties": false
+    },
+    "FunctionDeclaration": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "signature": {
+          "$ref": "#/$defs/Signature"
+        },
+        "linkage": {
+          "$ref": "#/$defs/Linkage"
+        },
+        "link_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "signature",
+        "linkage"
+      ],
+      "additionalProperties": false
+    },
+    "Callee": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "Direct": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Direct"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "Indirect": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "Indirect"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "FrontendSource": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "end_column": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        }
+      },
+      "required": [
+        "file",
+        "line",
+        "column",
+        "end_line",
+        "end_column"
+      ],
+      "additionalProperties": false
+    },
+    "SourceAnnotation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/FrontendSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "StructField": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ty": {
+          "$ref": "#/$defs/Type"
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ],
+      "additionalProperties": false
+    },
+    "FieldInit": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Expr"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

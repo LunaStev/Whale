@@ -1,0 +1,74 @@
+{
+  "name": "Feature request",
+  "description": "Propose a bounded Whale contract and implementation.",
+  "title": "[Feature] ",
+  "labels": [
+    "enhancement"
+  ],
+  "body": [
+    {
+      "type": "dropdown",
+      "id": "component",
+      "attributes": {
+        "label": "Whale component",
+        "description": "Choose the smallest affected boundary.",
+        "options": [
+          "Assembler",
+          "IR",
+          "Object",
+          "Linker",
+          "Codegen",
+          "CLI",
+          "CI / release tooling"
+        ]
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "problem",
+      "attributes": {
+        "label": "Problem and use case",
+        "description": "Describe the concrete program or workflow that needs this feature."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "contract",
+      "attributes": {
+        "label": "Bounded contract",
+        "description": "Specify accepted inputs, outputs, supported targets and explicit limits."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "criteria",
+      "attributes": {
+        "label": "Completion criteria",
+        "description": "List executable examples, expected results and tests that establish completion."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "compatibility",
+      "attributes": {
+        "label": "Compatibility and dependencies",
+        "description": "Mention existing behavior, related issues and prerequisite decisions."
+      },
+      "validations": {
+        "required": false
+      }
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 use crate::{ConstExpr, ConstValue, DataLayout, Function, GlobalId, Type};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Global {
     pub id: GlobalId,
     pub name: String,
@@ -12,7 +12,7 @@ pub struct Global {
     pub align: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Module {
     pub target: String,
     pub datalayout: DataLayout,

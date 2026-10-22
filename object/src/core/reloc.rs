@@ -5,6 +5,16 @@ pub enum RelocKind {
         machine: target_spec::Machine,
         code: u32,
     },
+    /// Explicit COFF namespace; ELF numeric IDs are never reinterpreted.
+    CoffSpecific {
+        machine: target_spec::Machine,
+        code: u16,
+    },
+    /// Explicit Mach-O namespace, independent of ELF/COFF numeric IDs.
+    MachSpecific {
+        machine: target_spec::Machine,
+        code: u8,
+    },
     Absolute64,
     Absolute32,
     /// Sign-extended 32-bit absolute value (R_X86_64_32S), distinct from unsigned 32.
@@ -20,6 +30,12 @@ impl RelocKind {
         self,
         target: target_spec::ObjectTarget,
     ) -> Result<(u32, usize), String> {
+        if target.format == target_spec::ObjectFormat::COFF {
+            return crate::formats::coff::relocations::encoding(self, target.machine);
+        }
+        if target.format == target_spec::ObjectFormat::MachO64 {
+            return crate::formats::macho::relocations::encoding(self, target.machine);
+        }
         use target_spec::Machine::*;
         let kind = match (target.machine, self) {
             (X86_64, Self::Absolute64) => (1, 8),

@@ -47,6 +47,8 @@ pub enum FCmpPred {
 #[allow(non_camel_case_types)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum CastOp {
+    /// Preserve the mathematical integer value or trap at this operation.
+    CheckedInt,
     ZExt,
     SExt,
     Trunc,
@@ -164,6 +166,13 @@ pub enum Instruction {
         rhs: ValueId,
     },
 
+    /// Modular integer negation or payload-preserving IEEE sign-bit negation.
+    Neg {
+        dst: ValueId,
+        ty: Type,
+        src: ValueId,
+    },
+
     Not {
         dst: ValueId,
         ty: Type,
@@ -239,6 +248,18 @@ pub enum Instruction {
     Alloca {
         dst: ValueId,
         ty: Type,
+        align: u32,
+    },
+    VolatileLoad {
+        dst: ValueId,
+        ty: Type,
+        ptr: ValueId,
+        align: u32,
+    },
+    VolatileStore {
+        ty: Type,
+        value: ValueId,
+        ptr: ValueId,
         align: u32,
     },
     Load {

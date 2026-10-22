@@ -1,4 +1,5 @@
 use amd64::AMD64;
+
 use diagnostic::{Context, ToDiagnostic};
 
 #[test]

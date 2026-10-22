@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 //! Process-isolated public API measurements; see tools/BENCHMARKS.md.
 use amd64::AMD64;
+
 use assembler::{ast::AST, tokens::tokenize, traits::ISA, AssemblerOutput};
 
 use ir::{ConstValue, DataLayout, Module, ModuleBuilder, Type};

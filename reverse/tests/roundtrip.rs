@@ -2,6 +2,7 @@
 #[cfg(whale_wave_reverse)]
 mod native {
     use amd64::AMD64;
+
     use assembler::assemble;
 
     #[test]

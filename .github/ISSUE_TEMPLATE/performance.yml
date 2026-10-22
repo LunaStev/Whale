@@ -1,0 +1,108 @@
+{
+  "name": "Performance report",
+  "description": "Provide a reproducible workload with units and a baseline.",
+  "title": "[Performance] ",
+  "labels": [
+    "performance"
+  ],
+  "body": [
+    {
+      "type": "dropdown",
+      "id": "component",
+      "attributes": {
+        "label": "Whale component",
+        "description": "Choose the smallest affected boundary.",
+        "options": [
+          "Assembler",
+          "IR",
+          "Object",
+          "Linker",
+          "Codegen",
+          "CLI",
+          "CI / release tooling"
+        ]
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "revision",
+      "attributes": {
+        "label": "Whale revision and build flags",
+        "description": "Commit SHA, profile, enabled features and toolchain."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "host",
+      "attributes": {
+        "label": "Hardware and host",
+        "description": "OS, CPU, memory and execution environment."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "workload",
+      "attributes": {
+        "label": "Workload and exact command",
+        "description": "Provide input size/content or generator seed and a reproducible command.",
+        "render": "text"
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "input",
+      "id": "units",
+      "attributes": {
+        "label": "Metrics and units",
+        "description": "For example elapsed milliseconds, peak RSS MiB, output bytes; identify the measured phase."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "baseline",
+      "attributes": {
+        "label": "Baseline",
+        "description": "Reference revision/tool, identical workload and its measured results."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "measurement",
+      "attributes": {
+        "label": "Observed measurements",
+        "description": "Include warmups, repetitions, individual results or spread, and measurement method."
+      },
+      "validations": {
+        "required": true
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "expectation",
+      "attributes": {
+        "label": "Expected performance",
+        "description": "Explain the expected difference using the baseline rather than an unsupported speed claim."
+      },
+      "validations": {
+        "required": false
+      }
+    }
+  ]
+}

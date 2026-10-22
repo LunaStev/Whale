@@ -17,6 +17,7 @@ pub fn run(args: Vec<String>) {
     }
 
     let mut arch: Option<String> = None;
+    let mut format = None;
     let mut input = None;
     let mut output = None;
     let mut max_input = None;
@@ -71,6 +72,23 @@ pub fn run(args: Vec<String>) {
                         })
                         .clone(),
                 );
+                i += 1;
+            },
+
+            "--format" => {
+                if format.is_some() {
+                    eprintln!("Error: duplicate --format");
+                    process::exit(1);
+                }
+                format = Some(match args.get(i + 1).map(String::as_str) {
+                    Some("elf") => object::ObjectFormat::ELF64,
+                    Some("macho") => object::ObjectFormat::MachO64,
+                    Some("coff") => object::ObjectFormat::COFF,
+                    _ => {
+                        eprintln!("Error: --format requires elf, coff or macho");
+                        process::exit(1);
+                    },
+                });
                 i += 1;
             },
 
@@ -141,10 +159,13 @@ pub fn run(args: Vec<String>) {
         );
         process::exit(1);
     });
-    let target = implementation.object_target().unwrap_or_else(|| {
+    let mut target = implementation.object_target().unwrap_or_else(|| {
         eprintln!("Error: assembler {arch:?} does not expose a native object target");
         process::exit(1);
     });
+    if let Some(format) = format {
+        target.format = format;
+    }
     target.validate().unwrap_or_else(|error| {
         eprintln!("Error: {error}");
         process::exit(1);
@@ -165,8 +186,10 @@ pub fn run(args: Vec<String>) {
         process::exit(1);
     });
 
-    if !output.ends_with(".o") {
-        eprintln!("Error: for now, asm output must be .o (object).");
+    let valid_extension = output.ends_with(".o")
+        || (target.format == object::ObjectFormat::COFF && output.ends_with(".obj"));
+    if !valid_extension {
+        eprintln!("Error: asm output must be .o (COFF also accepts .obj).");
         process::exit(1);
     }
 
@@ -233,8 +256,8 @@ pub fn run(args: Vec<String>) {
     if trace_enable {
         println!("[trace] creating object file");
     }
-    let final_bytes = assembler_object::write(&out, target).unwrap_or_else(|e| {
-        eprintln!("ELF build error: {}", e);
+    let final_bytes = asmobj::write(&out, target).unwrap_or_else(|e| {
+        eprintln!("Object build error: {}", e);
         process::exit(1);
     });
 
@@ -266,6 +289,7 @@ fn print_help() {
     println!();
     println!("  whale asm --arch ID <input> -o <output.o>");
     println!("Options:");
+    println!("  --format elf|coff|macho   object format (default elf; COFF/Mach-O: AMD64/AArch64)");
     println!("  --max-input N   input byte limit (default 8388608 bytes)");
     println!("  --debug-whale   enable debug features");
     println!("  --ast           print parser AST (debug)");

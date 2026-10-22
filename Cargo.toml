@@ -6,7 +6,7 @@ members = [
     "assembler/aarch64",
     "assembler/riscv64",
     "assembler/loongarch64",
-    "assembler-object",
+    "assembler/asmobj",
     "backend-api",
     "toolchain",
     "examples/external-target",
@@ -36,7 +36,7 @@ amd64 = { path = "assembler/amd64" }
 aarch64 = { path = "assembler/aarch64" }
 riscv64 = { path = "assembler/riscv64" }
 loongarch64 = { path = "assembler/loongarch64" }
-assembler-object = { path = "assembler-object" }
+asmobj = { path = "assembler/asmobj" }
 toolchain = { path = "toolchain" }
 reverse = { path = "reverse" }
 linker = { path = "linker" }

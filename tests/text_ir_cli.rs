@@ -46,12 +46,16 @@ fn typed_ir_commands_work_without_socket_and_publish_only_verified_output() {
     assert!(result.status.success(), "{result:?}");
     let result = run(&["ir", "print", input]);
     assert!(result.status.success(), "{result:?}");
-    assert_eq!(result.stdout, good.replace("format_version 3", "format_version 7").as_bytes());
+    assert_eq!(
+        result.stdout,
+        good.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
+            .as_bytes()
+    );
     let result = run(&["ir", "print", input, "-o", output]);
     assert!(result.status.success(), "{result:?}");
     assert_eq!(
         fs::read_to_string(output).unwrap(),
-        good.replace("format_version 3", "format_version 7")
+        good.replace("format_version 3", &format!("format_version {}", ir::IR_FORMAT_VERSION))
     );
     for (source, args) in [
         (good.to_string(), vec!["ir", "print", input, "-o", input]),
@@ -152,8 +156,12 @@ fn run_executes_exact_arguments_and_reports_traps_fuel_and_unsupported_operation
     );
     assert!(error.contains(input));
     fs::write(input, include_str!("../ir/tests/fixtures/wave-casts-v3.wir")).unwrap();
+    let converted = run(&["ir", "run", input, "--function", "@f0"]);
+    assert!(converted.status.success(), "{converted:?}");
+    fs::write(input, "module { format_version 3 semantics_version 1 target \"x86_64-whale-linux\" datalayout {ptr=64,endian=little} declare @f0 \"aggregate\": whale () -> void, linkage internal fn @f0 \"aggregate\"() -> void, entry %b0 { %b0 \"entry\": %v0: ptr<array<u8,1>> = alloca array<u8,1>, align 1 %v1: array<u8,1> = load array<u8,1>, ptr<array<u8,1>> %v0, align 1 ret void } }").unwrap();
     let result = run(&["ir", "run", input, "--function", "@f0"]);
     assert!(!result.status.success());
-    assert!(String::from_utf8_lossy(&result.stderr)
-        .contains("unsupported interpreter operation unsupported cast"));
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("unsupported interpreter operation load")
+    );
 }
